@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="de" translate="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feral Media Library</title>
+<link rel="icon" type="image/png" href="/static/img/feral-strawberry.png">
+<link rel="stylesheet" href="/static/css/theme.css">
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+
+<!-- Topbar: Logo · Suche · Zähler · Aktivität · Theme · Admin -->
+<header id="topbar">
+  <div id="logo">
+    <img class="mascot" src="/static/img/feral-strawberry.png" alt="">
+    <div>
+      <div>Feral</div>
+      <div class="mlabel">Media Library</div>
+    </div>
+  </div>
+  <!-- Suche + Ansichts-Werkzeuge (Sortierung, Dichte) als Gruppe in der
+       Topbar — die Leiste unterm Suchfeld gehört den Chips (Feral Strawberry, 2026-07-11). -->
+  <div id="qbar">
+    <input id="q" type="search" placeholder="Suchen … (feld: wert)">
+    <button type="button" id="sort"></button>
+    <div id="density">
+      <button type="button" data-density="s">S</button>
+      <button type="button" data-density="m">M</button>
+      <button type="button" data-density="l">L</button>
+    </div>
+  </div>
+  <!-- Instanzname (ADR 0041, I5): unterscheidet parallel laufende Instanzen. -->
+  <span id="instanceBadge" hidden></span>
+  <!-- Badge NUR im Übersichtsmodus (ADR 0041, I4): fml fasst keine Dateien an. -->
+  <span id="modeBadge" hidden></span>
+  <span id="counts"></span>
+  <span id="activity" hidden></span>
+  <!-- Harter Sprachumschalter (ADR 0054): übersteuert die Browser-Sprache. -->
+  <button id="langBtn" type="button"></button>
+  <button id="adminBtn" type="button" title="Admin-Konsole"></button>
+</header>
+
+<!-- Drei Spalten: Sidebar · Grid · Detail-Panel -->
+<div id="body">
+  <nav id="sidebar"></nav>
+  <div class="vsplit" id="splitL" title="Ziehen: Breite anpassen · Doppelklick: zurücksetzen"></div>
+  <main id="mid">
+    <div id="midhead">
+      <span id="crumb"></span>
+      <!-- Rechts, wo vorher Sortierung + Dichte saßen: Filter zurücksetzen
+           (auch per Esc, wenn kein Overlay offen) und die Sammel-Aktion. -->
+      <div id="midtools">
+        <button type="button" id="saveBtn" hidden></button>
+        <button type="button" id="filterReset" hidden></button>
+        <button type="button" id="bulkBtn" hidden></button>
+      </div>
+    </div>
+    <div id="gridwrap">
+      <div id="gridspacer">
+        <div id="grid"></div>
+      </div>
+    </div>
+  </main>
+  <div class="vsplit" id="splitR" title="Ziehen: Breite anpassen · Doppelklick: zurücksetzen"></div>
+  <aside id="panel"></aside>
+</div>
+
+<!-- Vollbild-Ebenen -->
+<div id="rankings" hidden></div>
+<div id="loupe" hidden></div>
+<div id="single" hidden></div>
+<div id="admin" hidden></div>
+
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+# --- Feral Strawberry Media Library: NUR Code versionieren, NIE Daten ---
+
+# Datenbank (Stand der Bibliothek — gehört nicht ins Repo)
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Backup der lokalen Config (entsteht beim GUI-Speichern)
+config.toml.bak
+
+# Thumbnail-Cache (wird regeneriert)
+/cache/
+/thumbnails/
+
+# Lokale Konfiguration mit rechner-spezifischen Pfaden
+config.toml
+config.local.toml
+*.local.toml
+
+# Hotfolder-Inhalte (Wurzel / _done / _failed)
+/hotfolder/
+**/_done/
+**/_failed/
+
+# Test-Medienlibrary / Sample-Sets (echte Beispielmedien) — außerhalb des Repos.
+# Pfad dahin kommt in die (gitignorete) config.toml, nicht hartkodiert.
+/testdata/
+/test-media/
+
+# Die Medien selbst (niemals ins Repo)
+/library/
+/media/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.webm
+*.mp4
+*.mpeg
+*.mov
+*.gif
+*.tif
+*.tiff
+*.psd
+*.pdf
+# Ausnahme: programmatisch erzeugte Test-Fixtures sind erlaubt, falls je nötig
+!tests/fixtures/**
+# Ausnahme: Doku-Bilder (README-Cover, Screenshots) — klein halten (< 1 MB)
+!docs/img/*.jpg
+!docs/img/*.png
+# Ausnahme: GUI-Assets (Logo/Favicon) — Teil der Anwendung, keine Mediendaten
+!src/feral/web/static/img/*.png
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtuelle Umgebungen
+.venv/
+venv/
+env/
+ENV/
+
+# Test / Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Lockfile aus pip freeze (optional einchecken — hier bewusst lokal gelassen)
+requirements.lock.txt
+
+# --- OS-Klumpatsch ---
+# macOS
+.DS_Store
+.DS_Store?
+# AppleDouble Resource-Forks (treten u. a. über SMB/NFS auf)
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.DocumentRevisions-V100
+.fseventsd
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.lnk
+*.stackdump
+# Linux
+.directory
+.Trash-*
+.nfs*
+
+# --- Editor / IDE ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+
+# --- Claude Code: lokale Session-Daten (Permissions wachsen automatisch, §6) ---
+.claude/settings.local.json

@@ -1,0 +1,26 @@
+[project]
+name = "feral-media-library"
+version = "0.1.0"
+description = "Feral Media Library (fml): schlanke Medienverwaltung für AI-generierte Bilder und Videos"
+requires-python = ">=3.12"
+# Laufzeit-Abhängigkeiten werden bewusst in requirements.txt gepinnt geführt
+# (siehe DEPENDENCIES.md). Hier nur Projekt-Metadaten und Tool-Konfiguration.
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# Nicht-Python-Dateien, die mitinstalliert werden müssen.
+# "**" erfasst Unterordner (js/, css/) rekursiv — braucht setuptools >= 62.3,
+# das build-system pinnt >= 68.
+feral = ["db/migrations/*.sql", "web/static/**"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"

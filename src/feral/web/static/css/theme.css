@@ -1,0 +1,38 @@
+/* theme.css — NUR Variablen (Paletten aus dem Design-Leitbild, siehe
+   docs/plans/2026-07-07-ui-umbau-design.md). Layout/Komponenten: app.css. */
+
+/* Dunkel (Standard) */
+:root {
+  color-scheme: dark;
+  --bg: #0b0b0d;
+  --panel: #111113;
+  --panel2: #17171a;
+  --border: #28282e;
+  --border-soft: #1e1e23;
+  --text: #ececed;
+  --dim: #9a9aa2;
+  --faint: #5f5f68;
+  --thumb: #1b1b1f;
+}
+
+/* Hell (per data-theme="light" auf <html>) */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f2ef;
+  --panel: #ffffff;
+  --panel2: #faf9f6;
+  --border: #e4e2dd;
+  --border-soft: #eeece7;
+  --text: #191919;
+  --dim: #6d6d73;
+  --faint: #a3a3a8;
+  --thumb: #eae8e3;
+}
+
+/* Gemeinsam (Akzent + Mono-Stack, themenunabhängig) */
+:root {
+  --accent: #ff3b48;
+  --accent-dim: rgba(255, 59, 72, .14);
+  --accent-line: rgba(255, 59, 72, .5);
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}

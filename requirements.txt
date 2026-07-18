@@ -1,0 +1,11 @@
+# Runtime dependencies (pinned). See DEPENDENCIES.md.
+
+# Image containers other than PNG (ADR 0008):
+Pillow==12.3.0
+
+# Web interface / backend (ADR 0001):
+fastapi==0.136.3
+uvicorn==0.49.0
+
+# ffprobe is a system binary (ffmpeg), NOT a pip package — see DEPENDENCIES.md.
+# The core (scanner/PNG extractor/layer-2 parsers/DB) stays standard library.

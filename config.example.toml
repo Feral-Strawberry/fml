@@ -1,0 +1,122 @@
+# Template for the local configuration.
+# Copy this file to `config.toml` and adjust the paths to your machine.
+# `config.toml` is excluded via .gitignore (machine-specific paths).
+
+# Note: the former `[[scan.locations]]` ("fixed scan locations") are gone —
+# in the GUI they appeared as a competing folder list next to the watch
+# folders (see `[[watch]]` below). Entries in old configs are ignored.
+
+[library]
+# Root of the consolidated, date-based target structure (imported media).
+# The import (ADR 0019) requires this entry.
+root = "/path/to/library"
+# Library management (ADR 0041): unlocks the file-writing paths
+# (copy/move import, moving rejected files out). The default is the
+# read-only mode with its hands-off guarantee: fml only catalogs and
+# curates — files are never copied, moved or deleted. If the key is
+# missing, a config with root set (or copy/move watch folders) counts
+# as deliberately configured ⇒ on.
+verwaltung = true
+
+[web]
+# Instance conveniences (ADR 0041/I5) — handy when several fml instances
+# run in parallel (each with its own config file + database + port; start
+# via `start.bat --config name.toml`, guide: docs/instanzen.md). All optional.
+# Port of the web interface. Precedence at startup: --port > $PORT > this entry.
+port = 8765
+# Instance name: shown as a badge in the top bar and in the tab title.
+# Takes effect immediately.
+#name = "Archive"
+# Accent color (#rrggbb): tints the interface and puts a colored dot into
+# the favicon — tells two tabs apart at a glance. Takes effect immediately.
+#akzentfarbe = "#3b82f6"
+
+[import]
+# Lower bound for a plausible creation date (ADR 0019): files with an older/
+# missing date end up in <library.root>/_unbekanntes-datum/.
+min_date = "2015-01-01"
+
+# Import rules (ADR 0046) — they filter during import AND during cataloging
+# (scan/watch); matches take the visible _ausgefiltert outcome or are
+# skipped during scans. All optional; omit/0 = off.
+# min_kante: smallest image side in px (e.g. 240 against archive thumbnails).
+# max_kante: longest image side in px (e.g. 8000 against contact sheets).
+# Both apply only to IMAGES with known dimensions — never to videos, and
+# nothing is guessed when dimensions are missing.
+#min_kante = 240
+#max_kante = 8000
+# Containers that are not taken in at all (half-supported formats; camera
+# RAW such as arw/nef/cr2/dng is detected separately). Common spellings
+# (tif, jpg, mkv, mp4, …) are mapped to the internal names:
+#formate_ausschliessen = ["psd", "arw"]
+
+[database]
+# SQLite file. NEVER put it on a network share (locking issues, ADR 0007).
+# Sensible next to/inside the data directory so it gets synced along
+# (ADR 0003). Lives outside the repo and is excluded via .gitignore.
+path = "./feral.sqlite"
+
+[testdata]
+# Optional: a place for real sample media (various ComfyUI/A1111 variants)
+# for manual testing. Keep it outside the repo (in .gitignore: /testdata/,
+# /test-media/). Unit tests do NOT need this — they build their fixtures
+# programmatically.
+root = "/path/to/testdata"
+
+[rankings]
+# Ranking module (ADR 0045): pairwise rating ("arenas" like LMArena) —
+# two images for a filter expression, one wins, Elo leaderboard.
+# Default off: no sidebar group, no queries, no cost.
+# Can also be toggled via Admin → Configuration → Modules.
+enabled = false
+
+[cache]
+# Thumbnail cache (regenerated on demand; safe to delete at any time).
+# Default when unset: "cache/thumbnails" next to the database file.
+thumbnails = "./cache/thumbnails"
+# Longest edge of the thumbnails in pixels.
+thumbnail_size = 320
+# Processes for thumbnail generation. Without a value: cores − 2 (full
+# power; the processes run at low priority and step aside immediately
+# when the machine is needed elsewhere). Set lower if the fans bother
+# you while thumbnails are being regenerated.
+#thumbnail_workers = 8
+# Low process priority (default: true = quiet operation, thumbnails make
+# room for other programs). Set to false for large imports = full-throttle
+# mode: switch it on and flee to the coffee machine before the fan noise.
+#thumbnail_low_priority = true
+
+# Watched source folders (ADR 0030). Any number of `[[watch]]` entries —
+# each is observed continuously, and new files are imported by themselves
+# once they have finished writing (copied into the YYYY/MM/DD structure,
+# duplicate check, hash verification). Typical usage patterns:
+#
+#   - "verschieben" (move): archive clean-up tool. Tip hundreds of legacy
+#     folders in one after another; successfully imported files are DELETED
+#     from the source (the content is a verified copy by then), the source
+#     ends up empty. Only duplicates/errors/unknown/blocked files stay behind.
+#   - "kopieren" (copy): standing watchers on the output folders of various
+#     ComfyUI/tool installations. The originals remain UNTOUCHED in place
+#     (ADR 0031), only a copy travels into the media library.
+#   - "katalogisieren" (catalog): record in place — neither copy nor move
+#     (in-place watcher; needs no media library).
+#
+# `modus` = "kopieren" (default), "verschieben" or "katalogisieren".
+# Quiet detection (configurable, ADR 0006): a file counts as finished when
+# (size, mtime) stays stable for `quiet_seconds` seconds; checked every
+# `poll_seconds`. The move mode is only active with [library] root set.
+#[[watch]]
+#name = "ComfyUI Output"
+#path = "/Volumes/MySSD/ComfyUI/output"
+#modus = "kopieren"
+#quiet_seconds = 5
+#poll_seconds = 1
+
+#[[watch]]
+#name = "Archive clean-up"
+#path = "/Users/your-name/Documents/__projects/cleanup"
+#modus = "verschieben"
+# After each run, delete source subfolders that have become empty (ADR 0033).
+# Folders containing only system files (.DS_Store & co.) count as empty; the
+# root and _importiert/_dubletten/… always remain. Only with modus = "verschieben".
+#leere_ordner_entfernen = true

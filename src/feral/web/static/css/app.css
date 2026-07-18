@@ -1,0 +1,1560 @@
+/* app.css — Layout und Grundkomponenten der Shell. Farben ausschließlich
+   über die Variablen aus theme.css. */
+
+/* ---------- Grundgerüst ---------- */
+* { box-sizing: border-box; }
+/* Das hidden-Attribut muss IMMER gewinnen: eigene display-Regeln (z. B.
+   .sbrow { display: flex }) überstimmen sonst das UA-Stylesheet — die
+   Dubletten-Zeile blieb so trotz hidden=true sichtbar (Feral Strawberry, 2026-07-09). */
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 13px;
+}
+
+/* ---------- Topbar ---------- */
+#topbar {
+  height: 52px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+/* Suche + Ansichts-Werkzeuge (Sortierung, Dichte) als Gruppe in der Topbar
+   (Feral Strawberry, 2026-07-11): die Leiste unterm Suchfeld gehört den Chips. */
+#qbar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+#q {
+  flex: 0 1 560px;
+  min-width: 120px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+/* Fokus bleibt trotz outline:none sichtbar (Tastatur-Navigation) */
+#q:focus-visible { border-color: var(--accent-line); }
+#counts { color: var(--dim); white-space: nowrap; }
+/* Instanzname (ADR 0041, I5): gefüllte Pille in der Akzentfarbe — der Name
+   unterscheidet zwei Tabs zuverlässiger als ein Farbton allein. */
+#instanceBadge {
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  color: var(--accent);
+  cursor: default;
+}
+#instanceBadge[hidden] { display: none; }
+/* Übersichtsmodus-Badge (ADR 0041, I4): gut sichtbar, aber kein Alarm —
+   der Standardzustand ist der sichere. */
+#modeBadge {
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  color: var(--accent);
+  cursor: default;
+}
+#modeBadge[hidden] { display: none; }
+
+/* ---------- Drei-Spalten-Körper ---------- */
+#body { flex: 1; display: flex; min-height: 0; }
+#sidebar {
+  width: var(--sbw, 248px);
+  flex: none;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+#mid { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* Kopfzeile über dem Grid: wächst mit, wenn die Chips umbrechen (Feral Strawberry,
+   2026-07-09 — vorher lagen Chips, Sortierung und Dichte-Knöpfe bei
+   schmalen Fenstern übereinander). Sortierung + Dichte bleiben oben rechts
+   in der ersten Zeile (flex-start), die Chip-Leiste darf hoch werden. */
+#midhead {
+  min-height: 44px;
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px 10px;
+  padding: 7px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+#crumb { flex: 1; min-width: 0; color: var(--dim); }
+/* Messhilfe (search.js layoutHead): Chip-Breite OHNE Umbruch bestimmen —
+   flex: none + max-content lässt die Box auf ihren Inhalt schrumpfen
+   (scrollWidth einer flex:1-Box wäre nie kleiner als die Box selbst). */
+#crumb.measure { flex: none; width: max-content; flex-wrap: nowrap; overflow: hidden; }
+/* Rechts in der Kopfzeile: Speichern + Filter zurücksetzen + Sammel-Aktion
+   als EINE Gruppe. Reicht die Breite nicht (search.js layoutHead misst),
+   rutscht die Gruppe geschlossen UNTER die Chips (Feral Strawberry, 2026-07-16) —
+   vorher brachen nur die Chips um und die Knöpfe standen chaotisch rechts. */
+#midhead { flex-wrap: wrap; }
+#midtools { display: flex; gap: 6px; margin-top: 3px; flex: none; margin-left: auto; }
+#midhead.stacked #midtools { flex-basis: 100%; justify-content: flex-end; margin-top: 0; }
+#gridwrap { flex: 1; overflow-y: auto; padding: 14px; }
+#panel {
+  width: var(--pw, 344px);
+  flex: none;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+/* ---------- Grid + Dichte (S/M/L rein clientseitig) ---------- */
+/* CSS-Grid ist Absicht: Die Virtualisierung (Task 6) macht zeilenbasiertes
+   Windowing IM Grid (translateY auf #grid, Spacer-Höhe = Gesamthöhe des
+   Bestands) — keine absolute Positionierung einzelner Kacheln. */
+#grid {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(var(--tile, 118px), 1fr));
+}
+.density-s { --tile: 86px; }
+.density-m { --tile: 118px; }
+.density-l { --tile: 168px; }
+
+/* ---------- Kacheln ---------- */
+.tile {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 9px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--thumb);
+  box-shadow: 0 0 0 1px var(--border-soft);
+}
+.tile.selected { box-shadow: 0 0 0 2px var(--accent); }
+.tile img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* Typ-Badge (VIDEO) oben rechts — auf Thumbnails immer dunkel/hell, themenfrei */
+.tile .badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #fff;
+  background: rgba(0, 0, 0, .55);
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+/* Platzhalter hinter dem Thumb (Design-Muster: Maße mittig, mono, dezent) */
+.tile .ph {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .5px;
+  color: var(--faint);
+}
+.tile img { position: relative; }
+
+/* Maße-Chip oben links */
+.tile .tdim {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  font-family: var(--mono);
+  font-size: 8px;
+  color: rgba(255, 255, 255, .8);
+  background: rgba(0, 0, 0, .55);
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+
+/* Container-/Tool-Chip unten links */
+.tile .tchip {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  max-width: calc(100% - 12px);
+  font-family: var(--mono);
+  font-size: 9px;
+  color: rgba(255, 255, 255, .85);
+  background: rgba(0, 0, 0, .55);
+  padding: 2px 6px;
+  border-radius: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Leerer Bestand: Hinweis über die volle Grid-Breite */
+.gridempty { grid-column: 1 / -1; color: var(--dim); padding: 24px 4px; }
+
+/* ---------- Vollbild-Ebenen: Loupe + Admin ---------- */
+#loupe {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  /* Bewusst harte Literale: Die Loupe ist in beiden Themes immer dunkel. */
+  background: rgba(0, 0, 0, .92);
+  color: #fff;
+}
+#admin {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: var(--bg);
+  color: var(--text);
+}
+#loupe[hidden], #admin[hidden] { display: none; }
+#single[hidden] { display: none; }
+
+/* ---------- Design-DNA: kleine generische Komponenten ---------- */
+/* Mono-Mikro-Label (Sektionstitel, Untertitel) — bewusst identisch zur
+   Zähler-Typo der Sidebar (.sbcount): Mono, normalgewichtig, faint. */
+.mlabel {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 400;
+  letter-spacing: 1px;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+/* Maskottchen (Topbar/Admin): abgerundetes Quadrat, Bildausschnitt oben */
+#logo { display: flex; align-items: center; gap: 11px; line-height: 1.2; }
+#logo > div > div:first-child { font-size: 13px; font-weight: 600; letter-spacing: .2px; }
+.mascot {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  object-fit: cover;
+  object-position: center 22%;
+  background: #000;
+  box-shadow: 0 0 0 1px var(--border);
+  flex: none;
+}
+img.pe-icon {
+  width: 96px;
+  height: 96px;
+  border-radius: 20px;
+  object-fit: cover;
+  object-position: center 22%;
+  opacity: .5;
+  filter: grayscale(.3);
+}
+/* Akzentpunkt vor Sektionsköpfen */
+.dot { width: 6px; height: 6px; border-radius: 2px; background: var(--accent); }
+
+/* Buttons und Selects: Panel2-Fläche, 1px-Rand, Radius 8 */
+button, select {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  padding: 5px 10px;
+}
+button { cursor: pointer; }
+#adminBtn { width: 30px; height: 30px; padding: 0; }
+/* Sprachumschalter (ADR 0054): dezent wie der Sortier-Knopf, zeigt DE/EN. */
+#langBtn {
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--dim);
+  flex: none;
+}
+#langBtn:hover { color: var(--text); border-color: var(--accent-line); }
+
+/* Sortier-Knopf + Popover (ADR 0039): ersetzt das System-<select>. */
+#sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 10px;
+  color: var(--dim);
+  white-space: nowrap;
+  flex: none;
+}
+#sort:hover { color: var(--text); border-color: var(--accent-line); }
+.sortarrow { color: var(--accent); font-size: 11px; }
+#sortmenu {
+  position: fixed;
+  z-index: 60;
+  min-width: 170px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+#sortmenu[hidden] { display: none; }
+.sortrow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--dim);
+  text-align: left;
+}
+.sortrow:hover { background: var(--panel2); color: var(--text); }
+.sortrow .sortarrow { visibility: hidden; }
+.sortrow.active { color: var(--text); }
+.sortrow.active .sortarrow { visibility: visible; }
+
+/* Checkboxen im Theme statt System-Optik (Feral Strawberry, 2026-07-09). */
+input[type="checkbox"] {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: pointer;
+  position: relative;
+  vertical-align: -2px;
+}
+input[type="checkbox"]:hover { border-color: var(--accent-line); }
+input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 4.5px;
+  top: 1.5px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* Radios im Theme statt System-Optik (Feral Strawberry, 2026-07-11 — Scope-Wahl im
+   Sammel-Dialog): gleiche Bauart wie die Checkboxen, nur rund mit Punkt. */
+input[type="radio"] {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg);
+  cursor: pointer;
+  position: relative;
+  vertical-align: -2px;
+}
+input[type="radio"]:hover { border-color: var(--accent-line); }
+input[type="radio"]:checked { border-color: var(--accent); }
+input[type="radio"]:checked::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Dichte-Umschalter: kompakte Text-Buttons statt Panel2-Klötze */
+#density { display: flex; gap: 2px; }
+#density button {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 3px 7px;
+  color: var(--dim);
+  font-size: 11px;
+}
+#density button.active { color: var(--accent); font-weight: 700; }
+
+/* ---------- Sidebar: Gruppen, Zeilen, Footer ---------- */
+#sidebar { display: flex; flex-direction: column; }
+.sbscroll { flex: 1; overflow-y: auto; padding: 6px 10px 8px; }
+.sbgroup { padding-top: 13px; }
+.sbgroup > .mlabel { padding: 0 8px 5px; }
+/* Gruppen ein-/ausklappbar: Überschrift ist der Schalter, Caret zeigt den
+   Zustand; eingeklappt verschwindet alles außer der Überschrift. */
+.sbgroup[data-group] > .mlabel { cursor: pointer; user-select: none; }
+.sbgroup[data-group] > .mlabel::before { content: "▾ "; color: var(--faint); }
+.sbgroup.collapsed > .mlabel::before { content: "▸ "; }
+.sbgroup.collapsed > :not(.mlabel) { display: none; }
+/* Nach Jahr: Caret klappt die Monats-Unterzeilen auf (ADR 0021) */
+.sbtwist {
+  border: 0; background: none; padding: 0 2px;
+  font-family: var(--mono); font-size: 10px; color: var(--faint);
+  cursor: pointer; flex: none;
+}
+.sbmonths { display: none; }
+.sbmonths.open { display: block; }
+.sbmonths .sbrow { padding-left: 24px; }
+.sbrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  margin-bottom: 1px;
+  color: var(--dim);
+}
+.sbrow:hover { background: var(--panel2); }
+/* Mitfilternde Facetten (Block S4): im aktuellen Kontext leere Werte werden
+   gedimmt, nicht versteckt — sichtbar bleibt, was es gäbe. Klickbar bleiben
+   sie (ODER-Erweitern über eine andere Gruppe kann sie wieder füllen). */
+.sbrow.dim { opacity: .38; }
+.sbrow.dim:hover { opacity: .7; }
+.sbrow.active {
+  background: var(--accent-dim);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--accent);
+}
+.sbdot { width: 8px; height: 8px; border-radius: 3px; flex: none; opacity: .8; }
+.sbrow.active .sbdot { background: var(--accent) !important; opacity: 1; }
+.sblabel { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
+.sbcount { font-family: var(--mono); font-size: 9.5px; color: var(--faint); flex: none; }
+.sbempty { color: var(--dim); font-size: 12px; padding: 4px 8px; }
+.sbfooter { flex: none; padding: 11px 14px; border-top: 1px solid var(--border); }
+.sbtotals { font-family: var(--mono); font-size: 10px; color: var(--dim); margin-top: 4px; }
+
+/* ---------- Breadcrumb + Suchergebnisse ---------- */
+.crumbcount { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+/* Kopfzeilen-Knöpfe rechts (Filter zurücksetzen, Sammel-Aktion) — gleiche
+   Optik wie die früheren Crumb-Knöpfe, aber fest verankert statt im
+   Chip-Fluss (die Leiste war zu voll, Feral Strawberry 2026-07-11). */
+#midtools button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--dim);
+  padding: 3px 9px;
+  font-size: 11px;
+  white-space: nowrap;
+  /* Icon + Text unabhängig zentrieren statt auf einer Baseline: die
+     Symbol-Glyphen (☆/✕/⚡) haben je Plattform andere Font-Metriken und
+     drückten den Text sonst 1–2 px nach unten (Opera/Win11, 2026-07-18). */
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+#midtools button .btnicon { line-height: 1; }
+#midtools button:hover { color: var(--accent); border-color: var(--accent-line); }
+/* Speichern gehört zur Suche → Akzent-Optik wie der frühere Crumb-Knopf. */
+#midtools #saveBtn { color: var(--accent); border-color: var(--accent-line); }
+/* Unter FullHD-Breite aufräumen (Feral Strawberry, 2026-07-16): Zurücksetzen und
+   Sammel-Aktion nur noch als Icon (der title sagt beim Hover, was sie tun),
+   das Präfix „Bibliothek /" trägt nichts und verschwindet. */
+@media (max-width: 1919px) {
+  #midtools button .btnlabel { display: none; }
+  .crumbroot { display: none; }
+}
+.sbdel {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  color: var(--faint);
+  font-size: 9px;
+  cursor: pointer;
+  flex: none;
+  visibility: hidden;
+}
+.sbrow:hover .sbdel { visibility: visible; }
+.sbdel:hover { color: var(--accent); }
+/* Armiert (erster Klick): sichtbar bleiben und deutlich fragen. */
+.sbdel[data-armed] { visibility: visible; color: var(--accent); font-weight: 700; }
+/* Chip-Leiste (Block S3, ADR 0035): der Suchzustand im Breadcrumb. */
+/* Chips brechen um statt abzuschneiden — die Kopfzeile wird dann höher.
+   min-height hält die einzeilige Normalform auf Knopf-Höhe zentriert. */
+#crumb { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 30px; }
+#crumb .chip { max-width: 100%; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 260px;
+  padding: 2px 4px 2px 9px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--fg);
+  font-size: 11.5px;
+  cursor: pointer;
+  flex: none;
+}
+.chip:hover { border-color: var(--accent); }
+.chip.neg { border-style: dashed; }
+.chip.sort { border-color: var(--border); color: var(--dim); }
+.chiptext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chipneg {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--accent);
+}
+.chipx {
+  background: none;
+  border: none;
+  color: var(--faint);
+  font-size: 10px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.chipx:hover { color: var(--accent); }
+.chiperr { color: var(--accent); font-size: 11px; flex: none; }
+
+/* Chip-Editor: kleines Popover unterm angeklickten Chip. */
+#chipeditor {
+  position: fixed;
+  z-index: 60;
+  min-width: 240px;
+  max-width: 320px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11.5px;
+}
+#chipeditor[hidden] { display: none; }
+.cevalues { display: flex; flex-wrap: wrap; gap: 5px; }
+.cechip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.cevx { background: none; border: none; color: var(--faint); font-size: 9px; padding: 0 3px; cursor: pointer; }
+.cevx:hover { color: var(--accent); }
+.ceadd {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--fg);
+  padding: 5px 8px;
+  font-size: 11.5px;
+}
+.ceneg { display: flex; align-items: center; gap: 6px; color: var(--dim); cursor: pointer; }
+.cedel {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--dim);
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.cedel:hover { color: var(--accent); border-color: var(--accent-line); }
+
+/* Advanced Mode (Block S5, ADR 0038): „+ Kriterium"-Popover + Tipphilfe. */
+.crumbadd {
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  color: var(--dim);
+  padding: 1px 9px;
+  font-size: 11px;
+  margin-left: 2px;
+  flex: none;
+  cursor: pointer;
+}
+.crumbadd:hover { color: var(--accent); border-color: var(--accent-line); }
+#addcrit {
+  position: fixed;
+  z-index: 60;
+  width: 460px;
+  max-width: calc(100vw - 16px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  display: flex;
+  font-size: 11.5px;
+  overflow: hidden;
+}
+#addcrit[hidden] { display: none; }
+.accats {
+  flex: none;
+  width: 150px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 6px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.accat {
+  background: none;
+  border: none;
+  border-radius: 7px;
+  color: var(--dim);
+  padding: 5px 8px;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.accat:hover { background: var(--panel2); }
+.accat.active {
+  background: var(--accent-dim);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--accent);
+}
+.acpane {
+  flex: 1;
+  min-width: 0;
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.acrows { display: flex; flex-direction: column; gap: 1px; }
+.acrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  color: var(--dim);
+  cursor: pointer;
+}
+.acrow:hover { background: var(--panel2); }
+.acrow.dim { opacity: .38; }
+.acrow.dim:hover { opacity: .7; }
+.acrow.active {
+  background: var(--accent-dim);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--accent);
+}
+.aclabel { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.account { font-family: var(--mono); font-size: 9.5px; color: var(--faint); flex: none; }
+.acneg { display: flex; align-items: center; gap: 6px; color: var(--dim); cursor: pointer; flex: none; }
+.achint { color: var(--faint); font-size: 10.5px; line-height: 1.45; }
+.acinput, .acmvalue {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--fg);
+  padding: 5px 8px;
+  font-size: 11.5px;
+}
+.acmetric { display: flex; gap: 5px; align-items: center; }
+.acmetric select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--fg);
+  padding: 4px 4px;
+  font-size: 11px;
+}
+.acmvalue { width: 70px; }
+.acmadd {
+  background: transparent;
+  border: 1px solid var(--accent-line);
+  border-radius: 7px;
+  color: var(--accent);
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+#typeahead {
+  position: fixed;
+  z-index: 70;
+  max-width: 420px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  font-size: 12px;
+}
+#typeahead[hidden] { display: none; }
+.tarow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  color: var(--fg);
+}
+.tarow:hover, .tarow.active { background: var(--accent-dim); }
+.tarow.dim { opacity: .45; }
+.tacat { color: var(--faint); font-size: 10.5px; flex: none; }
+.talabel { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tacount { font-family: var(--mono); font-size: 9.5px; color: var(--faint); flex: none; }
+.tahint { color: var(--faint); font-size: 9.5px; padding: 4px 8px 2px; border-top: 1px solid var(--border); margin-top: 3px; }
+
+#gridwrap[hidden] { display: none; }
+.rbadges { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 4px; }
+.badgechip {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  color: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  text-transform: uppercase;
+}
+.badgechip.origin-interpretiert { color: var(--accent); border-color: var(--accent-line); }
+.rsnippet { font-size: 11.5px; color: var(--dim); line-height: 1.4; }
+.warn { color: var(--accent); }
+
+/* ---------- Detail-Panel rechts ---------- */
+.ppreview {
+  aspect-ratio: 1;
+  /* Wie .svstage (Einzelbildansicht): Abtönung statt hartem Schwarz — im
+     Lightmode ein heller Grauton statt schwarzer Kasten (Feral Strawberry, 2026-07-16). */
+  background: rgba(0, 0, 0, .25);
+  border-bottom: 1px solid var(--border);
+  cursor: zoom-in;
+  overflow: hidden;
+}
+.ppreview img, .ppreview video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.phead { padding: 13px 14px; border-bottom: 1px solid var(--border); }
+.pname { font-family: var(--mono); font-size: 12px; word-break: break-all; line-height: 1.35; margin-bottom: 7px; }
+.pmeta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.section { padding: 14px; border-bottom: 1px solid var(--border); }
+.sechead { display: flex; align-items: center; gap: 7px; margin-bottom: 11px; }
+.sechead .secright { margin-left: auto; display: flex; gap: 5px; align-items: center; }
+.klabel {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: .6px;
+  color: var(--dim);
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+.kvgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin-bottom: 11px; }
+.kvblock { margin-bottom: 11px; }
+.vmodel { font-size: 12.5px; font-weight: 600; }
+.vmono { font-family: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.vdim { color: var(--dim); }
+.vblock {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--panel2);
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  padding: 9px 10px;
+  max-height: 118px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.chiprow { display: flex; flex-wrap: wrap; gap: 6px; }
+.seedcopy { color: var(--accent); cursor: pointer; }
+.copyhint { font-size: 8px; color: var(--faint); }
+.callout {
+  border: 1px dashed var(--accent-line);
+  background: var(--accent-dim);
+  border-radius: 9px;
+  padding: 12px 14px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+.callout b { color: var(--text); display: block; margin-bottom: 4px; }
+.accentbtn {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: transparent;
+  font-weight: 600;
+  font-size: 11.5px;
+  padding: 7px 12px;
+}
+.wfdl { display: block; margin-top: 8px; font-size: 11px; color: var(--dim); text-decoration: none; }
+.wfdl:hover { color: var(--accent); }
+.section details { margin-bottom: 6px; }
+.section summary {
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  color: var(--dim);
+}
+.rawtable { width: 100%; border-collapse: collapse; margin-top: 8px; }
+.rawtable td { padding: 4px 6px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+.rawtable .k { font-family: var(--mono); font-size: 10px; color: var(--dim); white-space: nowrap; }
+.rawtable .v { font-family: var(--mono); font-size: 10.5px; word-break: break-word; max-width: 0; width: 100%; }
+/* Scrollen übernimmt ein INNERES div — display:block auf <td> zerlegt das
+   Tabellenlayout (leere Riesenzellen, Geister-Scrollbalken; Feral Strawberrys Screenshot). */
+.rawtable .vscroll { max-height: 130px; overflow-y: auto; }
+.locs { margin-top: 8px; }
+.locrowv { font-family: var(--mono); font-size: 10.5px; word-break: break-all; padding: 3px 0; }
+.filerows > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 11px;
+  color: var(--dim);
+}
+.panelempty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 30px;
+  text-align: center;
+}
+.pe-title { font-size: 13px; font-weight: 600; color: var(--dim); }
+.pe-hint { font-size: 11.5px; line-height: 1.5; color: var(--faint); max-width: 200px; }
+
+/* ---------- Loupe (immer dunkel, siehe #loupe oben) ---------- */
+#loupe { display: flex; flex-direction: column; }
+#loupe[hidden] { display: none; }
+.lphead { flex: none; display: flex; align-items: center; gap: 12px; padding: 14px 20px; }
+.lphead #lpTitle { font-size: 12px; }
+.lpmeta { font-family: var(--mono); font-size: 10px; color: rgba(255, 255, 255, .55); white-space: nowrap; }
+.lpspacer { flex: 1; }
+.lpseg { display: flex; gap: 2px; background: rgba(255, 255, 255, .08); border-radius: 8px; padding: 3px; }
+.lpseg button {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, .6);
+}
+.lpseg button.active { background: var(--accent); color: #fff; }
+#lpClose, #lpReveal { background: rgba(255, 255, 255, .1); border: none; color: #fff; width: 30px; height: 30px; padding: 0; }
+.lpbody { flex: 1; display: flex; align-items: stretch; min-height: 0; }
+.lpnav {
+  flex: none;
+  width: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: rgba(255, 255, 255, .8);
+  font-size: 28px;
+  user-select: none;
+}
+.lpnav:hover { background: rgba(255, 255, 255, .05); }
+.lpstage { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; padding: 8px; overflow: hidden; }
+.lpstage img, .lpstage video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 10px;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, .6);
+}
+/* „Keine Vorschau verfügbar" (ADR 0052): dezenter Hinweis statt kaputtem
+   Bild-Icon, wenn /api/media oder /api/preview nichts liefert (fehlender
+   Fundort, PSD ohne Composite). Greift in Loupe, Einzelbild und Panel. */
+.nopreview {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 120px; padding: 24px; text-align: center;
+  color: var(--faint); font-size: 13px; letter-spacing: .3px;
+}
+.lpwf { width: 100%; height: 100%; display: flex; flex-direction: column; }
+.lpwf svg { flex: 1; min-height: 0; background: #141419; border: 1px solid #2a2a33; border-radius: 10px; cursor: grab; }
+.lpwf .wfbar { flex: none; font-size: 11.5px; color: rgba(255, 255, 255, .7); padding: 0 0 8px; }
+.lpwf .wfbar a { color: var(--accent); }
+.wfmuted { color: rgba(255, 255, 255, .5); }
+.lpfoot {
+  flex: none;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: rgba(255, 255, 255, .4);
+  letter-spacing: .3px;
+  padding: 10px 20px 20px;
+}
+
+/* ---------- Admin-Konsole ---------- */
+#admin { display: flex; flex-direction: column; }
+#admin[hidden] { display: none; }
+.adhead {
+  height: 52px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.adtitle { line-height: 1.15; font-size: 13px; font-weight: 600; }
+.adaccent { color: var(--accent); }
+/* Kopf-Sprungnavigation (ADR 0029): scrollt zu den Dashboard-Regionen. */
+.adjump { margin-left: auto; font-size: 12px; color: var(--dim); }
+.adjump a { color: var(--accent); cursor: pointer; padding: 2px 4px; }
+.adjump a:hover { text-decoration: underline; }
+.adjumpsep { opacity: .4; margin: 0 1px; }
+/* Ein-Seiten-Dashboard (ADR 0029) als Kontrollraum-Raster: volle Breite,
+   Regionen als Panel-Kacheln nebeneinander — maximale Übersicht statt
+   Scroll-Liste. Oben Kennzahlen + Aktivität in EINEM Streifen (ADR 0034),
+   darunter drei Spalten: Quellen & Import | Wartung + Probleme | Config. */
+.addash {
+  flex: 1; min-width: 0; overflow-y: auto; scroll-behavior: smooth;
+  padding: 14px 16px 40px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  align-items: start;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1.05fr);
+  grid-template-areas:
+    "strip strip strip"
+    "sources ops config";
+}
+#dashOverview { grid-area: strip; }
+#dashSources { grid-area: sources; }
+#dashOps { grid-area: ops; display: flex; flex-direction: column; gap: 12px; }
+#dashConfig { grid-area: config; }
+/* Mittelbreite: zwei Spalten, Config rutscht in voller Breite darunter. */
+@media (max-width: 1280px) {
+  .addash {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    grid-template-areas: "strip strip" "sources ops" "config config";
+  }
+}
+/* Schmal: eine Spalte — die Sprungnavigation im Kopf übernimmt. */
+@media (max-width: 860px) {
+  .addash { grid-template-columns: minmax(0, 1fr); grid-template-areas: "strip" "sources" "ops" "config"; }
+}
+.dashsec {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 13px 16px 15px;
+  scroll-margin-top: 10px;
+  min-width: 0;
+}
+/* Kachel-Titel in der Mikro-Label-DNA der Shell, mit Status-Punkt wie in
+   der Sidebar (sbdot) — Kontrollraum, keine Überschriften-Parade. */
+.dashtitle {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 400;
+  letter-spacing: 1px; text-transform: uppercase; color: var(--faint);
+  display: flex; align-items: center; gap: 7px;
+  margin: 0 0 12px;
+}
+.dashtitle::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); opacity: .8; flex: none;
+}
+.dashhint { font-size: 11px; margin: 3px 0 8px; }
+.dashrule { border: none; border-top: 1px solid var(--border-soft); margin: 14px 0 12px; }
+/* Kennzahlen-Leiste: eine schmale Zeile kleiner Wert/Label-Paare.
+   Seit ADR 0034 zweigeteilt: Bestand-Kennzahlen links, Aktivität rechts.
+   Der Streifen erbt die SPALTEN des Dashboards (subgrid): die Aktivität
+   beginnt damit auf jeder Fensterbreite bündig über der Wartungs-Kachel
+   (Feral Strawberry, 2026-07-09). Horizontales Padding liegt deshalb auf den Spalten,
+   nicht auf der Kachel — so fluchten die Inhalte mit den Kacheln darunter. */
+.dashstrip {
+  padding: 10px 0 12px;
+  display: grid;
+  grid-template-columns: subgrid;
+  row-gap: 8px;
+  align-items: start;
+}
+.stripgrid { display: contents; }
+.stripcol { min-width: 0; padding: 0 16px; }
+.stripcol:first-child { grid-column: 1; }
+.stripcol.stripact { grid-column: 2 / -1; }
+/* Einspaltig: untereinander (die Spur „2" existiert dann nicht mehr). */
+@media (max-width: 860px) { .stripcol.stripact { grid-column: 1; } }
+.stripcol > .mlabel { margin-bottom: 6px; }
+.statstrip { display: flex; flex-wrap: wrap; gap: 4px 24px; align-items: baseline; }
+.stat { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.statv { font-family: var(--mono); font-size: 14px; font-weight: 600; }
+.statk { font-size: 10.5px; color: var(--dim); }
+.statwarn .statv { color: var(--accent); }
+.stripinfo { font-size: 11px; color: var(--dim); margin-top: 6px; display: flex; flex-wrap: wrap; gap: 2px 8px; }
+.stripdb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+.adinfoline { font-size: 12px; padding: 3px 0; word-break: break-all; }
+/* Wartung: kleine Buttons, nach Funktionsbereich gruppiert (Feral Strawberry, ADR 0029). */
+.maintgroups { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px 18px; }
+.maintgroup > .mlabel { margin-bottom: 8px; }
+.maintbtns { display: flex; flex-wrap: wrap; gap: 7px; }
+.maintbtn {
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font: inherit; font-size: 12px; padding: 5px 11px; cursor: pointer;
+}
+.maintbtn:hover { border-color: var(--accent-line); }
+/* Überwachte Quellen (ADR 0030). */
+.watchlist { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+.watchcard {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 13px;
+}
+.watchmain { flex: 1; min-width: 0; }
+.watchname { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.watchpath { font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.watchstate { font-size: 11.5px; color: var(--dim); margin-top: 3px; }
+.wdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); margin-right: 5px; opacity: .5; }
+.wdot.on { background: #4bbf82; opacity: 1; }
+.watchtoggle { flex: none; font-size: 12px; padding: 5px 12px; }
+.watchwarn { margin-bottom: 8px; font-size: 12px; }
+/* Inline-Steuerung je Karte: Modus-Select, Beobachten/Stoppen, Entfernen. */
+.watchctl { flex: none; display: flex; align-items: center; gap: 6px; }
+.watchctl .wmodus { font-size: 11.5px; padding: 4px 6px; max-width: 165px; }
+.watchctl .wremove { padding: 4px 8px; color: var(--dim); }
+.watchctl .wremove:hover { color: var(--accent); border-color: var(--accent-line); }
+.admsg { margin-top: 12px; font-size: 12px; color: var(--dim); }
+.adok { color: #4bbf82; }
+.addirs { max-height: 220px; overflow-y: auto; border: 1px solid var(--border-soft); border-radius: 9px; margin-bottom: 8px; }
+.addir { padding: 6px 11px; cursor: pointer; font-size: 12.5px; border-bottom: 1px solid var(--border-soft); }
+.addir:hover { background: var(--panel2); }
+.adactions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.adstatus { font-size: 12.5px; }
+.adbar { height: 6px; border-radius: 4px; background: var(--panel2); overflow: hidden; margin: 8px 0; }
+.adbar > div { height: 100%; background: var(--accent); border-radius: 4px; transition: width .2s; }
+.issueresolve { color: var(--accent); cursor: pointer; font-size: 11px; }
+/* Probleme (ADR 0034): einzeilige Zusammenfassung, Liste im Overlay. */
+.issueline { font-size: 12.5px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.issueline button { font-size: 12px; padding: 4px 10px; }
+.pickbox.issuebox { width: min(760px, 94vw); }
+.issuebox .isslist { max-height: 62vh; overflow-y: auto; margin-bottom: 12px; padding-right: 4px; }
+/* Leerordner-Schalter (ADR 0033) in Watchcard + Import-Formular. */
+.wleer {
+  font-size: 11px; color: var(--dim); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+}
+.wleer input { accent-color: var(--accent); }
+/* Quellen-Formulare (Importieren / Scannen): Pfad + Optionen in einer Zeile. */
+.srcform { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.srcform input { flex: 1; min-width: 180px; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font: inherit; padding: 6px 10px; outline: none; }
+.srcform input:focus-visible { border-color: var(--accent-line); }
+.srcform select { font-size: 12px; padding: 5px 8px; }
+#cfgThumb { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font: inherit; padding: 5px 8px; }
+
+/* ---------- Topbar-Aktivitäts-Indikator ---------- */
+#activity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+#activity[hidden] { display: none; }
+.actdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: actpulse 1.1s ease-in-out infinite;
+}
+.actdot.idle { animation: none; background: #4bbf82; }
+@keyframes actpulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .45; transform: scale(.8); }
+}
+
+/* ---------- Kuratieren: Rating-Punkte, Tags, Notizen (Stufe 3.2) ---------- */
+.ratedots { margin-left: auto; display: inline-flex; gap: 5px; }
+.rdot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--faint);
+  flex: none;
+}
+.rdot.on { background: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.lpdots { display: flex; justify-content: center; gap: 9px; margin-bottom: 9px; }
+.lpdots .rdot { width: 14px; height: 14px; box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .45); }
+.lpdots .rdot.on { background: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.tile .trate {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  font-size: 7px;
+  letter-spacing: 2px;
+  color: var(--accent);
+  text-shadow: 0 0 3px rgba(0, 0, 0, .9);
+}
+.tagchip { display: inline-flex; align-items: center; gap: 4px; text-transform: none; font-size: 10px; }
+.tagdel { background: none; border: none; padding: 0; color: var(--faint); font-size: 9px; cursor: pointer; }
+.tagdel:hover { color: var(--accent); }
+#pTagInput, #pModel {
+  width: 100%;
+  margin-top: 8px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 6px 9px;
+  outline: none;
+}
+#pNotes {
+  width: 100%;
+  margin-top: 8px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 6px 9px;
+  outline: none;
+  resize: vertical;
+}
+#pTagInput:focus-visible, #pModel:focus-visible, #pNotes:focus-visible { border-color: var(--accent-line); }
+.multihint { margin: 10px 14px 0; }
+.badgechip.origin-manuell { color: #d9a441; border-color: #d9a44155; }
+
+/* ---------- Schnellmenü (Topbar-Overlay, Vorschlag) ---------- */
+#qmenu {
+  position: fixed;
+  top: 46px;
+  right: 14px;
+  z-index: 45;
+  width: 280px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  box-shadow: 0 18px 55px rgba(0, 0, 0, .5);
+  padding: 8px;
+}
+#qmenu[hidden] { display: none; }
+.qmadmin {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-line);
+}
+.qmadmin .mascot { width: 26px; height: 26px; border-radius: 7px; }
+.qmadmintext { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; }
+.qmsub { font-size: 10px; font-weight: 400; color: var(--dim); }
+.qmarrow { color: var(--accent); }
+/* Offene-Probleme-Hinweis (Klick → Probleme-Kachel im Dashboard). */
+.qmissues {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12px; padding: 7px 10px; margin-top: 5px;
+  border: 1px solid var(--border); border-radius: 9px; cursor: pointer;
+}
+.qmissues:hover { border-color: var(--accent-line); }
+.qmissues[hidden] { display: none; }
+.qmhead { padding: 10px 4px 5px; }
+#qmenu > button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+.qmseg { display: flex; gap: 3px; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 3px; }
+.qmseg button { flex: 1; background: transparent; border: none; border-radius: 6px; font-size: 11.5px; font-weight: 600; color: var(--dim); padding: 5px 0; }
+.qmseg button.active { background: var(--accent); color: #fff; }
+.qmmsg { font-size: 11px; color: var(--dim); padding: 6px 4px 0; min-height: 14px; }
+.qmfoot { font-family: var(--mono); font-size: 9px; color: var(--faint); text-align: center; padding: 8px 0 4px; }
+
+/* ---------- Verstellbare Panel-Trenner ---------- */
+.vsplit {
+  flex: none;
+  width: 5px;
+  margin: 0 -2px;      /* schmale Optik, aber 5px Greiffläche */
+  cursor: col-resize;
+  z-index: 4;
+  touch-action: none;
+}
+.vsplit:hover, .vsplit:active { background: var(--accent-dim); }
+
+/* ---------- Admin-Knopf: Slider-Icon aus dem Design ---------- */
+.sliders { display: flex; flex-direction: column; gap: 3px; width: 15px; margin: 0 auto; }
+.sliders i { position: relative; display: block; height: 2px; border-radius: 2px; background: var(--text); }
+.sliders i::after {
+  content: "";
+  position: absolute;
+  top: -1.5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--text);
+}
+.sliders i:nth-child(1)::after { left: 65%; }
+.sliders i:nth-child(2)::after { left: 25%; }
+.sliders i:nth-child(3)::after { left: 50%; }
+
+/* Eingabe-Platzhalter */
+::placeholder { color: var(--faint); }
+
+/* Eigene Scrollbalken */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--faint); }
+
+
+/* ---------- Admin-Konfiguration: Karten + Formularzeilen (Design-Angleich) ---------- */
+.cfgcard {
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border-soft);
+  border-radius: 0;
+  padding: 12px 0 4px;
+  margin: 10px 0 0;
+}
+.cfgcard > .mlabel { margin-bottom: 10px; }
+.cfgpathline { display: flex; gap: 6px; margin-bottom: 6px; }
+.cfgpathline input {
+  flex: 1; background: var(--panel2); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); font: inherit; padding: 6px 10px; outline: none;
+}
+.cfgpathline input:focus-visible { border-color: var(--accent-line); }
+.cfgline { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 12.5px; }
+.cfgline input[type="number"], .cfgline input[type="text"] {
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font: inherit; padding: 4px 8px; outline: none;
+}
+.cfgcheck { cursor: pointer; align-items: flex-start; }
+.cfgcheck input { margin-top: 2px; accent-color: var(--accent); }
+.cfghint { color: var(--faint); font-size: 11.5px; }
+.cfgpick, #cfgLibPick, #cfgHotPick {
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); cursor: pointer; padding: 4px 9px;
+}
+
+/* Ordner-Auswahl-Overlay */
+.pickoverlay {
+  position: fixed; inset: 0; z-index: 90;   /* über Admin (70) und Lupe (60) */
+  background: rgba(0, 0, 0, .55);
+  display: flex; align-items: center; justify-content: center;
+}
+.pickbox {
+  width: min(560px, 92vw);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .45);
+}
+.pickhead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.pickpath { font-size: 11.5px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pickbox .addirs { max-height: 320px; max-width: none; }
+
+/* Speicherdialog (Block S7): Chip-Vorschau + Name + Aktionen. */
+#savedlg[hidden] { display: none; }
+.savebox { display: flex; flex-direction: column; gap: 10px; }
+.sdchips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sdchips .chip { cursor: default; }
+.sdchips .chip:hover { border-color: var(--border); }
+.sdcount { color: var(--dim); font-size: 11.5px; flex: none; }
+.sdhint { color: var(--faint); font-size: 11.5px; }
+.sdname {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 13px;
+}
+.sdname:focus { outline: none; border-color: var(--accent-line); }
+.sderr { color: var(--accent); font-size: 11.5px; }
+
+/* Sammel-Aktion aufs Suchergebnis (Großbaustelle K, ADR 0040) */
+.bulkbox { width: min(540px, 94vw); }
+.bulkscope { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12.5px; }
+.bulkscope label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.bulkrow { display: flex; align-items: center; gap: 10px; }
+.bulkrow > label { flex: none; width: 128px; font-size: 12px; color: var(--dim); }
+.bulkrow .sdname { flex: 1; min-width: 0; }
+.bulkrow textarea.sdname { resize: vertical; font-family: inherit; }
+.bulkrow .sdhint { flex: none; max-width: 45%; }
+.bulkstars { display: flex; flex: none; gap: 1px; }
+.bstar {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+  padding: 0 2px;
+  color: var(--faint);
+}
+.bstar.on { color: var(--accent); }
+.bulkline { font-size: 12.5px; }
+.sdactions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+.sdactions button {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 5px 12px;
+  font-size: 12px;
+}
+.sdactions button:hover { border-color: var(--accent-line); }
+.sdactions .sdprimary { border-color: var(--accent-line); color: var(--accent); }
+.sdactions .sddelete { color: var(--dim); margin-left: auto; }
+.sdactions .sddelete:hover, .sdactions .sddelete[data-armed] { color: var(--accent); border-color: var(--accent-line); }
+
+
+/* ---------- Einzelbildansicht (Arbeitsansicht: Zoom + breites Panel) ---------- */
+#single {
+  position: fixed; inset: 0; z-index: 60;
+  background: var(--bg); color: var(--text);
+  display: flex; flex-direction: column;
+}
+#single .lphead { border-bottom: 1px solid var(--border-soft); }
+#single .lpfoot {
+  flex: none; display: flex; justify-content: center; gap: 16px;
+  padding: 8px 20px; color: var(--faint); font-size: 11px;
+  border-top: 1px solid var(--border-soft);
+}
+#single #svClose, #single #svReveal {
+  background: none; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); cursor: pointer; padding: 4px 10px;
+}
+.svbody { flex: 1; display: flex; min-height: 0; }
+.svstage {
+  flex: 1; min-width: 0; position: relative;
+  display: flex; align-items: flex-start; justify-content: flex-start;
+  overflow: auto; background: rgba(0, 0, 0, .25);
+}
+.svstage.fit { align-items: center; justify-content: center; overflow: hidden; }
+.svstage img, .svstage video { display: block; margin: auto; }
+.svstage.fit img, .svstage.fit video { max-width: 100%; max-height: 100%; width: auto; height: auto; }
+.svstage:not(.fit) img { cursor: grab; }
+.svstage:not(.fit) img:active { cursor: grabbing; }
+.svpanel {
+  flex: none; width: clamp(300px, 22vw, 380px);
+  border-left: 1px solid var(--border-soft);
+  overflow: hidden; display: flex;
+}
+.svpanel #panel { width: 100%; overflow-y: auto; }
+#single .lpnav { color: var(--faint); }
+#single .lpseg { background: var(--panel2); }
+
+
+/* ---------- Einzelbildansicht: Navigator (Lightroom-Muster) ---------- */
+/* Die Panel-Vorschau spielt in der Einzelbildansicht NICHT (Video-Kollision
+   mit der großen Ansicht) - der Navigator oben übernimmt die Übersicht. */
+#single #panel .ppreview { display: none; }
+.svnav {
+  flex: none; position: relative; margin: 10px;
+  border: 1px solid var(--border-soft); border-radius: 10px;
+  overflow: hidden; background: rgba(0, 0, 0, .3);
+  cursor: crosshair; user-select: none;
+}
+.svnav { display: flex; justify-content: center; }
+.svnav img { display: block; max-width: 100%; max-height: 220px; width: auto; height: auto; pointer-events: none; }
+.svnavrect {
+  position: absolute; border: 2px solid var(--accent);
+  border-radius: 3px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .35);
+  pointer-events: none;
+}
+.svpanel { flex-direction: column; }
+
+/* ---------- Ranking-Modul: Arena-Ansicht (Großbaustelle R, ADR 0045) ---------- */
+/* Vollbild-Ebene UNTER Lupe/Einzelbildansicht (60): das Durchsehen springt
+   per 'single-open' in die Einzelbildansicht — Esc dort führt zurück zur
+   Arena. Wie die Lupe immer dunkel (Bilder beurteilen braucht neutralen
+   Grund). */
+#rankings {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  /* Deckend statt teiltransparent (Feral Strawberry, R3.2-Feinschliff): die Arena ist
+     ein eigenes Feature, keine Ebene über der Galerie — nichts scheint durch. */
+  background: #0d0d0d;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+}
+#rankings[hidden] { display: none; }
+#rankings #rkTitle { font-size: 13px; font-weight: 600; }
+#rankings #rkBack, #rankings #rkEdit, #rankings #rkClose {
+  background: rgba(255, 255, 255, .1);
+  border: none;
+  color: #fff;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.rkbody { flex: 1; min-height: 0; display: flex; }
+.rkmsg { margin: auto; font-size: 13px; }
+#rankings .warn { color: #ff9d66; }
+
+/* Duell: zwei Karten, Klick = Sieg. */
+.rkstage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 8px 20px;
+}
+.rkcard {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.rkcard img, .rkcard video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 10px;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, .6);
+}
+.rkcard:hover img, .rkcard:hover video { outline: 2px solid var(--accent-line, rgba(255, 255, 255, .4)); }
+.rkvs { flex: none; font-family: var(--mono); font-size: 11px; color: rgba(255, 255, 255, .45); }
+/* Score-Feedback nach der Wertung (Sieger grün gerahmt, kurzes Elo-Badge). */
+.rkcard.rkwin img, .rkcard.rkwin video { outline: 3px solid #4bbf82; }
+.rkcard.rklose img, .rkcard.rklose video { opacity: .45; }
+.rkscore {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 13px;
+  background: rgba(0, 0, 0, .75);
+  border-radius: 8px;
+  padding: 4px 10px;
+}
+.rkcard.rkwin .rkscore { color: #4bbf82; }
+.rkcard.rklose .rkscore { color: rgba(255, 255, 255, .6); }
+#rankings .lpfoot { display: flex; align-items: center; justify-content: center; gap: 14px; }
+#rankings #rkSkip {
+  background: rgba(255, 255, 255, .1);
+  border: none;
+  color: #fff;
+  border-radius: 8px;
+  padding: 6px 14px;
+}
+
+/* Bestenliste = EINE Ansicht (R3.2): links das Medium des aktuellen Rangs,
+   rechts die Rangliste als mitscrollende Spalte (Rang · Thumbnail · Elo) —
+   bei Platz 55 bleibt die Umgebung ~50–60 sichtbar. */
+.rkbmain { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rkbstage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 10px 4px;
+}
+.rkbstage img, .rkbstage video {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, .6);
+}
+.rkbinfo {
+  flex: none;
+  text-align: center;
+  padding: 8px 10px 10px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, .75);
+}
+.rkbinfo .vmono { font-size: 11px; margin-left: 8px; }
+.rkblist {
+  flex: none;
+  width: 230px;
+  overflow-y: auto;
+  border-left: 1px solid rgba(255, 255, 255, .12);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rkbrow {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 3px 8px 3px 4px;
+  cursor: pointer;
+}
+.rkbrow:hover { background: rgba(255, 255, 255, .08); }
+.rkbrow.active { background: rgba(255, 255, 255, .12); outline: 2px solid var(--accent); }
+.rkbrank { flex: none; width: 34px; text-align: right; font-family: var(--mono); font-size: 12px; color: rgba(255, 255, 255, .55); }
+.rkbthumb { position: relative; flex: none; width: 56px; height: 38px; border-radius: 5px; overflow: hidden; background: rgba(255, 255, 255, .06); }
+.rkbthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rkbadge {
+  position: absolute; right: 4px; bottom: 4px;
+  font-family: var(--mono); font-size: 8px; letter-spacing: .5px;
+  background: rgba(0, 0, 0, .7); border-radius: 4px; padding: 1px 4px;
+}
+.rkbelo { margin-left: auto; font-family: var(--mono); font-size: 11px; color: rgba(255, 255, 255, .8); }
+
+/* Leere Bestenliste (R3): Hinweis + direkter Einstieg ins erste Duell. */
+.rkempty { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+#rankings #rkbSingle {
+  background: rgba(255, 255, 255, .1);
+  border: none;
+  color: #fff;
+  border-radius: 8px;
+  padding: 6px 14px;
+}
+
+/* Arena-Dialog: schmale pickbox mit Config-Zeilen. */
+.rkdlg .cfgline input[type="text"] { flex: 1; }
+.rkdlg #rkDlgMsg { margin-top: 8px; min-height: 16px; font-size: 12px; }
+
+/* Admin → Wartung → Ranking-Arenen: armierter Lösch-Knopf (zweistufig). */
+.arenadel[data-armed] { background: var(--accent); color: #fff; border-color: var(--accent); }
