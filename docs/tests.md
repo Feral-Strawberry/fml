@@ -1,6 +1,6 @@
 # Die Testsuite — was sie prüft und woran man erkennt, dass alles gut ist
 
-> Was ist das? Das Projekt bringt eine automatische Testsuite mit: rund **240
+> Was ist das? Das Projekt bringt eine automatische Testsuite mit: rund **480
 > kleine Prüfprogramme**, die in wenigen Sekunden durchlaufen und jede zentrale
 > Zusage der Software kontrollieren. Vor jeder Codeänderung, die eingecheckt
 > wird, läuft die komplette Suite. Diese Seite erklärt, **wie man sie startet**,
@@ -27,7 +27,7 @@ pytest -q
 Am Ende steht eine Zeile wie:
 
 ```
-240 passed, 2 skipped in 4.21s
+480 passed, 2 skipped in 4.2s
 ```
 
 - **passed** = bestanden. Die genaue Zahl wächst mit dem Projekt; wichtig ist:
@@ -85,7 +85,7 @@ Ausnahme — und eine einzige dürfte niemals einen kompletten Scan abbrechen.
 
 | Testdatei | Prüft |
 |---|---|
-| `test_interpret.py` (44 Tests) | Die Parser machen aus Roh-Metadaten durchsuchbare Felder: Prompt, Modell, LoRAs, Seed, … — für A1111/Forge-Texte und für ComfyUI-Workflow-Graphen in all ihren Bauformen. |
+| `test_interpret.py` (48 Tests) | Die Parser machen aus Roh-Metadaten durchsuchbare Felder: Prompt, Modell, LoRAs, Seed, … — für A1111/Forge-Texte und für ComfyUI-Workflow-Graphen in all ihren Bauformen. |
 | `test_interpret_xmp.py` | XMP-Daten: Midjourney-Beschreibungen, Google-AI-Kennzeichnung, Lightroom-Sternebewertungen. |
 | `test_reparse.py` | Das rückwirkende Neu-Interpretieren des ganzen Bestands: findet bisher Unverstandenes, ändert bei Wiederholung nichts doppelt und ersetzt veraltete Ergebnisse, wenn ein Parser verbessert wurde. |
 
@@ -119,7 +119,7 @@ egal, auf welchem alten Stand sie war.
 | Testdatei | Prüft |
 |---|---|
 | `test_scan.py` | Der komplette Ablauf erkennen → hashen → auslesen → interpretieren → speichern liefert die richtigen Zählungen; eine unlesbare Datei wird als „Scan-Problem" vermerkt statt den Lauf abzubrechen. |
-| `test_importer.py` (14 Tests) | Der Import-Workflow mit allen Sicherheitsgarantien (siehe [import.md](import.md)). |
+| `test_importer.py` (27 Tests) | Der Import-Workflow mit allen Sicherheitsgarantien (siehe [import.md](import.md)). |
 
 Die Import-Tests sind die wohl wichtigsten der ganzen Suite, denn hier geht es
 um **„niemals Daten verlieren"**. Jeder Test ist eine Garantie in Prosa:
@@ -154,7 +154,7 @@ welche Herkunft hat.
 | Testdatei | Prüft |
 |---|---|
 | `test_filters.py` | Die Filtersprache der Suchleiste (`model: flux`, `rating>=4`, `-tag: test`, `mp:`, `format:`, …) wird korrekt zerlegt und liefert die richtigen Treffermengen; Tippfehler in Feldnamen werden abgelehnt statt still ignoriert. |
-| `test_web_library.py` (34 Tests) | Galerie-Seiten kommen in der richtigen Reihenfolge und Sortierung; die Volltextsuche findet Prompts, Dateinamen und Wortanfänge; die Detailansicht zeigt alle drei Informationsebenen; Modell-Zähler in der Seitenleiste stimmen. |
+| `test_web_library.py` (53 Tests) | Galerie-Seiten kommen in der richtigen Reihenfolge und Sortierung; die Volltextsuche findet Prompts, Dateinamen und Wortanfänge; die Detailansicht zeigt alle drei Informationsebenen; Modell-Zähler in der Seitenleiste stimmen. |
 | `test_web_engine.py` | Der interne Arbeiter, der alle Schreibvorgänge nacheinander abarbeitet: eine abstürzende Aufgabe reißt ihn nicht mit; überwachte Ordner (Watch-Quellen) erkennen neue Dateien erst, wenn sie „zur Ruhe gekommen" sind (fertig kopiert). |
 | `test_web_app_static.py` | Die Oberfläche wird korrekt ausgeliefert, und der Browser bekommt nach einem Update keine veraltete Version aus dem Zwischenspeicher. |
 | `test_admin.py` | Das Admin-Dashboard meldet korrekte Kennzahlen; Scan-Probleme lassen sich erfassen und auflösen; verwaiste Datenbankeinträge (Datei existiert nicht mehr) werden gefunden und aufgeräumt. |

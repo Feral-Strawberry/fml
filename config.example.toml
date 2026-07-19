@@ -11,12 +11,14 @@
 # The import (ADR 0019) requires this entry.
 root = "/path/to/library"
 # Library management (ADR 0041): unlocks the file-writing paths
-# (copy/move import, moving rejected files out). The default is the
-# read-only mode with its hands-off guarantee: fml only catalogs and
-# curates — files are never copied, moved or deleted. If the key is
-# missing, a config with root set (or copy/move watch folders) counts
-# as deliberately configured ⇒ on.
-verwaltung = true
+# (copy/move import, moving rejected files out). fml ships in the
+# read-only mode with its hands-off guarantee: it only catalogs and
+# curates — files are never copied, moved or deleted. Set this to true
+# (or tick it under Admin → Configuration) only when you consciously
+# want imports. Caution: if the key is MISSING entirely, a config with
+# root set (or copy/move watch folders) counts as deliberately
+# configured ⇒ on.
+verwaltung = false
 
 [web]
 # Instance conveniences (ADR 0041/I5) — handy when several fml instances

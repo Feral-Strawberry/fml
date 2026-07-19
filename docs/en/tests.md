@@ -1,6 +1,6 @@
 # The test suite — what it checks and how to tell everything is fine
 
-> What is this? The project ships an automated test suite: around **240
+> What is this? The project ships an automated test suite: around **480
 > small test programs** that run in a few seconds and check every central
 > promise of the software. The complete suite runs before every code change
 > that gets checked in. This page explains **how to start it**, **what a
@@ -27,7 +27,7 @@ pytest -q
 At the end there is a line like:
 
 ```
-240 passed, 2 skipped in 4.21s
+480 passed, 2 skipped in 4.2s
 ```
 
 - **passed** = passed. The exact number grows with the project; what
@@ -84,7 +84,7 @@ must never abort a whole scan.
 
 | Test file | Checks |
 |---|---|
-| `test_interpret.py` (44 tests) | The parsers turn raw metadata into searchable fields: prompt, model, LoRAs, seed, … — for A1111/Forge texts and for ComfyUI workflow graphs in all their shapes. |
+| `test_interpret.py` (48 tests) | The parsers turn raw metadata into searchable fields: prompt, model, LoRAs, seed, … — for A1111/Forge texts and for ComfyUI workflow graphs in all their shapes. |
 | `test_interpret_xmp.py` | XMP data: Midjourney descriptions, Google AI labeling, Lightroom star ratings. |
 | `test_reparse.py` | The retroactive re-interpretation of the whole collection: finds previously ununderstood data, changes nothing twice on repetition, and replaces outdated results when a parser was improved. |
 
@@ -118,7 +118,7 @@ its state was.
 | Test file | Checks |
 |---|---|
 | `test_scan.py` | The complete flow detect → hash → read → interpret → store produces the right counts; an unreadable file is recorded as a "scan issue" instead of aborting the run. |
-| `test_importer.py` (14 tests) | The import workflow with all its safety guarantees (see [import.md](import.md)). |
+| `test_importer.py` (27 tests) | The import workflow with all its safety guarantees (see [import.md](import.md)). |
 
 The import tests are arguably the most important of the whole suite,
 because they are about **"never lose data"**. Every test is a guarantee in
@@ -153,7 +153,7 @@ it stay visible which information has which origin.
 | Test file | Checks |
 |---|---|
 | `test_filters.py` | The search bar's filter language (`model: flux`, `rating>=4`, `-tag: test`, `mp:`, `format:`, …) is parsed correctly and produces the right hit sets; typos in field names are rejected instead of silently ignored. |
-| `test_web_library.py` (34 tests) | Gallery pages arrive in the right order and sorting; the full-text search finds prompts, filenames and word prefixes; the detail view shows all three information layers; the model counters in the sidebar are correct. |
+| `test_web_library.py` (53 tests) | Gallery pages arrive in the right order and sorting; the full-text search finds prompts, filenames and word prefixes; the detail view shows all three information layers; the model counters in the sidebar are correct. |
 | `test_web_engine.py` | The internal worker that processes all writes one after another: a crashing task does not take it down; watched folders (watch sources) only notice new files once they have "come to rest" (finished copying). |
 | `test_web_app_static.py` | The interface is served correctly, and the browser does not get a stale version from its cache after an update. |
 | `test_admin.py` | The admin console reports correct key figures; scan issues can be recorded and resolved; orphaned database entries (file no longer exists) are found and cleaned up. |
