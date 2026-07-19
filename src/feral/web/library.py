@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from ..db import manual
+from ..hashing import hash_file
 from . import filters
 from .cache import EpochCache
 from typing import Any
@@ -891,36 +892,19 @@ def rating_counts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     ]
 
 
-def list_items(
-    conn: sqlite3.Connection,
+def _grid_query_parts(
     *,
-    limit: int = 200,
-    offset: int = 0,
-    sort: str = "added",
-    model: str | None = None,
-    rating: int | None = None,
-    filter_expr: str | None = None,
-    dupes: bool = False,
-    with_total: bool = True,
-    cache: EpochCache | None = None,
-) -> dict[str, Any]:
-    """Eine Seite des Bestands fürs Grid, Sortierung per Whitelist (``_SORTS``).
+    sort: str,
+    model: str | None,
+    rating: int | None,
+    filter_expr: str | None,
+    dupes: bool,
+) -> tuple[str, list[Any], str]:
+    """Gemeinsamer WHERE-/Sortier-Bau der Galerie-Queries.
 
-    Unbekannte Sortierschlüssel fallen auf ``added`` (neueste zuerst) zurück;
-    eine ``sort:``-Direktive im ``filter_expr`` gewinnt über ``sort`` (ADR 0035).
-    Optional gefiltert: ``model`` (exakter Schicht-2-Modellwert, Sidebar) und
-    ``rating`` (manuelle Schicht, exakt n Sterne — Feral Strawberry will auch gezielt
-    schlecht Bewertetes sehen), ``filter_expr`` (Smart-Folder-Grammatik,
-    ADR 0018 — wirft ``ValueError`` bei ungültigem Ausdruck) und ``dupes``
-    (nur Items mit mehr als einem Fundort). Liefert ``total``
-    (Gesamtzahl DES FILTERS für die Virtualisierung) und je Item Hash,
-    Container, Medienart, Größe, Zeitstempel, einen Fundort-Dateinamen, das
-    ``tool``-Feld aus Schicht 2 sowie das manuelle Rating.
-
-    ``cache`` (ADR 0048) beschleunigt NUR gefilterte Zustände: die fertig
-    sortierte Hash-Liste der Treffer wird einmal materialisiert und an die
-    Schreib-Epoche gebunden; jede Seite ist dann Listen-Slice + eine
-    Anzeige-Query. Der ungefilterte Pfad bleibt der Index-Spaziergang.
+    Liefert ``(where_sql, params, sort_key)`` — identisch für ``list_items``
+    und ``item_position``, damit beide (inkl. Cache-Schlüssel, ADR 0048)
+    garantiert dieselbe Treffermenge und Reihenfolge meinen.
     """
     sort_key = sort if sort in _SORTS else "added"
     where = []
@@ -960,7 +944,61 @@ def list_items(
             "(SELECT COUNT(*) FROM file_locations l2 WHERE l2.file_hash = i.file_hash) > 1"
         )
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+    return where_sql, params, sort_key
 
+
+def _sort_join_order(sort_key: str) -> tuple[str, str]:
+    """(Zusatz-JOIN, ORDER BY) der Hash-Reihenfolge für einen Sortierschlüssel."""
+    if sort_key in _PLAIN_SORTS:
+        return "", _PLAIN_SORTS[sort_key]
+    join, order_by, _, _ = _PAGED_SORTS[sort_key]
+    return join, order_by
+
+
+def _materialize_hits(
+    conn: sqlite3.Connection, sort_key: str, where_sql: str, params: list[Any]
+) -> list[str]:
+    """Die fertig sortierte Hash-Liste eines gefilterten Zustands (ADR 0048)."""
+    join, order_by = _sort_join_order(sort_key)
+    return [r[0] for r in conn.execute(
+        f"SELECT i.file_hash FROM items i{join}{where_sql}"
+        f" ORDER BY {order_by}", params)]
+
+
+def list_items(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 200,
+    offset: int = 0,
+    sort: str = "added",
+    model: str | None = None,
+    rating: int | None = None,
+    filter_expr: str | None = None,
+    dupes: bool = False,
+    with_total: bool = True,
+    cache: EpochCache | None = None,
+) -> dict[str, Any]:
+    """Eine Seite des Bestands fürs Grid, Sortierung per Whitelist (``_SORTS``).
+
+    Unbekannte Sortierschlüssel fallen auf ``added`` (neueste zuerst) zurück;
+    eine ``sort:``-Direktive im ``filter_expr`` gewinnt über ``sort`` (ADR 0035).
+    Optional gefiltert: ``model`` (exakter Schicht-2-Modellwert, Sidebar) und
+    ``rating`` (manuelle Schicht, exakt n Sterne — Feral Strawberry will auch gezielt
+    schlecht Bewertetes sehen), ``filter_expr`` (Smart-Folder-Grammatik,
+    ADR 0018 — wirft ``ValueError`` bei ungültigem Ausdruck) und ``dupes``
+    (nur Items mit mehr als einem Fundort). Liefert ``total``
+    (Gesamtzahl DES FILTERS für die Virtualisierung) und je Item Hash,
+    Container, Medienart, Größe, Zeitstempel, einen Fundort-Dateinamen, das
+    ``tool``-Feld aus Schicht 2 sowie das manuelle Rating.
+
+    ``cache`` (ADR 0048) beschleunigt NUR gefilterte Zustände: die fertig
+    sortierte Hash-Liste der Treffer wird einmal materialisiert und an die
+    Schreib-Epoche gebunden; jede Seite ist dann Listen-Slice + eine
+    Anzeige-Query. Der ungefilterte Pfad bleibt der Index-Spaziergang.
+    """
+    where_sql, params, sort_key = _grid_query_parts(
+        sort=sort, model=model, rating=rating, filter_expr=filter_expr, dupes=dupes
+    )
     display = """
         SELECT i.file_hash, i.container, i.media_kind, i.file_size, i.first_seen_at,
                i.width, i.height, i.fps,
@@ -972,7 +1010,7 @@ def list_items(
                  WHERE m.file_hash = i.file_hash AND m.field = 'tool' LIMIT 1) AS tool
           FROM items i
         """
-    if cache is not None and where:
+    if cache is not None and where_sql:
         # Trefferlisten-Cache (ADR 0048), NUR für gefilterte Zustände: die
         # fertig sortierte Hash-Liste einmal materialisieren, an die
         # Schreib-Epoche binden — jedes Häppchen ist dann Slice + EINE
@@ -980,18 +1018,9 @@ def list_items(
         # WHERE-Fragment, Parameter); die fundort:-Library-Root steckt als
         # LIKE-Präfix in den Parametern und läuft damit automatisch mit.
         key = ("items", sort_key, where_sql, tuple(params))
-
-        def _materialize() -> list[str]:
-            if sort_key in _PLAIN_SORTS:
-                order_by = _PLAIN_SORTS[sort_key]
-                join = ""
-            else:
-                join, order_by, _, _ = _PAGED_SORTS[sort_key]
-            return [r[0] for r in conn.execute(
-                f"SELECT i.file_hash FROM items i{join}{where_sql}"
-                f" ORDER BY {order_by}", params)]
-
-        hashes = cache.get(key, _materialize)
+        hashes = cache.get(
+            key, lambda: _materialize_hits(conn, sort_key, where_sql, params)
+        )
         total = len(hashes)  # die COUNT-Query je Filterwechsel entfällt mit
         page_hashes = hashes[offset:offset + limit]
         rows = []
@@ -1035,6 +1064,50 @@ def list_items(
             (*params, limit, offset),
         ).fetchall()
     return {"total": total, "offset": offset, "items": _item_dicts(rows)}
+
+
+def item_position(
+    conn: sqlite3.Connection,
+    file_hash: str,
+    *,
+    sort: str = "added",
+    model: str | None = None,
+    rating: int | None = None,
+    filter_expr: str | None = None,
+    dupes: bool = False,
+    cache: EpochCache | None = None,
+) -> int | None:
+    """Grid-Position (0-basiert) eines Items in der Treffermenge — oder ``None``.
+
+    Fundament des Galerie-Rücksprungs (ADR 0060): nach einem Suchzustands-
+    wechsel springt das Grid zum zuvor ausgewählten Bild zurück, statt oben
+    neu zu beginnen. Filter/Sortierung laufen über denselben Bau wie
+    ``list_items`` (``_grid_query_parts``), gefilterte Zustände über
+    DENSELBEN Trefferlisten-Cache (ADR 0048, identischer Schlüssel) —
+    die Position ist dann ein Listen-Lookup. Ungefiltert zählt eine
+    ROW_NUMBER-Query einmal durch (eine Nutzeraktion, kein Scroll-Pfad).
+    """
+    where_sql, params, sort_key = _grid_query_parts(
+        sort=sort, model=model, rating=rating, filter_expr=filter_expr, dupes=dupes
+    )
+    if cache is not None and where_sql:
+        key = ("items", sort_key, where_sql, tuple(params))
+        hashes = cache.get(
+            key, lambda: _materialize_hits(conn, sort_key, where_sql, params)
+        )
+        try:
+            return hashes.index(file_hash)
+        except ValueError:
+            return None
+    join, order_by = _sort_join_order(sort_key)
+    row = conn.execute(
+        f"""SELECT rn FROM (
+              SELECT i.file_hash AS h, ROW_NUMBER() OVER (ORDER BY {order_by}) AS rn
+                FROM items i{join}{where_sql}
+            ) WHERE h = ?""",
+        (*params, file_hash),
+    ).fetchone()
+    return row[0] - 1 if row else None
 
 
 def _item_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
@@ -1148,7 +1221,9 @@ def a1111_fields(conn: sqlite3.Connection, file_hash: str) -> dict[str, list[str
     return fields
 
 
-def resolve_media(conn: sqlite3.Connection, file_hash: str) -> tuple[str, str] | None:
+def resolve_media(
+    conn: sqlite3.Connection, file_hash: str, *, verify: bool = False
+) -> tuple[str, str] | None:
     """Der erste noch existierende Fundort eines Items plus MIME-Type.
 
     Nur Pfade aus `file_locations` kommen infrage — der Endpunkt kann also
@@ -1162,6 +1237,12 @@ def resolve_media(conn: sqlite3.Connection, file_hash: str) -> tuple[str, str] |
     zwischen Dateiwechsel und nächstem Watcher-Lauf). Größengleiche
     Fremd-Dateien fängt erst der Katalogisier-Cleanup in store_extraction;
     mtime bleibt außen vor (ändert sich auch ohne Inhaltswechsel).
+
+    ``verify`` (ADR 0062, für „Im Dateimanager anzeigen"): zusätzlich die
+    Datei hashen und gegen ``file_hash`` prüfen — schließt auch das
+    Größengleich-Fenster. Bewusst NICHT im Streaming-Pfad (jede Vorschau
+    würde sonst die ganze Datei lesen), sondern nur für seltene, explizite
+    Nutzeraktionen, bei denen der falsche Treffer teuer ist.
     """
     rows = conn.execute(
         """SELECT l.path, i.file_size, i.container FROM file_locations l
@@ -1172,6 +1253,8 @@ def resolve_media(conn: sqlite3.Connection, file_hash: str) -> tuple[str, str] |
         p = Path(row["path"])
         try:
             if not p.is_file() or p.stat().st_size != row["file_size"]:
+                continue
+            if verify and hash_file(p) != file_hash:
                 continue
         except OSError:
             continue

@@ -187,7 +187,10 @@ progress and result appear under **Activity**.
 - **Re-interpret** — run the layer-2 parsers retroactively over the whole
   collection. After new/improved parsers.
 - **Backfill creation dates** — fill in missing capture/creation dates
-  (`media_date`) from metadata/file.
+  (`media_date`) from metadata/file; also adds the **time of day** to
+  legacy date-only entries (always from metadata, from the file stamp
+  only if it still names the same day). Also runs automatically on
+  startup when needed.
 - **Rebuild search index** — regenerate the FTS5 full-text index from
   scratch.
 

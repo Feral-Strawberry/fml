@@ -226,6 +226,15 @@ attribution may get lost in the process. If you want to get more deeply
 involved: just ask - collaboration works via an invitation to the
 working repo.
 
+**About the "ADR" references** in code comments and docs (e.g.
+"ADR 0041"): these are **Architecture Decision Records** - short,
+numbered entries following the pattern *context → decision →
+consequences* that document every notable decision made in this project.
+They live in the private working repo and are not part of the snapshots;
+the references are left in place on purpose so decisions stay
+traceable. If you want to know the reasoning behind a specific number:
+just open an issue.
+
 ---
 
 ## For developers

@@ -11,7 +11,7 @@
 // Dichte-Wechsel), die Spaltenzahl kommt aus dem berechneten Grid-Layout.
 
 import { STRINGS } from "./strings.js";
-import { getItems, loadThumb } from "./api.js";
+import { getItemPosition, getItems, loadThumb } from "./api.js";
 import { emit, on } from "./main.js";
 
 const PAGE = 200;              // Items pro API-Seite (wie alte Seite)
@@ -145,13 +145,14 @@ export function initGallery() {
   }
 
   async function reloadGrid() {
-    reloadSeq++;                       // laufende Antworten alter Seiten entwerten
+    const seq = ++reloadSeq;           // laufende Antworten alter Seiten entwerten
     firstLoadDone = false;             // „leer"-Hinweis erst NACH der Antwort
     total = 0;
     items = new Map();
     loadedPages = new Set();
     tiles.forEach((el) => el.remove());
     tiles = new Map();
+    const keepHash = selectedHash;     // Rücksprung-Anker (ADR 0060)
     selectedHash = null;               // alte Auswahl gehört zur alten Reihenfolge
     selectedIndex = null;
     wrap.scrollTop = 0;
@@ -160,6 +161,22 @@ export function initGallery() {
     // Zweiter Durchgang im nächsten Frame: Erst mit gesetzter Spacer-Höhe steht
     // fest, ob ein Scrollbalken erscheint (der die Spaltenbreite ändert).
     requestAnimationFrame(() => { measureLayout(); renderGrid(); });
+    // Rücksprung (ADR 0060): War vor dem Zustandswechsel ein Bild ausgewählt
+    // und ist es in der neuen Treffermenge noch enthalten, dorthin springen
+    // statt oben neu zu beginnen — z. B. Esc aus der Seed-Varianten-Suche
+    // führt so zum zuletzt angeklickten Bild zurück. Fehler sind unkritisch
+    // (dann bleibt es beim Anfang der Galerie).
+    if (!keepHash || !total) return;
+    try {
+      const pos = await getItemPosition({ hash: keepHash, sort: sortKey, ...filter });
+      if (seq !== reloadSeq || selectedHash !== null) return;  // überholt/neu geklickt
+      if (pos.index === null || pos.index === undefined) return;
+      const it = await galleryItemAt(pos.index);
+      if (seq !== reloadSeq || selectedHash !== null || !it) return;
+      emit("selection-changed", { hash: it.file_hash, index: pos.index });
+    } catch (err) {
+      console.warn(err);
+    }
   }
 
   // Schonender Refresh (ADR 0057): Daten neu laden, aber Scrollposition,

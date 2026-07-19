@@ -309,11 +309,48 @@ def test_backfill_media_dates(db, tmp_path):
 
     assert result == {"total": 3, "dated": 2}
     dates = dict(db.execute("SELECT file_hash, media_date FROM items"))
-    assert dates["a1" * 32] == "2021-06-15"
-    assert dates["b2" * 32] == "2022-05-01"
+    assert dates["a1" * 32] == "2021-06-15 10:00:00"
+    assert dates["b2" * 32] == "2022-05-01 12:00:00"
     assert dates["c3" * 32] is None
     # Zweiter Lauf: nichts mehr zu tun.
     assert importer.backfill_media_dates(db) == {"total": 1, "dated": 0}
+
+
+def test_backfill_refreshes_date_only_values(db, tmp_path):
+    """Uhrzeit-Auffrischung (ADR 0061): Alt-Einträge mit reinem Datum bekommen
+    die Uhrzeit — aus Metadaten immer, aus dem Dateisystem nur bei gleichem
+    Tag; weicht der Stempel ab, bleibt das Datum ehrlich stehen."""
+    import os
+
+    from feral import importer
+
+    # Metadaten-Datum: überschreibt den Alt-Wert (auch den Tag, falls anders).
+    _store(db, "a1" * 32, str(tmp_path / "weg.png"),
+           text_chunk("DateTimeOriginal", "2021:06:15 10:00:00"))
+    db.execute("UPDATE items SET media_date='2021-06-15' WHERE file_hash=?",
+               ("a1" * 32,))
+    # Dateisystem, gleicher Tag: Uhrzeit kommt dazu.
+    same = tmp_path / "gleich.png"
+    same.write_bytes(build_png(text_chunk("parameters", "x")))
+    os.utime(same, (1651406400, 1651406400))   # 2022-05-01 12:00 UTC
+    _store(db, "b2" * 32, str(same), text_chunk("parameters", "x"))
+    db.execute("UPDATE items SET media_date='2022-05-01' WHERE file_hash=?",
+               ("b2" * 32,))
+    # Dateisystem, ANDERER Tag (Datei später kopiert): Datum bleibt stehen.
+    other = tmp_path / "anders.png"
+    other.write_bytes(build_png(text_chunk("parameters", "y")))
+    os.utime(other, (1656676800, 1656676800))  # 2022-07-01 12:00 UTC
+    _store(db, "c3" * 32, str(other), text_chunk("parameters", "y"))
+    db.execute("UPDATE items SET media_date='2022-05-01' WHERE file_hash=?",
+               ("c3" * 32,))
+
+    result = importer.backfill_media_dates(db)
+
+    assert result == {"total": 3, "dated": 2}
+    dates = dict(db.execute("SELECT file_hash, media_date FROM items"))
+    assert dates["a1" * 32] == "2021-06-15 10:00:00"
+    assert dates["b2" * 32] == "2022-05-01 12:00:00"
+    assert dates["c3" * 32] == "2022-05-01"   # ehrlich datumsgenau
 
 
 # -- Block S2 (ADR 0036): text:-Prädikat auf kuratierten FTS-Spalten ------------------
@@ -626,7 +663,9 @@ def test_import_and_scan_set_media_date(db, tmp_path):
     f.write_bytes(build_png(text_chunk("parameters", "x")))
     os.utime(f, (1651406400, 1651406400))   # 2022-05-01 UTC
     importer.import_folder(db, source, target_root=target)
-    assert db.execute("SELECT media_date FROM items").fetchone()[0] == "2022-05-01"
+    assert db.execute(
+        "SELECT media_date FROM items"
+    ).fetchone()[0] == "2022-05-01 12:00:00"
 
     g = tmp_path / "alt" / "alt.png"
     g.parent.mkdir()
@@ -635,9 +674,11 @@ def test_import_and_scan_set_media_date(db, tmp_path):
     scan.scan_files(db, [g])
     row = db.execute(
         "SELECT media_date FROM items WHERE file_hash != ?",
-        (db.execute("SELECT file_hash FROM items WHERE media_date='2022-05-01'").fetchone()[0],),
+        (db.execute(
+            "SELECT file_hash FROM items WHERE media_date LIKE '2022-05-01%'"
+        ).fetchone()[0],),
     ).fetchone()
-    assert row[0] == "2015-01-02"
+    assert row[0] == "2015-01-02 00:00:00"
 
 
 # -- fundort: Library vs. Extern (ADR 0041, I2) --------------------------------------

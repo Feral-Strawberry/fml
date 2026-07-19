@@ -234,6 +234,15 @@ Hand übernommen werden - dabei kann die Commit-Zuordnung (Attribution)
 verloren gehen. Wer tiefer einsteigen möchte: einfach melden - Mitarbeit
 läuft über eine Einladung ins Arbeitsrepo.
 
+**Zu den „ADR"-Verweisen** in Code-Kommentaren und Doku (z. B.
+„ADR 0041"): Das sind **Architecture Decision Records** - kurze,
+durchnummerierte Einträge nach dem Muster *Kontext → Entscheidung →
+Konsequenzen*, in denen jede nennenswerte Entscheidung dieses Projekts
+festgehalten ist. Sie liegen im privaten Arbeitsrepo und sind nicht Teil
+der Snapshots; die Verweise bleiben absichtlich stehen, damit
+Entscheidungen zuordenbar bleiben. Wer die Begründung zu einer bestimmten
+Nummer wissen möchte: einfach ein Issue aufmachen.
+
 ---
 
 ## Für Entwickler

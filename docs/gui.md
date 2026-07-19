@@ -108,6 +108,10 @@ Beständen - nur sichtbare Kacheln sind im Speicher), neueste zuerst. Oben:
 Breadcrumb mit den Such-Chips und dem Zähler; rechts daneben fest verankert
 **✕ Filter zurücksetzen** (erscheint, sobald gefiltert wird - auch **Esc**
 leert die Filter, wenn kein Overlay offen ist) und **⚡ Sammel-Aktion**.
+War beim Filter- oder Sortierwechsel ein Medium ausgewählt und ist es
+auch in der neuen Trefferliste enthalten, **springt die Galerie dorthin
+zurück** statt oben neu zu beginnen - Esc aus der Seed-Varianten-Suche
+führt so direkt zum zuletzt angeklickten Bild.
 Der **Sortier-Knopf** (Hinzugefügt / Erstellt /
 Dateiname / Dateigröße / Container / Bewertung - Unbewertete und Undatierte
 zuletzt) und die **Dichte S/M/L** sitzen oben in der Topbar neben dem
@@ -141,9 +145,11 @@ A1111-Bildern mit Badge „ComfyUI · erzeugt" - siehe Workflow-Ansicht - plus
 **„A1111-Infotext kopieren"**: der unveränderte Infotext für PNG Info /
 txt2img in A1111 und Forge) ·
 aufklappbar **Roh-Metadaten** (Schicht 1, byte-treu mit Quell-Label) und
-**Fundorte** · **DATEI** (Format, Größe, **Erstellt** - das Erstelldatum,
-nach dem „Nach Jahr" gruppiert; „ohne Datum" heißt: kein plausibles Datum
-gefunden -, Hinzugefügt, Hash). Medien ohne
+**Fundorte** · **DATEI** (Format, Größe, **Erstellt** - das Erstelldatum
+mit Uhrzeit (UTC), nach dem „Nach Jahr" gruppiert und die Sortierung
+„Erstellt" sekundengenau ordnet; „ohne Datum" heißt: kein plausibles Datum
+gefunden, nur Datum ohne Uhrzeit: die Uhrzeit ließ sich für den
+Alt-Bestand nicht mehr sicher ermitteln -, Hinzugefügt, Hash). Medien ohne
 erkannte Generierungs-Daten zeigen einen Hinweis - die Roh-Schicht bleibt
 immer einsehbar.
 
@@ -173,7 +179,11 @@ führen zur Galerie zurück, die auf dem zuletzt betrachteten Bild steht.
 
 **📂 Im Dateimanager anzeigen** (oben rechts, auch in der Lupe): öffnet
 Explorer (Windows) bzw. Finder (macOS) mit markierter Datei - dem ersten
-noch existierenden Fundort. Alles Weitere (umbenennen, endgültig löschen)
+noch existierenden Fundort, dessen Inhalt vor dem Öffnen **per SHA-256
+verifiziert** wird (liegt am katalogisierten Pfad inzwischen eine andere
+Datei, meldet der Knopf ehrlich „kein Fundort mehr vorhanden" statt aufs
+falsche Bild zu zeigen; bei großen Videos kann die Prüfung einen Moment
+dauern). Alles Weitere (umbenennen, endgültig löschen)
 passiert bewusst dort: fml selbst fasst Dateien nie an. Hinweis: Das
 Fenster öffnet sich auf dem Rechner, auf dem der Server läuft - im
 normalen localhost-Betrieb ist das der eigene.

@@ -182,7 +182,9 @@ def determine_date(
 def set_media_date(
     conn: sqlite3.Connection, file_hash: str, when: datetime | None, source: str
 ) -> None:
-    """``items.media_date`` setzen (ADR 0021, ``YYYY-MM-DD``).
+    """``items.media_date`` setzen (ADR 0021; seit ADR 0061 mit Uhrzeit,
+    ``YYYY-MM-DD HH:MM:SS`` in UTC — sortiert lexikografisch korrekt, und
+    ``substr``-Filter auf Jahr/Monat laufen unverändert).
 
     Metadaten-Daten überschreiben, Dateisystem-Daten füllen nur NULL auf —
     Kopien/Backups verfälschen mtimes, eingebettete Daten nicht. ``None``
@@ -190,7 +192,7 @@ def set_media_date(
     """
     if when is None:
         return
-    value = f"{when:%Y-%m-%d}"
+    value = f"{when:%Y-%m-%d %H:%M:%S}"
     if source == "metadaten":
         conn.execute(
             "UPDATE items SET media_date = ? WHERE file_hash = ?", (value, file_hash)
@@ -217,10 +219,19 @@ def backfill_media_dates(
     der älteste plausible Dateisystem-Stempel des ersten noch existierenden
     Fundorts — dieselbe Kaskade wie ADR 0019, nur aus zweiter Hand.
     Items ohne plausibles Datum bleiben ehrlich NULL („ohne Datum").
+
+    Uhrzeit-Auffrischung (ADR 0061): Alt-Einträge mit reinem Datum
+    (``length = 10``, vor ADR 0061 gespeichert) werden um die Uhrzeit
+    ergänzt — aus Metadaten immer (eingebettete Daten sind maßgeblich),
+    aus dem Dateisystem NUR, wenn der Stempel noch denselben Tag nennt.
+    Weicht er ab (Datei seit dem Import kopiert/berührt), bleibt das
+    gespeicherte Datum stehen: lieber ehrlich datumsgenau als eine
+    plausibel aussehende, falsche Uhrzeit.
     """
     upper = datetime.now(timezone.utc) + timedelta(days=1)
     rows = conn.execute(
-        "SELECT file_hash FROM items WHERE media_date IS NULL"
+        """SELECT file_hash, media_date FROM items
+            WHERE media_date IS NULL OR length(media_date) = 10"""
     ).fetchall()
     total, dated = len(rows), 0
     for index, row in enumerate(rows, start=1):
@@ -258,8 +269,19 @@ def backfill_media_dates(
                     when = candidate
                 break
         if when is not None:
-            set_media_date(conn, file_hash, when, source)
-            dated += 1
+            if row["media_date"] is None or source == "metadaten":
+                set_media_date(conn, file_hash, when, source)
+                dated += 1
+            else:
+                # Uhrzeit-Auffrischung aus dem Dateisystem: nur wenn der
+                # aktuelle Stempel noch auf dem gespeicherten Tag liegt.
+                value = f"{when:%Y-%m-%d %H:%M:%S}"
+                cur = conn.execute(
+                    """UPDATE items SET media_date = ?
+                        WHERE file_hash = ? AND media_date = substr(?, 1, 10)""",
+                    (value, file_hash, value),
+                )
+                dated += cur.rowcount
         if index % 500 == 0:
             conn.commit()
             if progress is not None:

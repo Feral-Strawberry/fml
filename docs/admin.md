@@ -188,7 +188,10 @@ Fortschritt und Ergebnis erscheinen unter **Aktivität**.
 - **Neu interpretieren** — Schicht-2-Parser rückwirkend über den ganzen Bestand.
   Nach neuen/verbesserten Parsern.
 - **Erstelldaten nachtragen** — fehlende Aufnahme-/Erstelldaten (`media_date`)
-  aus Metadaten/Datei ergänzen.
+  aus Metadaten/Datei ergänzen; ergänzt außerdem bei Alt-Einträgen mit
+  reinem Datum die **Uhrzeit** (aus Metadaten immer, aus dem Datei-Stempel
+  nur, wenn er noch denselben Tag nennt). Läuft bei Bedarf auch beim
+  Start automatisch.
 - **Suchindex neu aufbauen** — den FTS5-Volltextindex komplett neu erzeugen.
 
 ## Erststart (frische Installation)

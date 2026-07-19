@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import re
 from typing import Any
 from pathlib import Path
@@ -360,8 +361,13 @@ def create_app(
     # Re-Scan-Pflicht war eine Stolperfalle) und der FTS5-Suchindex (ADR 0024 —
     # Alt-Bestand vor Migration 0013 bzw. Drift).
     with contextlib.closing(connect(db_path)) as boot_conn:
+        # length = 10: Alt-Bestand mit Datum OHNE Uhrzeit (vor ADR 0061) —
+        # der Backfill reichert ihn um die Uhrzeit an. Unauffrischbare Reste
+        # (mtime inzwischen verändert) bleiben ehrlich datumsgenau und werden
+        # wie dauerhaft datenlose NULL-Items bei jedem Start mitgeprüft.
         undated = boot_conn.execute(
-            "SELECT EXISTS(SELECT 1 FROM items WHERE media_date IS NULL)"
+            """SELECT EXISTS(SELECT 1 FROM items
+                              WHERE media_date IS NULL OR length(media_date) = 10)"""
         ).fetchone()[0]
         index_drift = boot_conn.execute(
             """SELECT (SELECT COUNT(*) FROM items)
@@ -497,6 +503,29 @@ def create_app(
             except ValueError as exc:   # ungültiger Filterausdruck (ADR 0018)
                 raise HTTPException(status_code=400, detail=_err(exc))
 
+    @app.get("/api/items/position")
+    def items_position(
+        hash: str = Query(...),
+        sort: str = Query("added"),
+        model: str | None = Query(None),
+        rating: int | None = Query(None, ge=1, le=5),
+        filter: str | None = Query(None),
+        dupes: bool = Query(False),
+    ) -> dict:
+        # Galerie-Rücksprung (ADR 0060): Position eines Items in der
+        # aktuellen Treffermenge — Parameter spiegeln /api/items, gefilterte
+        # Zustände laufen über denselben Trefferlisten-Cache (ADR 0048).
+        _require_hash(hash)
+        with read_conn() as conn:
+            try:
+                index = library.item_position(
+                    conn, hash, sort=sort, model=model, rating=rating,
+                    filter_expr=filter, dupes=dupes, cache=hits_cache,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=_err(exc))
+        return {"index": index}
+
     @app.get("/api/ratings")
     def ratings(filter: str | None = Query(None)) -> dict:
         with read_conn() as conn:
@@ -519,13 +548,20 @@ def create_app(
         """„Im Dateimanager anzeigen" (I6, ADR 0041): der Server öffnet
         Explorer/Finder mit der ersten noch existierenden Fundort-Datei —
         im localhost-Normalbetrieb (ADR 0001) der Rechner des Anwenders.
-        Reine Anzeige, darum keine Übersichtsmodus-Sperre (I4)."""
+        Reine Anzeige, darum keine Übersichtsmodus-Sperre (I4).
+
+        Härtung (ADR 0062): ``verify=True`` hasht den Fundort vor dem Öffnen
+        — ein größengleicher Fremdinhalt am katalogisierten Pfad wird
+        übersprungen statt als falsches Bild präsentiert. ``abspath``
+        normalisiert den Pfad (``..``, relative Reste), denn explorer
+        ``/select,`` scheitert an unnormalisierten Pfaden kommentarlos und
+        öffnet stattdessen den Dokumente-Ordner."""
         _require_hash(file_hash)
         with read_conn() as conn:
-            resolved = library.resolve_media(conn, file_hash)
+            resolved = library.resolve_media(conn, file_hash, verify=True)
         if resolved is None:
             raise HTTPException(status_code=404, detail=msg("errNoLocation"))
-        path = Path(resolved[0])
+        path = Path(os.path.abspath(resolved[0]))
         try:
             reveal.show_in_file_manager(path)
         except OSError as exc:

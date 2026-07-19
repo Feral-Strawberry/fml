@@ -48,6 +48,11 @@ export const getStats = () => api("/api/stats");
 export const getItems = ({ limit, offset, sort, model, rating, filter, dupes, total } = {}) =>
   api(withQuery("/api/items", { limit, offset, sort, model, rating, filter, dupes, total }));
 
+/** Grid-Position eines Items in der aktuellen Treffermenge (ADR 0060) —
+ *  Parameter wie getItems; Antwort {index} (0-basiert, null = nicht drin). */
+export const getItemPosition = ({ hash, sort, model, rating, filter, dupes } = {}) =>
+  api(withQuery("/api/items/position", { hash, sort, model, rating, filter, dupes }));
+
 // -- Smart Folders (Stufe 3.3, ADR 0018) ----------------------------------------
 
 /** Alle Smart Folders mit Live-Zählern: {folders}. */

@@ -141,6 +141,18 @@ def test_unfiltered_path_bypasses_cache(filled, cache):
     assert len(cache._entries) == 0  # Index-Spaziergang, nichts gemerkt
 
 
+def test_item_position_shares_hit_list_with_list_items(filled, cache):
+    """item_position (ADR 0060) nutzt DENSELBEN Cache-Schlüssel wie
+    list_items — eine Trefferliste für beide, und cached == uncached."""
+    plain = library.item_position(filled, "h2", sort="name", filter_expr=EXPR)
+    cached = library.item_position(filled, "h2", sort="name", filter_expr=EXPR,
+                                   cache=cache)
+    assert cached == plain == 2
+    assert len(cache._entries) == 1
+    library.list_items(filled, sort="name", filter_expr=EXPR, cache=cache)
+    assert len(cache._entries) == 1  # kein zweiter Eintrag: identischer Schlüssel
+
+
 # --- Modell-Basisliste in models_facet -------------------------------------------
 
 

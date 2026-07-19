@@ -105,6 +105,10 @@ collections - only visible tiles are in memory), newest first. On top: a
 breadcrumb with the search chips and the counter; anchored to its right
 **✕ Reset filters** (appears as soon as filtering is active - **Esc**
 also clears the filters when no overlay is open) and **⚡ Bulk action**.
+If a medium was selected when the filter or sort order changed and it is
+also part of the new result list, the gallery **jumps back to it**
+instead of starting at the top - Esc out of the seed-variant search thus
+leads straight back to the last clicked image.
 The **sort button** (Added / Created / Filename / File size / Container /
 Rating - unrated and undated items last) and the **density S/M/L** sit up
 in the top bar next to the search box. The sort button opens a small
@@ -138,8 +142,10 @@ generated" - see workflow view - plus **"Copy A1111 infotext"**: the
 unmodified infotext for PNG Info / txt2img in A1111 and Forge) ·
 collapsible **raw metadata** (layer 1, byte-true with source label) and
 **locations** · **FILE** (format, size, **Created** - the creation date
-that "By year" groups by; "no date" means: no plausible date found -,
-Added, hash). Media without recognized generation data show a note - the
+with time of day (UTC) that "By year" groups by and that the "Created"
+sort orders to the second; "no date" means: no plausible date found,
+date without a time means: the time could no longer be determined
+reliably for legacy entries -, Added, hash). Media without recognized generation data show a note - the
 raw layer always stays inspectable.
 
 **Panel widths:** the dividers left and right of the gallery can be
@@ -167,7 +173,11 @@ editing, push-to-ComfyUI). **←/→** pages in grid order; **Esc, Enter or
 
 **📂 Show in file manager** (top right, also in the loupe): opens
 Explorer (Windows) or Finder (macOS) with the file selected - at the
-first still-existing location. Everything else (renaming, final deletion)
+first still-existing location, whose content is **verified via SHA-256**
+before opening (if a different file now sits at the catalogued path, the
+button honestly reports "no location left" instead of pointing at the
+wrong image; for large videos the check can take a moment). Everything
+else (renaming, final deletion)
 deliberately happens there: fml itself never touches files. Note: the
 window opens on the machine the server runs on - in normal localhost
 operation that is your own.

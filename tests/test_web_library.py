@@ -252,6 +252,28 @@ def test_list_items_sort_unknown_falls_back(populated_db):
     assert [i["file_hash"] for i in a["items"]] == [i["file_hash"] for i in b["items"]]
 
 
+# -- Galerie-Rücksprung: Position eines Items in der Treffermenge (ADR 0060) ---------
+
+
+def test_item_position_matches_list_order(populated_db):
+    """Position = Index in genau der Reihenfolge, die list_items liefert —
+    für beide Sortier-Bauformen (plain: added, paged: name)."""
+    added = [i["file_hash"] for i in library.list_items(populated_db)["items"]]
+    assert [library.item_position(populated_db, h) for h in added] == [0, 1, 2, 3, 4]
+    by_name = [i["file_hash"]
+               for i in library.list_items(populated_db, sort="name")["items"]]
+    assert [library.item_position(populated_db, h, sort="name")
+            for h in by_name] == [0, 1, 2, 3, 4]
+    assert library.item_position(populated_db, "fehlt") is None
+
+
+def test_item_position_respects_filter(populated_db):
+    assert library.item_position(
+        populated_db, "h5", filter_expr="container: jpeg") == 0
+    assert library.item_position(
+        populated_db, "h1", filter_expr="container: jpeg") is None
+
+
 def test_item_detail_contains_all_layers(db):
     _store(db, "h1", "/a.png", text_chunk("parameters", "rot\nSteps: 20, Seed: 9"))
 
