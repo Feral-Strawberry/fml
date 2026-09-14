@@ -96,7 +96,7 @@ Library unter `D:\Media\Library`.
    Die Library-Verwaltung bleibt hier bewusst AUS.
 3. In der Natur-Instanz: Admin → Quellen & Import → Pfad
    `D:\Media\Library`, Modus **„katalogisieren"**, „dauerhaft beobachten"
-   → Aufnehmen. Die Instanz indiziert den kompletten Bestand am Ort —
+   → Aufnehmen. Die Instanz katalogisiert den kompletten Bestand am Ort —
    keine Datei wird kopiert oder bewegt, es entsteht nur ihr eigener
    Katalog. (Ein Unterordner statt der ganzen Library geht genauso.)
 4. Kuratieren: Alles, was nicht zum Thema gehört, **ablehnen** — einzeln

@@ -72,6 +72,15 @@ root = "/path/to/testdata"
 # Can also be toggled via Admin → Configuration → Modules.
 enabled = false
 
+[performance]
+# Response time in milliseconds from which a request is logged as slow
+# ("langsam:" WARNING in fml-web.log and on the console). 250 suits a
+# desktop with NVMe; use ~600 for a laptop with a SATA SSD and ~1500 for
+# a Chromebook, USB drive or NAS. 0 = never warn. Cold-start runs
+# ("kalt:") are always INFO only. Changing it in the GUI takes effect
+# immediately (Admin -> Configuration -> Thumbnails & performance).
+slow_request_ms = 250
+
 [cache]
 # Thumbnail cache (regenerated on demand; safe to delete at any time).
 # Default when unset: "cache/thumbnails" next to the database file.

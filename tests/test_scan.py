@@ -108,7 +108,12 @@ def test_scan_records_unreadable_file_as_failed(db, tmp_path):
     root.mkdir()
     (root / "ok.png").write_bytes(COMFY_PNG)
     # Hängender Symlink -> beim Öffnen FileNotFoundError -> 'failed'.
-    (root / "broken.png").symlink_to(tmp_path / "does-not-exist.png")
+    # Windows erlaubt Symlinks nur mit Adminrechten/Entwicklermodus
+    # (WinError 1314) — dann ehrlich überspringen (Issue #50).
+    try:
+        (root / "broken.png").symlink_to(tmp_path / "does-not-exist.png")
+    except OSError as exc:
+        pytest.skip(f"Symlinks auf diesem System nicht erlaubt: {exc}")
 
     report = scan_directory(db, root)
 
@@ -190,3 +195,91 @@ def test_scan_respects_import_rules(db, tmp_path):
         "SELECT path, outcome FROM scan_memory")}
     assert outcomes[str(root / "mini.png")] == "ausgefiltert"
     assert outcomes[str(root / "foto.arw")] == "ausgefiltert"
+
+
+def test_scan_date_rule_uses_configured_min_date(db, tmp_path):
+    """Datumsregel beim Katalogisieren (ADR 0075, #113): ein Stempel vor
+    min_date wird ausgefiltert statt mit leerem Datum katalogisiert; mit
+    gesenktem min_date (Config → rules) kommt die Datei datiert herein."""
+    import os
+    from .pngbuild import build_png, text_chunk
+    root = tmp_path / "laufwerk"
+    root.mkdir()
+    old = root / "uralt.png"
+    old.write_bytes(build_png(text_chunk("parameters", "p")))
+    os.utime(old, (0, 0))   # 1.1.1970
+
+    report = scan_directory(db, root, rules={"min_kante": 0, "max_kante": 0, "formate": []})
+    assert report.ausgefiltert == 1 and report.new_items == 0
+    assert db.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 0
+    assert db.execute("SELECT outcome FROM scan_memory").fetchone()[0] == "ausgefiltert"
+
+    report = scan_directory(
+        db, root, rules={"min_kante": 0, "max_kante": 0, "formate": [],
+                         "min_date": "1970-01-01"})
+    assert report.new_items == 1
+    assert db.execute("SELECT media_date FROM items").fetchone()[0] == "1970-01-01 00:00:00"
+
+
+# -- Nicht abspielbare Codecs (Issue #71, ADR 0070) --------------------------------
+
+def _stream_items(codec: str, pix_fmt: str):
+    from feral.extract.types import RawMetadataItem
+
+    def fact(keyword, text):
+        return RawMetadataItem(source="isobmff:stream0", keyword=keyword, text=text,
+                               data=None, encoding="utf-8")
+    return [fact("codec_type", "video"), fact("codec_name", codec), fact("pix_fmt", pix_fmt)]
+
+
+def _fake_extract(codec: str, pix_fmt: str):
+    from feral.extract.types import ContainerExtraction
+
+    def extract(path):
+        return ContainerExtraction(container="isobmff", items=_stream_items(codec, pix_fmt))
+    return extract
+
+
+def test_scan_records_playback_issue_for_prores_and_resolves_after_recode(db, tmp_path, monkeypatch):
+    from feral import scan as scan_mod
+
+    root = tmp_path / "vids"
+    root.mkdir()
+    clip = root / "topaz.mov"
+    clip.write_bytes(b"\x00" * 32)
+
+    monkeypatch.setattr(scan_mod.container, "extract", _fake_extract("prores", "yuv422p10le"))
+    scan_directory(db, root)
+
+    rows = db.execute(
+        "SELECT kind, message, resolved FROM scan_issues WHERE path = ?", (str(clip),)
+    ).fetchall()
+    assert [(r["kind"], r["resolved"]) for r in rows] == [("playback", 0)]
+    assert '"key": "issueUnplayable"' in rows[0]["message"]
+    assert '"codec": "prores"' in rows[0]["message"]
+    # Schicht 2 trägt das Feld — der Chip »video_codec: prores« findet die Datei.
+    assert db.execute(
+        "SELECT value_text FROM interpreted_metadata WHERE field = 'video_codec'"
+    ).fetchone()[0] == "prores"
+
+    # Re-Scan mit unverändertem Codec: bleibt offen (ein Problem, kein Duplikat).
+    scan_directory(db, root)
+    assert db.execute("SELECT COUNT(*) FROM scan_issues WHERE resolved = 0").fetchone()[0] == 1
+
+    # Datei inzwischen als H.264 8-bit neu geschrieben: Problem quittiert sich selbst.
+    clip.write_bytes(b"\x01" * 32)
+    monkeypatch.setattr(scan_mod.container, "extract", _fake_extract("h264", "yuv420p"))
+    scan_directory(db, root)
+    assert db.execute("SELECT COUNT(*) FROM scan_issues WHERE resolved = 0").fetchone()[0] == 0
+
+
+def test_scan_hevc_is_limited_not_unplayable(db, tmp_path, monkeypatch):
+    from feral import scan as scan_mod
+
+    root = tmp_path / "vids"
+    root.mkdir()
+    (root / "clip.mp4").write_bytes(b"\x00" * 32)
+    monkeypatch.setattr(scan_mod.container, "extract", _fake_extract("hevc", "yuv420p10le"))
+    scan_directory(db, root)
+    row = db.execute("SELECT kind, message FROM scan_issues").fetchone()
+    assert row["kind"] == "playback" and '"key": "issueLimitedPlayback"' in row["message"]

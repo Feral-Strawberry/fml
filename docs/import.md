@@ -21,7 +21,7 @@ root = "/pfad/zum/bestand"
 
 ## Ablauf
 
-**Admin-Dashboard → Quellen & Import:** Ordner wählen, Modus wählen,
+**Admin → Quellen & Import:** Ordner wählen, Modus wählen,
 Häufigkeit „einmal jetzt", **Aufnehmen**. Die Library-Seite ist in jedem
 Modus gleich: Neues wird nach `bestand/JJJJ/MM/TT/` **kopiert**, die Kopie
 per Hash gegen die Quelle verifiziert und sofort katalogisiert (kein
@@ -34,7 +34,11 @@ passiert (ADR 0031):
   nichts. Der richtige Modus für fremde Ordner und Tool-Outputs.
 - **„verschieben"** (mit ausdrücklicher Bestätigung) — erfolgreich
   Importiertes wird nach der Verifikation aus der Quelle **gelöscht**;
-  der Ordner leert sich. Nur Nachschau-Fälle bleiben sichtbar liegen:
+  der Ordner leert sich. Nur Nachschau-Fälle bleiben sichtbar liegen.
+  Die Namen der Ausgangs-Ordner sind feste Bezeichner wie die
+  Config-Werte (`kopieren`, `verschieben`, `katalogisieren`): sie bleiben
+  in jeder Sprache gleich, damit fml sie in jeder Installation
+  wiedererkennt; die Tabelle nennt die Bedeutung.
 
   | Ausgang | Bedeutung |
   | --- | --- |
@@ -42,7 +46,7 @@ passiert (ADR 0031):
   | `_unbekanntes-format/` | Container nicht erkannt — dein Stolper-Ordner für fehlende Formate |
   | `_fehler/` | Lesefehler oder die Kopie ließ sich nicht verifizieren |
   | `_gesperrt/` | Hash steht auf der Sperrliste (in der Bibliothek abgelehnt) — wird nicht wieder importiert (ADR 0023/0041) |
-  | `_ausgefiltert/` | von den **Import-Regeln** aussortiert (zu klein / zu groß / ausgeschlossenes Format, s. u.) — nach einer Regel-Änderung einfach neu einwerfen |
+  | `_ausgefiltert/` | von den **Import-Regeln** aussortiert (zu klein / zu groß / ausgeschlossenes Format / kein plausibles Datum, s. u.) — nach einer Regel-Änderung einfach neu einwerfen |
 
   Gelöscht wird also ausschließlich, was nachweislich bit-identisch im
   Bestand liegt und dessen Katalogeintrag gespeichert ist — alles andere
@@ -52,7 +56,7 @@ passiert (ADR 0031):
   braucht — und der einzige, der im Übersichtsmodus (Standard) erlaubt
   ist.
 
-Große Läufe laufen als **Pipeline** (Block 4S): mehrere Vorarbeiter-Threads
+Große Läufe laufen als **Pipeline**: mehrere Vorarbeiter-Threads
 erkennen und hashen voraus (auch die Gesundheitsprüfung von Bestandskopien
 bei Dubletten läuft so parallel), kopiert und katalogisiert wird weiterhin
 strikt der Reihe nach, gespeichert in Schüben. Dublettenlastige
@@ -72,19 +76,27 @@ verschieben), Katalogisieren und Watchordner:
 - **Formate ausschließen**, z. B. `psd, arw`: halb unterstützte Formate
   gar nicht erst aufnehmen. Kamera-RAW-Dateien (Sony ARW, Nikon NEF,
   Canon CR2, DNG) werden eigens erkannt statt als TIFF durchzurutschen.
+- **Frühestes plausibles Datum** (`[import] min_date`, Standard
+  2015-01-01): eine Datei, deren Erstelldatum weder aus den Metadaten
+  noch aus dem Dateistempel plausibel ist (vor `min_date` oder in der
+  Zukunft, z. B. 1.1.1970), wird **nicht aufgenommen** — sie gilt als
+  Regel-Treffer wie ein zu kleines Bild. Diese Regel ist immer aktiv;
+  wer Altes behalten will, senkt `min_date`.
 
 Beide Maß-Regeln gelten nur für **Bilder mit bekannten Maßen** — Videos
 nie, und ohne Maße wird nicht geraten. Beim Import (verschieben-Modus)
-landen Treffer sichtbar in `_ausgefiltert/`; beim Katalogisieren werden
-sie einfach übersprungen und im Report gezählt. Nichts verschwindet
-still, und die Quelle wird im kopieren-Modus wie immer nie angefasst.
+landen Treffer sichtbar in `_ausgefiltert/` (Grund im Import-Log); beim
+Katalogisieren werden sie einfach übersprungen und im Report gezählt.
+Nichts verschwindet still, und die Quelle wird im kopieren-Modus wie
+immer nie angefasst.
 
 Für Bestände, die **vor** den Regeln aufgenommen wurden, gibt es
 **Admin → Wartung → „Import-Regeln auf den Bestand"**: zeigt erst, wie
-viele Items die aktuellen Regeln träfen (aufgeschlüsselt nach Grund),
-und lehnt sie nach Bestätigung gesammelt ab — die Dateien bleiben
-liegen, nur die Katalog-Einträge verschwinden (umkehrbar über die
-Sperrliste). Hintergründe: ADR 0046.
+viele Items die aktuellen Regeln träfen (aufgeschlüsselt nach Grund,
+inklusive „ohne plausibles Datum"), und lehnt sie nach Bestätigung
+gesammelt ab — die Dateien bleiben liegen, nur die Katalog-Einträge
+verschwinden (umkehrbar über die Sperrliste). Hintergründe: ADR 0046
+und ADR 0075.
 
 ## Watchordner (automatischer Import)
 
@@ -107,15 +119,20 @@ Watchordner übernommen.)
 
 Einsortiert wird nach dem **Erstelldatum**: eingebettetes Datum aus den
 Metadaten (falls vorhanden), sonst der ältere plausible Dateisystem-Stempel.
-Unglaubwürdige Daten (vor 2015, z. B. 1.1.1970, oder in der Zukunft) landen
-in `bestand/_unbekanntes-datum/` statt in einem falschen Ordner — im
-Import-Log als `unplausibel` markiert, damit sie später nachbehandelt werden
-können. Untergrenze einstellbar: `[import] min_date = "2015-01-01"`.
+Gibt es kein plausibles Datum (vor `min_date`, z. B. 1.1.1970, oder in der
+Zukunft), greift die Datumsregel von oben: die Datei wird **nicht
+importiert** und landet sichtbar in `_ausgefiltert/` — statt in einem
+falschen Datumsordner oder mit leerem Datum im Katalog. Untergrenze
+einstellbar: `[import] min_date = "2015-01-01"`. Ein Ordner
+`bestand/_unbekanntes-datum/` aus früheren Versionen bleibt, wie er ist:
+seine Einträge kannst du über „Import-Regeln auf den Bestand" ablehnen
+(Dateien bleiben liegen) oder mit gesenktem `min_date` und „Erstelldaten
+nachtragen" ehrlich datieren.
 
 ## Report
 
 Jeder Lauf endet mit einer Summenzeile („4 neu · 8.311 Dubletten · …", in
-der Aktivität des Admin-Dashboards). Jede einzelne Datei steht in der
+der Aktivität der Admin-Übersicht). Jede einzelne Datei steht in der
 DB-Tabelle `import_log` (Zeitpunkt, Quelle, Ausgang, Ziel, Hash,
 Datumsquelle).
 

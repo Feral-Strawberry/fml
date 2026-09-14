@@ -1,7 +1,7 @@
 """Thumbnail-Pipeline (Stufe 2, ADR 0013).
 
 Im Grid werden **nie** Originaldateien gezeigt, sondern vorab generierte
-Thumbnails fester Größe (Steckbrief §4): einmal generiert, als JPEG im
+Thumbnails fester Größe (Projektziel: flüssiges Scrollen): einmal generiert, als JPEG im
 Platten-Cache abgelegt (Dateiname = Datei-Hash, sharded), immer wiederverwendet.
 
 - Bilder (auch animiertes WEBP/GIF): **Pillow**, erster Frame als Poster-Frame.
@@ -70,6 +70,9 @@ def _thumb_worker_init(low_priority: bool = True) -> None:  # pragma: no cover
     """Worker auf niedrige Priorität setzen (leiser Betrieb, Standard) —
     oder mit ``low_priority=False`` volle Priorität („Vollgas-Modus":
     anmachen und vorm Krach zur Kaffeemaschine flüchten, Feral Strawberry 2026-07-07)."""
+    from .processes import exit_when_parent_dies
+
+    exit_when_parent_dies()   # keine Waisen nach hartem Ende des Elternprozesses (ADR 0067)
     if not low_priority:
         return
     try:
@@ -173,7 +176,7 @@ def _image_thumbnail(source: str | Path, tmp: Path, size: int) -> tuple[bool, st
         with Image.open(source) as img:
             if img.format == "PSD" and not psd.has_real_composite(source):
                 return False, _PSD_NO_COMPOSITE
-            # Animierte Formate: Frame 0 ist der Poster-Frame (Steckbrief §4).
+            # Animierte Formate: Frame 0 ist der Poster-Frame.
             img.thumbnail((size, size))
             img.convert("RGB").save(tmp, "JPEG", quality=85)
         return True, ""

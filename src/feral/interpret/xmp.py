@@ -29,7 +29,7 @@ from ..extract.types import RawMetadataItem
 from .types import InterpretedField, Interpretation
 
 NAME = "xmp"
-VERSION = 1
+VERSION = 2   # v2: Midjourney-Version (--v / --niji) als model (Konzeptrunde 2026-09-08)
 
 _NS = {
     "dc": "http://purl.org/dc/elements/1.1/",
@@ -48,6 +48,12 @@ _PROPERTY_MAP = {
 
 # Midjourney-Signatur am Ende der Beschreibung: "<prompt> Job ID: <uuid>"
 _JOB_ID = re.compile(r"\s*Job ID:\s*([0-9a-fA-F-]{8,})\s*$")
+# Midjourney-Modellversion als Prompt-Parameter (Midjourney-Doku „Version"):
+# ``--v 6.1`` / ``--version 7`` → „Midjourney V6.1"; ``--niji 6`` → „Niji 6".
+# Ohne Parameter galt die damalige Standardversion — nicht rekonstruierbar,
+# dann kein Modell (bleibt manuell, ADR 0022).
+_MJ_VERSION = re.compile(r"(?:^|\s)--(?:v|version)\s+(\d+(?:\.\d+)?)(?=\s|$)")
+_MJ_NIJI = re.compile(r"(?:^|\s)--niji(?:\s+(\d+(?:\.\d+)?))?(?=\s|$)")
 
 
 def parse(items: Sequence[RawMetadataItem]) -> Interpretation | None:
@@ -67,6 +73,9 @@ def parse(items: Sequence[RawMetadataItem]) -> Interpretation | None:
             prompt = _JOB_ID.sub("", description).strip()
             if prompt:
                 fields.append(InterpretedField("prompt", prompt))
+                model = _midjourney_model(prompt)
+                if model:
+                    fields.append(InterpretedField("model", model))
             fields.append(InterpretedField("job_id", match.group(1)))
         else:
             fields.append(InterpretedField("description", description))
@@ -77,6 +86,18 @@ def parse(items: Sequence[RawMetadataItem]) -> Interpretation | None:
     if not fields:
         return None
     return Interpretation(parser=NAME, parser_version=VERSION, fields=fields)
+
+
+def _midjourney_model(prompt: str) -> str | None:
+    """Modellversion aus den Prompt-Parametern: Niji hat Vorrang (``--niji 6
+    --v 6`` ist Niji), sonst ``--v``/``--version``."""
+    niji = _MJ_NIJI.search(prompt)
+    if niji:
+        return f"Niji {niji.group(1)}" if niji.group(1) else "Niji"
+    version = _MJ_VERSION.search(prompt)
+    if version:
+        return f"Midjourney V{version.group(1)}"
+    return None
 
 
 def _first_xmp_root(items: Sequence[RawMetadataItem]) -> ET.Element | None:

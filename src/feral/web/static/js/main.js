@@ -11,27 +11,33 @@ import { initSidebar } from "./sidebar.js";
 import { initSearch } from "./search.js";
 import { initAdvanced } from "./advanced.js";
 import { initSaveDialog } from "./savedialog.js";
+import { initContext } from "./context.js";
 import { initBulkDialog } from "./bulkdialog.js";
 import { initDetail } from "./detail.js";
 import { initLoupe } from "./loupe.js";
 import { initSingleView } from "./singleview.js";
-import { initAdmin } from "./admin.js";
+import { initCompare } from "./compare.js";
 import { initCurate } from "./curate.js";
-import { initQuickmenu } from "./quickmenu.js";
 import { initRankings } from "./rankings.js";
+import { initOverlays } from "./overlays.js";
+import { initTheme, initThemeToggle, applyInstance } from "./appearance.js";
+import { startStatusPolling, initActivityBadge } from "./status.js";
 
 // -- Event-Bus -----------------------------------------------------------------
 //
 // Vereinbarte Events (Payload = event.detail):
-//   'search-state-changed' {expression, predicates, sort}
+//   'search-state-changed' {expression, predicates, sort, reset}
 //                       — der EINE Suchzustand (Chips, ADR 0035) hat sich
-//                         geändert: Grid filtert, Sidebar markiert
+//                         geändert: Grid filtert, Sidebar markiert;
+//                         reset: true = „Alle Medien" (Sidebar) — Grid
+//                         oben, kein Rücksprung (Issue #33)
 //   'chip-toggle'       {pred}   — Facetten-Wert togglen (Sidebar → search.js)
 //   'sort-changed'      {sort}   — Galerie-Dropdown setzt die Sortierung
 //                         (search.js ersetzt den sort:-Chip; Block S6)
-//   'state-load'        {expression, label, folder?} — gespeicherte Suche als
-//                         Chips laden (folder {id, name} merkt sich der
-//                         Speicherdialog zum Überschreiben, Block S7)
+//   'state-load'        {expression, label, folder?, arena?} — gespeicherte Suche/Arena als
+//                         Chips laden (folder = Ursprung für ☆-Dialog und
+//                         Sidebar-Markierung; arena = Bearbeiten-Modus im
+//                         Breadcrumb, ADR 0081/#133)
 //   'save-dialog-open'  {expression, predicates, sort, total}
 //                       — ☆ speichern: Speicherdialog öffnen (Block S7)
 //   'state-clear'       {}       — Zustand leeren („Alle Medien")
@@ -41,17 +47,38 @@ import { initRankings } from "./rankings.js";
 //   'loupe-open'        {hash, mode}
 //                       — Loupe öffnen (mode: 'media'|'workflow';
 //                         mode optional, Standard 'media')
-//   'items-reloaded'    {total}
+//   'single-open'       {hash, index?}
+//                       — Einzelbildansicht öffnen (Grid-Doppelklick, Lupe)
+//   'compare-open'      {hashes: [a, b]}
+//                       — A/B-Vergleichsansicht für genau zwei Medien
+//                         (Galerie-Knopf ⇆ / Taste C → compare.js, Issue #38)
+//   'items-reloaded'    {total, reset}
 //                       — Grid hat neue Daten geladen (z. B. für Zähler);
-//                         Konsumenten setzen ihren Zustand zurück
+//                         Konsumenten setzen ihren Zustand zurück;
+//                         reset: true nach „Alle Medien" (Issue #33)
 //   'items-refreshed'   {total}
 //                       — schonender Refresh (ADR 0057): nur Daten frisch,
 //                         Scroll/Auswahl blieben — KEINE Zustands-Resets
 //   'arena-open'        {id, name, expression}
 //                       — Arena öffnen (Sidebar → rankings.js, ADR 0045)
-//   'arena-create'      {}       — Arena-Dialog „Neue Arena" öffnen
+//   'arena-dialog-open' {expression, predicates, total}
+//                       — 🏆 in der Chip-Leiste: NEUE Arena aus den Chips
+//                         (search.js → rankings.js, ADR 0081)
+//   'rankings-enabled'  {enabled} — Modul-Schalter (Sidebar → search.js)
+//   'chips-rendered'    {}       — Chip-Leiste neu gezeichnet (search.js →
+//                         context.js hängt das Kontext-Segment ein)
+//   'folder-origin'     {id, name, expression}
+//                       — gespeicherte Suche gerade gespeichert/überschrieben
+//                         (savedialog.js → Sidebar markiert sie)
+//   'context-changed'   {kind, id, name} | null — Bearbeiten-Modus für
+//                         Rankings (context.js → Sidebar)
 //   'rankings-changed'  {}       — Arenen-Bestand/Duelle geändert
 //                         (rankings.js → Sidebar lädt die Gruppe neu)
+//   'view-changed'      {view, open}
+//                       — eine Ansicht (loupe|single|compare|rankings)
+//                         wurde geöffnet/geschlossen (ADR 0069): Haken für
+//                         Aufräumer — Dialog-Stapel leert sich (overlays.js),
+//                         Sperren fallen zurück. Nur Ressourcen, nie Daten.
 
 export const bus = new EventTarget();
 export const emit = (type, detail) => bus.dispatchEvent(new CustomEvent(type, { detail }));
@@ -63,111 +90,28 @@ export const on = (type, fn) => {
   return h;
 };
 
-// -- Theme -----------------------------------------------------------------------
-//
-// Dark ist Standard (kein data-theme-Attribut); nur 'light' wird explizit
-// gesetzt. Wahl überlebt in localStorage('feral-theme'). Umschalten passiert
-// NUR im Admin-Schnellmenü (quickmenu.js) — das separate Header-Icon flog
-// raus (Feral Strawberry, 2026-07-16: doppelt verwaltbar, so oft braucht man das nicht).
-
-const THEME_KEY = "feral-theme";
-
-function initTheme() {
-  if (localStorage.getItem(THEME_KEY) === "light") {
-    document.documentElement.dataset.theme = "light";
-  }
-}
-
 // -- Topbar ------------------------------------------------------------------------
 
-/** Bytes → lesbare Größe: ab 1 GB in GB (eine Nachkommastelle), darunter MB. */
-function fmtSize(n) {
-  if (n >= 1e9) {
-    return (n / 1e9).toLocaleString(STRINGS.locale, {
-      minimumFractionDigits: 1,
-      maximumFractionDigits: 1,
-    }) + " GB";
-  }
-  return Math.round(n / 1e6).toLocaleString(STRINGS.locale) + " MB";
-}
+// -- Instanz (ADR 0041, I5) -- Name/Farbe: appearance.js (geteilt mit dem Admin).
 
-// -- Instanz (ADR 0041, I5) ---------------------------------------------------
-//
-// Name + Akzentfarbe aus [web] in der Config unterscheiden parallel laufende
-// Instanzen: Topbar-Badge, Tab-Titel und ein Farbpunkt im Favicon. Ohne
-// Config-Einträge bleibt alles beim Standard-Erscheinungsbild.
-
-const DEFAULT_TITLE = "Feral Media Library";
-let faviconBase = null; // Original-Href merken, um zum Standard zurückzukönnen
-
-function tintFavicon(farbe) {
-  const link = document.querySelector('link[rel="icon"]');
-  if (!link) return;
-  if (faviconBase === null) faviconBase = link.href;
-  if (!farbe) { link.href = faviconBase; return; }
-  const img = new Image();
-  img.onload = () => {
-    const c = document.createElement("canvas");
-    c.width = c.height = 64;
-    const ctx = c.getContext("2d");
-    ctx.drawImage(img, 0, 0, 64, 64);
-    // Farbpunkt unten rechts statt Um-Einfärben: die Erdbeere bleibt
-    // erkennbar, der Punkt unterscheidet die Tabs.
-    ctx.beginPath();
-    ctx.arc(46, 46, 16, 0, Math.PI * 2);
-    ctx.fillStyle = farbe;
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(0, 0, 0, .35)";
-    ctx.stroke();
-    link.href = c.toDataURL("image/png");
-  };
-  img.src = faviconBase;
-}
-
-function applyInstance(inst) {
-  const root = document.documentElement;
-  const badge = document.getElementById("instanceBadge");
-  const name = (inst && inst.name) || "";
-  const farbe = (inst && inst.farbe) || "";
-  document.title = name ? `${name} — ${DEFAULT_TITLE}` : DEFAULT_TITLE;
-  badge.hidden = !name;
-  badge.textContent = name;
-  badge.title = STRINGS.instanceBadgeTitle;
-  if (/^#[0-9a-f]{6}$/i.test(farbe)) {
-    // Die abgeleiteten Varianten (-dim/-line) sind in theme.css feste
-    // rgba-Werte — hier aus dem Hex neu gerechnet, gleiche Alphas.
-    const [r, g, b] = [1, 3, 5].map((i) => parseInt(farbe.slice(i, i + 2), 16));
-    root.style.setProperty("--accent", farbe);
-    root.style.setProperty("--accent-dim", `rgba(${r}, ${g}, ${b}, .14)`);
-    root.style.setProperty("--accent-line", `rgba(${r}, ${g}, ${b}, .5)`);
-    tintFavicon(farbe);
-  } else {
-    root.style.removeProperty("--accent");
-    root.style.removeProperty("--accent-dim");
-    root.style.removeProperty("--accent-line");
-    tintFavicon(null);
-  }
-}
-
-/** Bestandszähler laden; bei Serverfehler dezente Meldung statt Crash. */
+/** Übersichtsmodus- und Instanz-Badge aus den Kennzahlen setzen. Der
+ *  Bestandszähler (Items · Größe) steht seit #121 NUR im Sidebar-Fuß —
+ *  die Topbar-Kopie war ärmer (ohne Library/gesamt) und hing an weniger
+ *  Ereignissen. Bei Serverfehler bleibt die Oberfläche sanft. */
 async function initCounts() {
-  const counts = document.getElementById("counts");
   const badge = document.getElementById("modeBadge");
   try {
     const s = await getStats();
-    counts.textContent = STRINGS.totalsPlain
-      .replace("{items}", s.total_items.toLocaleString(STRINGS.locale))
-      .replace("{size}", fmtSize(s.total_bytes));
     // Badge NUR im Übersichtsmodus (ADR 0041, I4) — der eingeschaltete
     // Zustand braucht keinen eigenen Modusnamen.
     badge.hidden = s.verwaltung !== false;
     badge.textContent = STRINGS.modeBadge;
     badge.title = STRINGS.modeBadgeTitle;
-    applyInstance(s.instanz); // I5: Name/Farbe wirken sofort (auch nach Config-Speichern)
+    // I5: Name/Farbe wirken sofort (auch nach Config-Speichern im Admin-Tab)
+    applyInstance(s.instanz, { badge: document.getElementById("instanceBadge"),
+                               badgeTitle: STRINGS.instanceBadgeTitle });
   } catch (err) {
     console.warn(err); // Debugbarkeit — die Oberfläche bleibt trotzdem sanft.
-    counts.textContent = STRINGS.serverUnreachable;
   }
 }
 
@@ -177,7 +121,6 @@ function initTopbar() {
   adminBtn.title = STRINGS.tooltipAdmin;
   // Slider-Icon aus dem Design (drei Regler-Balken mit Knopf).
   adminBtn.innerHTML = '<span class="sliders"><i></i><i></i><i></i></span>';
-  document.getElementById("activity").title = STRINGS.tooltipActivity;
   // Der Sortier-Knopf samt Popover gehört der Galerie (gallery.js, ADR 0039).
 
   // Harter Sprachumschalter (ADR 0054): zeigt die aktive Sprache, Klick
@@ -189,6 +132,10 @@ function initTopbar() {
     const i = LANGUAGES.findIndex((l) => l.code === LANG);
     setLang(LANGUAGES[(i + 1) % LANGUAGES.length].code);
   });
+  // Dark/Light neben der Sprache (#123) — das Schnellmenü ist Geschichte,
+  // der Admin-Knopf daneben ist ein reiner Link.
+  initThemeToggle(document.getElementById("themeBtn"),
+                  { toDark: STRINGS.themeToDark, toLight: STRINGS.themeToLight });
 }
 
 // -- Verstellbare Panelbreiten (Sidebar links, Detail-Panel rechts) -----------------
@@ -250,21 +197,33 @@ initPanelResize();
 // ganze Shell brechen. Reihenfolge unkritisch, Kommunikation läuft über den Bus.
 //
 
+initOverlays(); // Dialog-Stapel: Ansichtswechsel schließt alle Dialoge (ADR 0069)
 initGallery(); // Galerie: virtualisiertes Grid + Sortierung + Dichte
 initSidebar(); // Sidebar: Bibliothek + Nach Modell (Task 7)
 initSearch();  // Suche: Topbar-Feld + Ergebnisliste + Breadcrumb (Task 7)
 initAdvanced(); // Advanced Mode: „+ Kriterium"-Popover + Tipphilfe (Block S5)
-initSaveDialog(); // Speicherdialog: speichern/überschreiben/umbenennen/löschen (Block S7)
+initSaveDialog(); // Speicherdialog: neue Suche oder »Name« überschreiben (Block S7, #133)
+initContext();    // Bearbeiten-Modus für Rankings im Breadcrumb (ADR 0081/#133)
 initBulkDialog(); // Sammel-Aktion aufs Suchergebnis (Großbaustelle K, ADR 0040)
 initDetail();  // Detail-Panel rechts: alle Schichten sichtbar (Task 9)
 initLoupe();   // Vollbild-Lupe: Blättern mit Vorladen + Workflow-Modus (Task 10)
 initSingleView();  // Einzelbildansicht: Zoom + breites Panel (Feral Strawberry, 2026-07-08)
-initAdmin();   // Admin-Konsole + Aktivitäts-Indikator (Task 11)
+initCompare();     // A/B-Vergleich zweier markierter Bilder mit Wischkante (Issue #38)
 initCurate();  // Kuratieren: Rating-Tastatur + Schreibstelle manuelle Schicht (3.2)
-initQuickmenu(); // Schnellzugriff-Overlay am Admin-Knopf (Vorschlag)
 initRankings(); // Ranking-Modul: Arenen mit Duell + Bestenliste (ADR 0045)
+
+// Status-Poller (status.js, geteilt mit dem Admin-Dokument): Topbar-Badge,
+// und an der Flanke laufend→leer der Bus-Event 'engine-idle' (Grid, Sidebar,
+// Zähler laden neu). Der Admin selbst ist seit ADR 0074 ein eigenes Dokument
+// unter /admin — kein initAdmin() mehr in dieser Shell.
+initActivityBadge(document.getElementById("activity"));
+startStatusPolling({ onIdle: () => emit("engine-idle", {}) });
 
 // Nach abgeschlossenen Engine-Aufgaben (Scan/Wartung) Zähler auffrischen.
 on("engine-idle", initCounts);
-// Nach Config-Speichern (Admin) das Übersichtsmodus-Badge nachziehen (I4).
-on("config-saved", initCounts);
+// Config-Speichern passiert im Admin-Tab: Wird dieser Tab wieder sichtbar,
+// Kennzahlen + Übersichtsmodus-Badge + Instanzname frisch holen (I4/I5;
+// /api/stats ist epochen-gecacht, das kostet nichts).
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") initCounts();
+});

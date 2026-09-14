@@ -27,22 +27,30 @@ Strawberry** (zugleich der Name der GitHub-Organisation).
   und wieder abgefragt werden.
 - [Ordner scannen](scanning.md) — einen ganzen Ordner rekursiv aufnehmen
   (`python -m feral.scan`). **Der erste Schritt mit Echtdaten.**
-- [Import & Watchordner](import.md) — Quellordner kopierend in die
-  datumsbasierte Media Library einsortieren (Dublettencheck, sichtbare
-  Ausgänge) und Ordner dauerhaft beobachten lassen. **Der Alltagsweg,
-  neue Medien aufzunehmen.**
-- [Die Oberfläche (Web-GUI)](gui.md) — **Galerie** mit Vorschaubildern und
-  Detailansicht, Ordner per Klick wählen, scannen, beobachten und durchsuchen
-  (`python -m feral.web`). **Bequemste Variante zum Testen.**
-- [Admin & Wartung](admin.md) — DB-Status, Wartungsaktionen (Neu-Interpretieren,
-  Re-Scan, Integritätscheck, …), Scan-Probleme und Config-Bearbeitung in der GUI.
+- [Import & Watchordner](import.md) — Quellordner in die datumsbasierte
+  Media Library einsortieren (Modi kopieren / verschieben / nur
+  katalogisieren, Dublettencheck, sichtbare Ausgänge, Import-Regeln) und
+  Ordner dauerhaft beobachten lassen. **Der Alltagsweg, neue Medien
+  aufzunehmen.**
+- [Die Oberfläche (Web-GUI)](gui.md) — **Galerie** mit Sidebar-Facetten,
+  Chip-Suche und gespeicherten Suchen, Detail-Panel, Lupe, Einzelbildansicht
+  mit echtem Zoom, A/B-Vergleich, Workflow-Ansicht für ComfyUI-Medien,
+  Kuratieren (Bewerten, Tags, Notizen, Ablehnen) und Sammel-Aktionen
+  (`python -m feral.web` bzw. die Startskripte). **Der Alltag.**
+- [Admin](admin.md) — eigene Seite unter `/admin` mit Übersicht,
+  Konfiguration, Quellen & Import (Watchordner), Wartung (Re-Scan, Neu
+  interpretieren, Rausverschieben, Import-Regeln auf den Bestand, …),
+  Problemen mit Sperrliste, Rankings und Serverlog.
+- [Rankings](rankings.md) — das optionale Ranking-Modul: Paarvergleich mit
+  Elo-Bestenliste über eine gespeicherte Suche.
 - [Mehrere Instanzen](instanzen.md) — parallele, unabhängige Galerien aus
   einem Programmordner (eigene DB + Port je Instanz): **Subgalerien einer
   Gesamt-Library**, ohne Dateien zu berühren. Start per
   `start.bat --config name.toml`.
-- [Sicherheit](security.md) — wie Feral mit **fremden** Bilddateien umgeht
+- [Sicherheit](security.md) — wie fml mit **fremden** Bilddateien umgeht
   (untrusted Metadaten), Betriebsempfehlung und welche Abhängigkeiten man aktuell
   halten sollte. **Vor der Weitergabe an andere lesen.**
-- [Die Testsuite](tests.md) — was die ~240 automatischen Tests absichern, wie
-  man sie startet (`pytest -q`) und woran man das korrekte Ergebnis erkennt.
+- [Die Testsuite](tests.md) — was die gut 700 automatischen Tests (Python und
+  Node-Tests der Oberfläche) absichern, wie man sie startet (`pytest -q`) und
+  woran man das korrekte Ergebnis erkennt.
   **Nützlich als Installations-Check auf einem neuen Rechner.**

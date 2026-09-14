@@ -44,7 +44,7 @@ def schema_version() -> int:
     return files[-1][0] if files else 0
 
 
-def connect(path: str | Path) -> sqlite3.Connection:
+def connect(path: str | Path, *, check_same_thread: bool = True) -> sqlite3.Connection:
     """Öffne (oder erstelle) die DB und bringe sie auf den aktuellen Schema-Stand.
 
     Schaltet WAL (gleichzeitige Leser neben dem einen Schreiber) und Foreign-Key-
@@ -53,8 +53,13 @@ def connect(path: str | Path) -> sqlite3.Connection:
 
     ``path`` darf ``":memory:"`` sein (für Tests). **Nie auf Netzlaufwerken**
     anlegen (ADR 0007).
+
+    ``check_same_thread=False`` NUR für eine Verbindung, deren Zugriffe der
+    Aufrufer selbst serialisiert (die gemeinsame Schreibverbindung von
+    ``engine.run_write`` unter ihrem Lock, Issue #72) — sqlite3 erlaubt das
+    Teilen dann ausdrücklich; ohne Serialisierung wäre es ein Datenrisiko.
     """
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
     # busy_timeout ZUERST: bei parallelem Erst-Start (Engine-Thread + erste
     # Anfrage) braucht schon der Migrations-Lock das Warten — sonst fliegt
@@ -123,3 +128,21 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
     except BaseException:
         conn.rollback()
         raise
+
+
+def optimize(conn: sqlite3.Connection) -> None:
+    """``PRAGMA optimize``: Planer-Statistik (``sqlite_stat1``) für die auf
+    dieser Verbindung benutzten Tabellen nachziehen (Issue #85).
+
+    Ohne Statistik rät der Planer bei mehreren passenden Indizes — die
+    Galerie-Anzeige lief so über einen Bereichs-Scan statt eines Punkt-
+    zugriffs (1,1 s statt 1 ms je Seite). Der Aufruf ist billig, wenn es
+    nichts zu tun gibt; er gehört ans Ende von Schreib-Läufen (Worker nach
+    jeder Aufgabe) und einmal an den Start. Fehler sind nie fatal.
+    """
+    try:
+        conn.execute("PRAGMA optimize")
+        if conn.in_transaction:
+            conn.commit()
+    except sqlite3.Error:  # pragma: no cover — reine Hygiene
+        pass

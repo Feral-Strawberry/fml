@@ -2,8 +2,8 @@
 
 > What is this? The local web interface of the Feral Media Library (fml):
 > browse and search the collection, read metadata, scan/watch folders and
-> do the maintenance - all without a command line. Since block 3.0 in a
-> three-column layout (dark theme, switchable).
+> do the maintenance - all without a command line. Three-column layout,
+> dark theme (switchable to light).
 
 ## Starting
 
@@ -30,11 +30,11 @@ DB + port, started via `start.bat --config name.toml`):
 ## Layout
 
 **Top bar:** search box (center), right next to it the **sort button** and
-the **density S/M/L** (up here since 2026-07-11 - the bar below the search
-belongs to the chips), collection counter (items · total size), activity
-indicator (pulses while a scan/maintenance runs - clicking opens the admin
-console), admin button (click opens the quick menu - since 2026-07-16 it
-also holds the only dark/light switch; the separate ◐ icon is gone). If an
+the **density S/M/L** (the bar below the search belongs to the chips), activity
+indicator (pulses while a scan/maintenance runs - a link to the admin
+page), **dark/light switch** (moon/sun; the same choice applies in the
+admin), admin button (a real link to `/admin`: click opens the admin,
+middle-click the admin in a second tab). If an
 **instance name** is set in the configuration, it appears here as a
 colored pill (plus tab title and favicon color dot - distinguishes
 instances running in parallel). If fml runs in **read-only mode** (the
@@ -50,14 +50,14 @@ Configuration → Interface) switches hard: once set, the choice applies
 permanently in this browser and overrides the browser language; switching
 reloads the page. The language belongs to the viewer (browser), not to
 the instance - two machines can view the same instance in different
-languages (ADR 0054). Since block M.3 the search grammar additionally
+languages (ADR 0054). The search grammar additionally
 understands **English aliases** for its German remnants: `file:` =
 `datei:`, `location:` = `fundort:`, `portrait`/`square`/`landscape` =
 `hochformat`/`quadratisch`/`querformat`, `-asc`/`-desc` = `-auf`/`-ab`,
 `external` = `extern` and `unknown` = `unbekannt`. Both spellings are
 always understood, whatever language is set; **canonical** (in chips,
 saved searches and serialized expressions) remains the existing spelling
-— saved smart folders stay valid untouched. Since block M.2 all
+— saved smart folders stay valid untouched. All
 **server-generated texts** follow the UI language as well: activity
 labels and progress in the admin console, result summaries ("Import: 3
 new · 2 duplicates"), error messages of the search grammar and all other
@@ -68,24 +68,47 @@ stored language-neutrally and translated on display.
 **Left - sources:** "All media", **Duplicates** (items that sit at
 several paths on disk - the panel shows all locations), your **saved
 searches**, the **Rating** group (exactly n stars - also for finding
-poorly rated media on purpose), **By model** - including **"(unknown
+poorly rated media on purpose), **Generator** (the platform the file was
+created on: ComfyUI, A1111, Midjourney, Google, OpenAI, Adobe, Topaz - from
+the embedded metadata or Content Credentials, see
+[interpretation](interpretation.md#generator-detection-gemini-chatgpt-firefly--co-c2paxmp);
+chip `tool: google`, equivalently `generator: google`; a click makes the
+model list below count in context), **By model** - including **"(unknown
 model)"** for media without an interpreted model field (Midjourney,
 Gemini, ChatGPT, …); WAN 2.2 two-stage checkpoints (high/low noise)
 appear as ONE entry, the tooltip names both raw names and clicking
 filters on both -, **By year** (creation date; the caret before the year
 unfolds the months - legacy collections get their date via "Re-scan all
-locations"), **By LoRA** (the LoRAs used during generation, most used
-first), **By file type** (PNG, WEBP, video containers, …), **By format**
+locations"), **By LoRA** (the LoRAs used during generation, most used first;
+in the long lists Generator, Model and LoRA, rows with hits sit on top while
+rows empty in context are dimmed below a divider "no hits with this filter · 106 models" - without an active chip that divider does not appear), **By file type** (PNG, WEBP, video containers, …), **By format**
 (rough aspect-ratio classes: portrait / square / landscape / widescreen -
 for troubleshooting after an import), **By resolution** (megapixel
 ranges: under 1 / 1-2 / 2-4 / over 4 MP), **Input image** (with/without -
 finds img2img and image-to-video results) and **Location** ("in the
 library" = at least one copy sits in the media library, "external only" =
-only indexed in place, e.g. via `catalog` from external drives; the group
+only cataloged in place, e.g. via `catalog` from external drives; the group
 only appears when a media library is configured). A click puts a **chip**
-into the search bar above the gallery (see "Searching"); a click on a
-**second value of the same group** widens the chip to an OR ("flux OR
-krea"), a click on an active (highlighted) value removes it again.
+into the search bar above the gallery (see "Searching").
+
+**Click rule as in Lightroom (changed in September 2026 - please read if
+you have been using fml for a while):**
+
+- **Click** a value to select it - clicking a **different value of the
+  same group replaces** the selection (switch from "Google" to "OpenAI"
+  without deselecting first).
+- **Cmd-click (Mac) or Ctrl-click (Windows/Linux)** **adds** and widens
+  the chip to an **OR** ("flux OR krea").
+- **Click the active (highlighted) value** to remove it again.
+
+Until then a plain click already widened to an OR. If you want the OR,
+hold the key now - or type it into the search bar (`tool: google |
+openai`). The "+ criterion" popover and the typing help still add. The
+hint also sits as a tooltip on every group heading and every row - with
+the key of your system (⌘ on the Mac, Ctrl otherwise). And the first time
+a click replaces an existing selection, a short line appears below the
+group: "Selection replaced · ⌘-click adds (OR)" - at most three times,
+then the rule is learned.
 
 The counters **filter along**: as soon as chips are active, every group
 shows how many hits a click would bring **in the current context** -
@@ -98,7 +121,7 @@ Every group can be **collapsed/expanded** by clicking its header
 (remembered). At the bottom the library footer: items and total size -
 with a configured media library split as **"library X GB · total Y GB"**
 (library = what physically sits under the collection root, total =
-everything indexed, external included).
+everything cataloged, external included).
 
 **Center - gallery:** virtualized grid (fluid even with very large
 collections - only visible tiles are in memory), newest first. On top: a
@@ -108,7 +131,9 @@ also clears the filters when no overlay is open) and **⚡ Bulk action**.
 If a medium was selected when the filter or sort order changed and it is
 also part of the new result list, the gallery **jumps back to it**
 instead of starting at the top - Esc out of the seed-variant search thus
-leads straight back to the last clicked image.
+leads straight back to the last clicked image. The one exception is a
+click on **"All media"** in the sidebar: that is the reset key, afterwards
+the gallery sits at the top with nothing selected.
 The **sort button** (Added / Created / Filename / File size / Container /
 Rating - unrated and undated items last) and the **density S/M/L** sit up
 in the top bar next to the search box. The sort button opens a small
@@ -156,7 +181,7 @@ The choice is remembered.
 ## Single view (zoom + metadata)
 
 **Double-click or Enter** opens the selected medium in the single view -
-the working view with real zoom: steps **fit / 50 / 100 / 200 %**, the
+the working view with real zoom: steps **fit / max 100 % / 50 / 100 / 200 %**, the
 **mouse wheel** zooms continuously, **double-click in the image** jumps
 between fit and 100 %, dragging pans. The percentages mean **real
 pixels**: at 100 % one image pixel equals one screen pixel - regardless
@@ -164,7 +189,10 @@ of OS scaling (Windows 150 %, Retina Macs) and browser zoom. That makes
 100 % pixel-sharp everywhere and the reliable step for judging details
 and artifacts. The **last step chosen in the zoom bar is remembered**
 and applies to every further image (if you always want 100 %, pick it
-once); mouse wheel and double-click produce image-dependent in-between
+once). **max 100 %** is the everyday mode for mixed collections: real
+size, but at most screen-filling - a small image stands pixel-sharp at
+100 %, a large portrait image is shrunk as with "fit" instead of running
+off the bottom. Mouse wheel and double-click produce image-dependent in-between
 values and deliberately do not change the remembered step. On the right sits the complete
 metadata panel in wide form - rating (also keys 1-5), tags, model and
 notes work the same here; more tools will come mid-term (metadata
@@ -172,15 +200,78 @@ editing, push-to-ComfyUI). **←/→** pages in grid order; **Esc, Enter or
 ✕** lead back to the gallery, which stays on the last viewed image.
 
 **📂 Show in file manager** (top right, also in the loupe): opens
-Explorer (Windows) or Finder (macOS) with the file selected - at the
-first still-existing location, whose content is **verified via SHA-256**
-before opening (if a different file now sits at the catalogued path, the
-button honestly reports "no location left" instead of pointing at the
-wrong image; for large videos the check can take a moment). Everything
-else (renaming, final deletion)
+Explorer (Windows) or Finder (macOS) with the file selected. If the file
+exists at several locations, a fixed order applies: **library before
+watch source before other places**, and only locations where the file is
+still present with the right size. The **Locations** panel (below) shows
+which one that is. The content is **verified via SHA-256** before opening
+(if a different file now sits at the catalogued path, the button honestly
+reports "no location left" instead of pointing at the wrong image) - for
+files above 64 MB the hashing is skipped and only the size check counts,
+so the button no longer hangs for minutes on large videos. While the
+server checks, the button shows ⏳; if Explorer cannot select the file
+(Windows path over 259 characters), fml opens just the folder and says so
+(📁 + hint). Everything else (renaming, final deletion)
 deliberately happens there: fml itself never touches files. Note: the
 window opens on the machine the server runs on - in normal localhost
 operation that is your own.
+
+**Locations** (panel, collapsible): every path where fml knows the file,
+in the same order the 📂 button uses. Each row carries an origin tag -
+**Library** (under the library root), **Source** (under a watch source,
+typically "catalogue") or **external** - and the location that "Show in
+file manager" opens is marked with 📂. If the file is gone there, the row
+says "(missing)"; if a different file now sits at the path (size does not
+match), "(different file at this path)".
+
+Every path is a **breadcrumb**: clicking a folder segment opens exactly
+that folder in the file manager - **without** selecting the file,
+deliberately unlike the 📂 button top right. Clicking the **file name**
+(bold) opens the file with the application the system associates with
+that type (Photoshop, VLC, …). That also gets you to a second location,
+for instance to clean up duplicates in the file system yourself without
+fml managing that folder. Segments are underlined only on hover; an error
+(folder gone, file gone) shows for four seconds on the row. fml touches
+nothing here - what the opened application does with the file afterwards
+is your call there. Since the panel is the same in gallery and single
+view, this works in both places.
+
+## A/B compare (blend two images)
+
+Variants from edit workflows often differ only in small things (a
+finger, an edge, an artifact) - side by side you hardly see it. The
+compare view puts **two selected images exactly on top of each other**
+and reveals B with a **wipe edge**, like in ComfyUI edit workflows.
+
+**Open:** select exactly two media (Ctrl/Cmd-click or Shift-click), then
+**key `C`** or the button **⇆ Compare** in the gallery header (it only
+appears with exactly two selected media). The first selected image is
+**A** (left), the second is **B** (right).
+
+- **Wipe edge:** drag anywhere in the image with the mouse or a finger;
+  **`←`/`→`** move it in small steps (coarse with Shift), **`Home`/`End`**
+  all the way left/right.
+- **Space** (or the button at the top right) cycles three ways: **wipe →
+  A only → B only → wipe**. "A only"/"B only" show one image in full -
+  that gives the blink comparison where even tiny differences "jump".
+  **Tab** swaps A and B (and with it the rating target).
+- **Zoom** as in the single view: fit / max 100 % / 50 / 100 / 200 %, mouse wheel,
+  `+`/`-`, double-click jumps between fit and 100 %. The percentages mean
+  real pixels, and the remembered zoom step is the same one. When zoomed
+  in, scroll with the scrollbars.
+- **Decide:** above the image each side shows name, dimensions and the
+  **rating dots**, plus **Reject** (item out + block, the file stays
+  untouched). The keys **`1`-`5`/`0`** and **`Del`** act on **A** - use
+  Tab to bring the other image to A. After rejecting, the compare view
+  closes.
+- **Different dimensions:** both images are matched to the width of A,
+  and the hint "Dimensions differ" appears at the top right.
+- **Esc, Enter or ✕** lead back to the gallery; the two-item selection
+  stays.
+
+First version **for images only**: if a video is among the two, the
+compare view opens with a note instead of the images (frame-synchronous
+comparison comes later).
 
 ## Loupe (full screen)
 
@@ -192,13 +283,36 @@ la Lightroom/IrfanView), `Home`/`End` jumps to the first/last medium,
 medium. Panel and gallery follow along while paging.
 
 **🕸 Workflow view:** for ComfyUI media (videos too!) the image/workflow
-toggle at the top switches to the embedded node graph - nodes with
-titles, colors, widget values and connections; dragging pans, the mouse
-wheel zooms. The third button **"Single view"** switches to the single
-view in the same place. "Load as .json" downloads the **unmodified**
-original workflow, which can be dropped straight back into ComfyUI. (The
-preview only reads the stored workflow JSON - it needs no running ComfyUI
-and does not break with ComfyUI updates.)
+toggle at the top switches to the embedded node graph. Since September
+2026 it looks like ComfyUI itself: grid, node colors from the workflow,
+**slot and link colors by data type** (MODEL purple, CLIP yellow,
+CONDITIONING orange, LATENT pink, IMAGE blue, VAE red), **widgets as
+pills with name and value** (`seed 123456789`, `steps 20`, `cfg 1`,
+`sampler_name euler`), prompts as text boxes, groups with title bars,
+**muted nodes dimmed, bypass magenta**, collapsed nodes as title bars,
+and **subgraphs as boxes** ("⧉ 2 nodes · click to open") - a click shows
+the inside with inputs and outputs, "‹ back" goes up. Dragging pans, the
+mouse wheel zooms. The third button **"Single view"** switches to the
+single view in the same place. "Load as .json" downloads the
+**unmodified** original workflow, which can be dropped straight back into
+ComfyUI. (The preview only reads the stored workflow JSON - it needs no
+running ComfyUI and does not break with ComfyUI updates.)
+
+*Widget names:* ComfyUI stores widget values without names. fml knows the
+names of the core nodes (KSampler, loaders, encoders, latents, video, …)
+and reads them straight from newer workflows when present
+(`widgets_values_named`). For custom nodes a small tool fetches the names
+from your own ComfyUI installation - run it once while ComfyUI is running,
+after that the preview labels those nodes too:
+
+```bash
+python tools/dump_object_info.py            # ComfyUI at http://127.0.0.1:8188
+python tools/dump_object_info.py --url http://192.168.1.20:8188
+```
+
+The result sits as `widgets.json` next to the UI and is pure information
+about your installation (not code, not in the repo). Values with no known
+name stay bare in the pill - never guessed.
 
 **A1111 images** get the same view: a minimal, real ComfyUI graph is
 generated from the interpreted fields (checkpoint → LoRAs →
@@ -237,13 +351,13 @@ extracted from the files.
   rating/tags/notes) and its hash goes onto the **blocklist** - a
   re-import is prevented (visible outcome `_gesperrt/` in the source
   folder). **The file itself stays untouched**, whether it sits in the
-  library or was only indexed - fml deletes and moves nothing when
+  library or was only cataloged in place - fml deletes and moves nothing when
   rejecting ("the original is sacred"). The view does not jump back to
   the top either: the scroll position stays put and the selection moves
   to the **successor** at the same position — so a seed series can be
   sorted through briskly with Del, Del, Del … The blocklist remembers the
-  file's last locations. Unblocking: admin console → Issues → "View &
-  clean up" → unblock; after another scan/import the medium is fully back
+  file's last locations. Unblocking: admin → Issues → block list
+  (searchable, paged) → unblock; after another scan/import the medium is fully back
   (only the earlier curation is not).
 
 ## Bulk action: all hits at once (⚡)
@@ -273,68 +387,30 @@ large in the dialog. The apply button asks once more on the first click
 ("Really apply to …?"); the second click executes. Afterwards the dialog
 shows a summary, and grid + sidebar refresh themselves.
 
-## Saved searches
+## Search, saved search, ranking: one idea
 
-Any search - whether assembled from sidebar clicks, text terms or typed
-expressions - can be stored with the **☆ next to the chips**. The ☆ opens
-the **save dialog**: it shows the chips as a preview, the current hit
-count, a note if a sort order will be stored along, and asks for the
-name. The search appears on the left under "Saved searches" with a live
-counter; a click loads it **back as chips** (everything stays editable).
-If a saved search is loaded, the dialog becomes its maintenance:
-**Overwrite** stores the edited state (a changed name renames it), **Save
-as new search** creates a copy, **Delete** removes it (second click
-confirms). The ✕ on the sidebar row still deletes directly. A sort order
-given along (`sort:` or the sort button) is stored with the search and
-restored on loading.
+Everything in fml starts with a **search decision**: which media do I
+want to see right now? Three things build on each other, in this order:
 
-**For advanced users:** the search bar also understands filter
-expressions - they immediately show the filtered grid. Predicates are
-AND-combined, `-` negates; **several values in one predicate** are
-separated by ` | ` (pipe with spaces) as OR:
+1. **The search** is ONE state made of **chips** above the gallery.
+   Sidebar clicks, typed terms and filter expressions all land in these
+   chips; the gallery always shows exactly what the chips say.
+2. **A saved search** is this state **with a name**. A click in the
+   sidebar loads the chips back, you see the images and can keep
+   changing the chips. The ☆ saves: a new search or, if you came from a
+   saved search, either **"overwrite »name«"** or **"save as new
+   search"**.
+3. **A ranking** is a saved search **that duels run over** (ranking
+   module, off by default). 🏆 creates it from the current chips; ✎ in
+   the ranking loads its population as chips into the gallery (**edit
+   mode**), "Save ranking" leads back into the ranking. A ranking has two
+   views: the **leaderboard** and the **duel mode**.
 
-```
-model: flux -tag: wip rating>=4
-model: flux | krea rating>=4
-container: png -has: workflow
-prompt: "red hair" rating=0
-year: 2022 | unbekannt sort: created
-```
-
-`model: flux | krea` means flux OR krea; `-tag: wip | alt` means neither
-`wip` nor `alt`. OR only exists for value predicates - comparisons
-(`rating>=`, `width>=` …) form ranges via `>=`/`<=` pairs. The directive
-**`sort: <key>`** (once per expression) sets the sort order and is stored
-with the search: `added`, `created` (creation date), `size`, `name`,
-`container`, `rating`. A suffix flips the direction: `sort: created-auf`
-(oldest first), `sort: name-ab` (Z–A) - in English `-asc`/`-desc`
-(`sort: created-asc`). Without a suffix the sensible default direction
-applies (newest/largest/best first, names A–Z); unrated and undated items
-stay at the end in both directions.
-
-`field: value` searches as a substring, `field: "value"` exactly;
-`rating=0` means unrated; the allowed fields are those of
-[layer 2](interpretation.md) plus `tag:`, `container:`, `has:`
-(`has: workflow` = embedded workflow, `has: model` = layer-2 field
-present - **`-has: model`** finds media **without** a recognized model),
-`format:` (rough aspect-ratio classes
-`quadratisch`/`hochformat`/`querformat`/`widescreen` - in English
-`square`/`portrait`/`landscape`/`widescreen`), `mp:` (megapixel ranges
-`<1`/`1-2`/`2-4`/`>4`), `year:`/`month:` (creation date: `year: 2022`,
-`month: 2022-07`, `year: unbekannt` - in English `year: unknown`),
-`fundort:` (in English `location:`; `library` = at least one location
-sits in the media library, `extern` - in English `external` - = only
-indexed outside; needs a configured library), `text:` (free term -
-curated search across interpreted fields, filenames and the manual
-layer; exactly the live search's semantics: `text: ball text: desert`),
-`raw:` (like `text:`, but **additionally in the raw metadata** - finds
-e.g. node names in workflow JSON: `raw: ipadapter`), `datei:` (in
-English `file:`; specifically the **filename** of the locations, without
-directory - substring, exact with `"…"`; handy for metadata-less
-collections like Midjourney exports, and of course usable in arena
-expressions too) and the media metrics `width`/`height`/`fps` with
-comparison (e.g. `width>=1920 fps>=24`). Saved searches are dynamic:
-evaluated every time they are opened.
+Terms: a criterion in the bar is a **chip**; a named search is a **saved
+search**; a named search with duels is a **ranking** (no longer
+"arena"), its two views **leaderboard** and **duel**. The sections below
+follow this order; the rankings in detail are described in
+[rankings.md](rankings.md).
 
 ## Searching: ONE search state made of chips
 
@@ -343,26 +419,33 @@ clicks, text terms and typed expressions all land in the same state and
 combine instead of replacing each other:
 
 ```
-Library / [ Model: flux | krea ✕ ] [ Text: desert ✕ ] [ ★ ≥ 4 ✕ ] · 1,234   ☆ save · ✕ · ⚡
+[ Model: flux | krea ✕ ] [ Text: desert ✕ ] [ ★ ≥ 4 ✕ ] · 1,234   ☆ save · 🏆 Ranking · ✕ · ⚡
 ```
 
 **☆ save**, **✕ Reset filters** and **⚡ Bulk action** sit as ONE button
 group on the right; if the width is not enough, the group slides as a
 whole below the chips. Below FullHD width, reset and bulk action show
-only their icon (hover reveals the function) and the "Library /" prefix
-is hidden - small monitors stay tidy.
+only their icon (hover reveals the function) - small monitors stay tidy.
+In a ranking's edit mode (see [Rankings](rankings.md)) all four buttons
+show only their icon.
 
 - **Typing filters live:** from the third character on, the gallery
   filters after a short typing pause (the gallery IS the hit list -
   thumbnails instead of text snippets). **Enter** turns the terms into
   fixed **text chips** (`"…"` keeps word sequences together; a quote
-  INSIDE a value is written doubled: `prompt: "say ""hi"""`); several
-  words are AND-combined. Terms count as **word prefixes** (`des` finds
+  INSIDE a value is written doubled: `prompt: "say ""hi"""`, likewise the
+  apostrophe in `'…'`: `prompt: 'don''t stop'`); several words are
+  AND-combined. The chip editor and the typing help understand `"…"`
+  (exact) and `'…'` (contains) as well. Terms count as **word prefixes** (`des` finds
   "desert"; thanks to the full-text index in milliseconds even at 250k).
-- **Sidebar clicks** become chips: a second value of the same group
-  widens to an **OR**, a click on an active value removes it. The
+- **Sidebar clicks** become chips: a click **replaces** the group's
+  selection, Cmd/Ctrl-click widens to an **OR**, a click on an active
+  value removes it (Lightroom rule, since September 2026). The
   sidebar counters recalculate in the current context (empty values
-  dimmed); "with/without input image" replace each other.
+  dimmed); "with/without input image" replace each other. All counters
+  of a search state come from **one** run, and the server remembers the
+  result until the collection changes - the second click on the same
+  saved search costs nothing.
 - **Typed filter expressions** (see above, Enter) are decomposed into
   chips - typed and clicked are guaranteed to be the same.
 - **Clicking a chip** opens it for editing: remove or add values (OR),
@@ -371,8 +454,11 @@ is hidden - small monitors stay tidy.
   the right of the header - or **Esc** (when no overlay is open) or "All
   media" in the sidebar.
 - **☆ save** opens the save dialog (preview + hit count + name) and
-  stores the whole state as a saved search; loaded searches can be
-  overwritten, renamed, copied and deleted there.
+  stores the whole state as a saved search; if the state came from a saved
+  search, it offers "Overwrite »Name«" and "Save as new search".
+- **🏆 Ranking** (only with the ranking module enabled, also without chips)
+  creates a **new ranking** from the chips (pairwise comparison with
+  leaderboard), see [Rankings](rankings.md).
 - **"+ Criterion"** (next to the chips) opens the **builder**: all
   categories (model, LoRA, tags, rating, text, year, file type, format,
   resolution, input image, metrics, raw-data search, filename, sort
@@ -406,35 +492,124 @@ running, the collection changes continuously - scrolling is then
 temporarily as leisurely as it used to be, but always shows the fresh
 state.
 
-## Quick menu + admin console
+## Filter expressions (for advanced users)
 
-The button top right opens the **quick menu**: a jump into the admin
-console, the most frequent maintenance actions (re-scan, re-interpret,
-clear thumbnail cache) and the theme switch - without leaving the
-library. Esc or a click beside it closes.
+The search bar also understands filter
+expressions - they immediately show the filtered grid. Predicates are
+AND-combined, `-` negates; **several values in one predicate** are
+separated by ` | ` (pipe with spaces) as OR:
 
-The **admin console** (from the quick menu or via the activity
-indicator) is ONE page with regions:
+```
+model: flux -tag: wip rating>=4
+model: flux | krea rating>=4
+container: png -has: workflow
+prompt: "red hair" rating=0
+prompt: 'new york' -prompt: 'at night'
+year: 2022 | unbekannt sort: created
+```
 
-1. **Overview:** the collection's key figures (items, metadata, thumbnail
-   cache, DB size, parsers, ffprobe/ffmpeg) and next to them the
-   **Activity** of the running task with live progress.
-2. **Sources & import:** ONE ingest form (folder + mode
-   copy / move / catalog + "once now" / "watch permanently") and the
-   list of watch folders.
-3. **Maintenance:** small buttons by functional area - re-scan, orphaned
-   locations, thumbnails, integrity check, VACUUM, re-interpret,
-   backfill creation dates, rebuild search index.
-4. **Issues:** summary with an overlay for acknowledging (grouped by
-   error kind, honest numbers); the blocklist lives there too (unblock
-   rejected media).
-5. **Configuration:** media library (takes effect immediately), oldest
-   plausible date, thumbnail size (creates `config.toml.bak`; the
-   commented reference is `config.example.toml`).
+`model: flux | krea` means flux OR krea; `-tag: wip | alt` means neither
+`wip` nor `alt`. OR only exists for value predicates - comparisons
+(`rating>=`, `width>=` …) form ranges via `>=`/`<=` pairs. The directive
+**`sort: <key>`** (once per expression) sets the sort order and is stored
+with the search: `added`, `created` (creation date), `size`, `name`,
+`container`, `rating`. A suffix flips the direction: `sort: created-auf`
+(oldest first), `sort: name-ab` (Z–A) - in English `-asc`/`-desc`
+(`sort: created-asc`). Without a suffix the sensible default direction
+applies (newest/largest/best first, names A–Z); unrated and undated items
+stay at the end in both directions.
 
-Details: [admin.md](admin.md). "Back to the library" top left (or `Esc`)
-closes the console. After finished tasks, gallery and counters refresh by
-themselves.
+`field: value` searches as a substring, `field: "value"` exactly,
+`field: 'two words'` as a **multi-word substring** ("contains":
+`prompt: 'new york'` also finds "a view of New York at night",
+`prompt: "new york"` only a prompt that reads exactly that);
+`rating=0` means unrated; the allowed fields are those of
+[layer 2](interpretation.md) plus `tag:`, `container:`, `has:`
+(`has: workflow` = embedded workflow, `has: model` = layer-2 field
+present - **`-has: model`** finds media **without** a recognized model),
+`format:` (rough aspect-ratio classes
+`quadratisch`/`hochformat`/`querformat`/`widescreen` - in English
+`square`/`portrait`/`landscape`/`widescreen`), `mp:` (megapixel ranges
+`<1`/`1-2`/`2-4`/`>4`), `year:`/`month:` (creation date: `year: 2022`,
+`month: 2022-07`, `year: unbekannt` - in English `year: unknown`),
+`fundort:` (in English `location:`; `library` = at least one location
+sits in the media library, `extern` - in English `external` - = only
+cataloged outside; needs a configured library), `text:` (free term -
+curated search across interpreted fields, filenames and the manual
+layer; exactly the live search's semantics: `text: ball text: desert`),
+`raw:` (like `text:`, but **additionally in the raw metadata** - finds
+e.g. node names in workflow JSON: `raw: ipadapter`), `datei:` (in
+English `file:`; specifically the **filename** of the locations, without
+directory - substring, exact with `"…"`; handy for metadata-less
+collections like Midjourney exports, and of course usable in ranking
+expressions too) and the media metrics `width`/`height`/`fps` with
+comparison (e.g. `width>=1920 fps>=24`). Saved searches are dynamic:
+evaluated every time they are opened.
+
+## Saved searches
+
+Any search - whether assembled from sidebar clicks, text terms or typed
+expressions - can be stored with the **☆ next to the chips**. The ☆ opens
+the **save dialog**: it shows the chips as a preview, the current hit
+count, a note if a sort order will be stored along, and asks for the
+name. The search appears on the left under "Saved searches" with a live
+counter; a click loads it **back as chips** (everything stays editable)
+and shows its media, with no further mode. The list appears immediately,
+the counters follow shortly after ("…" while they are being computed):
+after a server start or an import they are counted once fresh, afterwards
+they come from memory until the collection changes.
+
+As long as the chips match the loaded search exactly, its row in the
+sidebar is highlighted. Change a chip and the highlight goes off: from then
+on it is a free search, nothing gets overwritten unnoticed. Press ☆ then
+and the dialog says **"From the saved search »Name«"**, the name is
+prefilled, and there are two clearly named ways:
+
+- **Overwrite »Name«** stores the current chips as the new version of this
+  search; a changed name renames it along the way.
+- **Save as new search** creates a second search and leaves the old one as
+  it was.
+
+The origin ends with "All media", Esc, clearing the chips or loading
+another search. Deleting happens via the ✕ on the sidebar row (second
+click confirms). A sort order given along (`sort:` or the sort button) is
+stored with the search and restored on loading.
+
+## Rankings: a saved search with duels
+
+With the ranking module enabled (Admin → Configuration → Modules) the
+chip bar shows **🏆 Ranking**: it creates a new ranking from the current
+chips (without chips: the whole library) and opens it. In the sidebar,
+rankings appear in the group **Rankings** with their population as the
+counter; a click opens the leaderboard. ✎ in the ranking loads the
+population into the gallery, the header switches to edit mode, "Save
+ranking" leads back. Everything else (leaderboard, duel mode, "Both
+out", Elo scores): [rankings.md](rankings.md).
+
+## Admin
+
+The button top right leads straight into the **admin** (a real link to
+`/admin`: bookmarks, middle-click and right-click → new tab). The former
+quick menu with maintenance actions is gone; re-scan, re-interpret and
+clear thumbnail cache live under Admin → Maintenance, dark/light sits as a
+moon/sun button next to the language switch.
+
+Since ADR 0074 the **admin** is a **page of its own** under `/admin` with a
+side navigation on the left (Overview, Configuration, Sources & import,
+Maintenance, Issues, Rankings, Logs) and the activity widget at the
+bottom of the navigation - on every page you see what is running or
+waiting. Every page has an address (`/admin/logs` …), browser back and
+forward work; "Back to the library" is an ordinary page change (the
+gallery comes from the browser's history cache or starts fresh). Gallery
+and admin may run side by side in two tabs; the gallery refreshes key
+figures, read-only badge and instance name as soon as its tab becomes
+visible again.
+
+Details: [admin.md](admin.md). After finished tasks, gallery and counters
+refresh by themselves - gently: tiles stay in place, new images (e.g. from
+a watch folder next to ComfyUI) slide in at the top and push the rest,
+scroll position and selection stay on the image. Only tiles whose content
+changed are refilled.
 
 ## Keyboard
 
@@ -442,13 +617,37 @@ themselves.
 | --- | --- |
 | `Space` | open/close the loupe |
 | `Enter` / double-click | open/close the single view |
-| `+` / `-` | zoom (single view) |
+| `C` | open the A/B compare view for two selected images |
+| `+` / `-` | zoom (single view, compare) |
 | `1`–`5` / `0` | rate / clear rating (toggle) |
-| `←` / `→` | page - in overview and loupe |
+| `←` / `→` | page - in overview and loupe; wipe edge in compare |
 | `↑` / `↓` | one row up/down (overview) |
 | `Del` | reject the selection (item out + block, file stays) |
-| `Home` / `End` | first/last medium (loupe) |
-| `Esc` | close the open overlay (loupe, dialogs, admin) - otherwise: **Reset filters** |
+| `Home` / `End` | first/last medium (loupe); wipe edge fully left/right (compare) |
+| `Tab` / `Space` | compare: swap A and B / wipe → A only → B only |
+| `Esc` | close the topmost dialog, else the open overlay (loupe, single view) - otherwise: **Reset filters** |
+
+### Dialogs and hanging requests
+
+Dialogs (ranking, save, bulk action, reject - in the admin only folder
+picker and confirmation) may stack: the folder picker opens on top of the
+page or a confirmation, and cancelling keeps what you had typed. `Esc` always
+closes only the topmost dialog. Switching the view (loupe, single view,
+compare, ranking opening or closing) closes all open dialogs of the gallery;
+the admin, being its own page, has its own dialog stack.
+
+Read requests to the server (gallery pages, details, counters) time out
+after 60 seconds, thumbnails after 20 seconds, and report that as a
+normal error; gallery pages and thumbnails retry on their own afterwards.
+Writing actions (import, maintenance, move-out) have no time limit. A
+video the browser cannot open shows "No preview available" in the loupe,
+single view and panel instead of a black area. If fml knows the codec
+(layer 2, field `video_codec`), the player asks the browser BEFORE
+loading: for ProRes, 10-bit H.264 or HEVC in Firefox the poster frame
+appears with "This browser cannot play ProRes (HQ, 10-bit) …" — no stream,
+no black player with audio only. The codec is also shown in the header of
+panel, loupe and single view; `codec: prores` in the search field finds all
+affected files ([interpretation.md](interpretation.md#video-codec-and-playability)).
 
 ## Important / limits (as of now)
 
@@ -459,6 +658,29 @@ themselves.
 - **Video metadata needs ffprobe** (part of ffmpeg, see
   [extraction.md](extraction.md)). Without ffprobe, videos are still
   cataloged; a re-scan after installing it fetches the metadata.
+- **Which videos the browser plays:** fml serves videos unchanged (no
+  transcoding, "originals are sacred"); whether a codec plays is therefore
+  decided by the **browser**, not by fml. The player asks it before loading
+  and, if the answer is no, shows the poster frame with a note. As of 2026
+  (browsers change; when in doubt the browser's answer wins):
+
+  | Codec / container | Chrome, Edge | Firefox | Safari (macOS) |
+  |---|---|---|---|
+  | H.264 8-bit 4:2:0 (MP4, MOV) | yes | yes | yes |
+  | H.264 10-bit, 4:2:2, 4:4:4 (High 10 & co.) | no | no | no |
+  | HEVC / H.265 | with hardware decoder | depends on the system (Windows: "HEVC Video Extensions", macOS: recent versions, Linux: no) | yes |
+  | VP8 / VP9 (WebM) | yes | yes | yes (macOS 11+) |
+  | AV1 | yes | yes | only recent Apple chips |
+  | **ProRes (MOV, Topaz export)** | no | no | **yes** |
+  | DNxHD, Motion JPEG, other intermediate codecs | no | no | no |
+  | MKV container | partially | no | no |
+
+  Mac users on Safari are therefore not affected by the ProRes problem; in
+  Chrome and Firefox only another player (📂 show in file manager) or an
+  H.264 export helps. Which codecs are in your own catalog is shown by
+  `codec: prores` in the search field or the
+  [diagnostic command](scanning.md#diagnostics-video-codecs-in-the-catalog);
+  on ingest the issue appears under Admin → Issues (kind `playback`).
 - **TIFF and PSD** are not displayed natively by any browser — gallery,
   loupe and single view render a JPEG server-side for them (the original
   stays untouched). PSD uses the embedded composite. PSDs saved

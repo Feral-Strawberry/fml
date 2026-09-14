@@ -34,7 +34,14 @@ store_extraction(
 | `interpreted_metadata` | the structured fields ([layer 2](interpretation.md)): per entry the parser (+ version), field name (`prompt`, `seed`, `model`, …) and value. |
 | `annotations` | the **manual layer** (ADR 0017): rating (1–5, NULL = unrated) and notes — strictly separated from everything extracted. |
 | `tags` / `item_tags` | your own tag vocabulary (case-insensitively unique) and the tag ↔ item assignment, each with timestamps. |
-| `scan_issues` | problems collected while scanning (admin area, ADR 0014). |
+| `scan_issues` | problems collected while scanning (Admin → Issues). |
+| `smart_folders` | saved searches: name + filter expression (the sort order is part of the expression). |
+| `blocked_hashes` | the **block list** of rejected media (hash, reason, last known paths). |
+| `import_log` | every file touched by import / move-out with outcome, target, hash and date source. |
+| `scan_memory` | size + modification time of files cataloged by watch folders (restarts skip the unchanged). |
+| `rankings` / `ranking_duels` / `ranking_scores` | the ranking module: rankings (name + expression), the append-only **duel log** and the Elo scores derived from it, including the eliminated marker. |
+| `search_index` (FTS5) | the full-text index over interpreted fields, filenames and the manual layer; can be rebuilt at any time (Admin → Maintenance). |
+| `app_state` | small key-value store for remembered admin figures (with the machine's origin stamp). |
 
 Access to the manual layer goes through `feral/db/manual.py`
 (`set_rating`, `set_notes`, `add_tag`, `remove_tag`, `annotations_for`,
@@ -66,5 +73,7 @@ SELECT DISTINCT file_hash FROM interpreted_metadata
 
 - **Never** put the DB file on a network share (SMB/NFS) — SQLite locking
   breaks there. Keep it local, sensibly next to the data directory.
-- Only **one** process ever writes (the server). Multiple simultaneous
-  readers are no problem thanks to WAL.
+- Only **the server** ever writes (the web process for short writes, its
+  worker process for long-running tasks; both belong to one instance). Never
+  run two fml instances, or the GUI and a CLI scan, on the same file at the
+  same time. Multiple simultaneous readers are no problem thanks to WAL.

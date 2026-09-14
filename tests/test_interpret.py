@@ -816,3 +816,212 @@ def test_comfyui_ungated_llm_generator_sets_enhancer_feature():
     fields = _fields(comfyui.parse(_comfy_items(graph)))
     assert fields["prompt"] == ["cinematic machinery self-assembling"]
     assert fields["feature"] == ["prompt_enhancer"]
+
+
+# --- ComfyUI v11: Steps/Sampler aus Split-Knoten und Subgraphen (Issue #29) --
+
+
+def test_comfyui_split_sampler_nodes_yield_settings():
+    """LTX-/Flux-Bauform: RandomNoise + KSamplerSelect + BasicScheduler +
+    CFGGuider + SamplerCustomAdvanced — kein Knoten trägt seed UND steps.
+    Modell wird vom Guider aus zurückverfolgt."""
+    graph = {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "ltx-2.safetensors"}},
+        "2": {"class_type": "RandomNoise", "inputs": {"noise_seed": 777}},
+        "3": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+        "4": {"class_type": "BasicScheduler", "inputs": {
+            "scheduler": "simple", "steps": 30, "denoise": 1.0, "model": ["1", 0]}},
+        "5": {"class_type": "CFGGuider", "inputs": {
+            "cfg": 3.0, "model": ["1", 0], "positive": ["6", 0], "negative": ["7", 0]}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "a fox", "clip": ["1", 1]}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "blurry", "clip": ["1", 1]}},
+        "8": {"class_type": "SamplerCustomAdvanced", "inputs": {
+            "noise": ["2", 0], "guider": ["5", 0], "sampler": ["3", 0],
+            "sigmas": ["4", 0], "latent_image": ["9", 0]}},
+    }
+    fields = _fields(comfyui.parse(_comfy_items(graph)))
+    assert fields["steps"] == ["30"]
+    assert fields["sampler"] == ["euler"]
+    assert fields["cfg_scale"] == ["3.0"]
+    assert fields["scheduler"] == ["simple"]
+    assert fields["seed"] == ["777"]
+    assert fields["model"] == ["ltx-2.safetensors"]
+
+
+def test_comfyui_manual_sigmas_and_sampler_class():
+    """LTX-2.3-Template: Steps stecken nur in der Sigma-Liste (9 Werte = 8
+    Schritte), der Sampler ist ein Knoten ohne sampler_name."""
+    graph = {
+        "1": {"class_type": "ManualSigmas", "inputs": {
+            "sigmas": "1., 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"}},
+        "2": {"class_type": "SamplerEulerAncestral", "inputs": {"eta": 0, "s_noise": 1}},
+        "3": {"class_type": "SamplerCustomAdvanced", "inputs": {
+            "sampler": ["2", 0], "sigmas": ["1", 0]}},
+    }
+    fields = _fields(comfyui.parse(_comfy_items(graph)))
+    assert fields["steps"] == ["8"]
+    assert fields["sampler"] == ["euler_ancestral"]
+    assert comfyui._sampler_from_class("SamplerDPMPP_2M_SDE") == "dpmpp_2m_sde"
+    assert comfyui._sampler_from_class("SamplerLMS") == "lms"
+    assert comfyui._sampler_from_class("SamplerCustomAdvanced") is None
+    assert comfyui._sampler_from_class("Sampler") is None
+
+
+def test_comfyui_subgraph_ids_with_linked_steps():
+    """Geflatteter Subgraph: IDs „3:7" bzw. verschachtelt „3:5:2"; steps und
+    seed kommen als Link vom Subgraph-Rand (PrimitiveInt) statt als Literal."""
+    graph = {
+        "3:12": {"class_type": "PrimitiveInt", "inputs": {"value": 8}},
+        "3:5:9": {"class_type": "PrimitiveInt", "inputs": {"value": 4242}},
+        "3:5:2": {"class_type": "KSampler", "inputs": {
+            "seed": ["3:5:9", 0], "steps": ["3:12", 0], "cfg": 1.0,
+            "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0,
+            "model": ["3:1", 0], "positive": ["3:7", 0], "negative": ["3:8", 0]}},
+        "3:1": {"class_type": "UNETLoader", "inputs": {"unet_name": "krea2.safetensors"}},
+        "3:7": {"class_type": "TextEncodeQwenImage", "inputs": {"prompt": "harbor"}},
+        "3:8": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["3:7", 0]}},
+        "3:13": {"class_type": "MathExpression", "inputs": {"a": ["3:12", 0], "expression": "a*2"}},
+        "3:14": {"class_type": "BasicScheduler", "inputs": {
+            "steps": ["3:13", 0], "scheduler": "simple", "denoise": 1.0}},
+    }
+    fields = _fields(comfyui.parse(_comfy_items(graph)))
+    assert fields["steps"] == ["8"]  # Rechenknoten ohne Literal: nie raten
+    assert fields["seed"] == ["4242"]
+    assert fields["model"] == ["krea2.safetensors"]
+    assert fields["prompt"] == ["harbor"]
+    assert "negative_prompt" not in fields
+
+
+def test_comfyui_multi_pass_main_pass_first():
+    """Hires-Fix-Kette: der Upscale-Pass (denoise 0.5) steht im Graphen VOR dem
+    Hauptpass — angezeigt wird der Hauptpass zuerst, alle Werte bleiben."""
+    graph = {
+        "9": {"class_type": "KSampler", "inputs": {
+            "seed": 1, "steps": 12, "cfg": 5.0, "sampler_name": "dpmpp_2m",
+            "scheduler": "karras", "denoise": 0.5, "model": ["1", 0]}},
+        "3": {"class_type": "KSampler", "inputs": {
+            "seed": 1, "steps": 20, "cfg": 7.0, "sampler_name": "euler",
+            "scheduler": "normal", "denoise": 1.0, "model": ["1", 0]}},
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "sdxl.safetensors"}},
+    }
+    fields = _fields(comfyui.parse(_comfy_items(graph)))
+    assert fields["steps"] == ["20", "12"]
+    assert fields["cfg_scale"] == ["7.0", "5.0"]
+    assert fields["sampler"] == ["euler", "dpmpp_2m"]
+    assert fields["denoise"] == ["1.0", "0.5"]
+
+
+def test_comfyui_llm_generator_seed_is_not_image_seed():
+    graph = {
+        "16": {"class_type": "TextGenerate", "inputs": {"prompt": "sys", "seed": 0, "clip": ["2", 0]}},
+        "3": {"class_type": "KSampler", "inputs": {"seed": 42, "steps": 8, "denoise": 1.0}},
+    }
+    fields = _fields(comfyui.parse(_comfy_items(graph)))
+    assert fields["seed"] == ["42"]
+    assert fields["steps"] == ["8"]
+
+
+def _nested_subgraph_workflow(*, bypass_inner: bool = False) -> dict:
+    """UI-Graph: Hauptgraph → Subgraph A → Subgraph B; KSampler nur in B.
+    steps literal innen, seed zweimal promotet (B-Rand → A-Rand → Widget am
+    Instanzknoten im Hauptgraphen), cfg promotet auf ein Primitive in A."""
+    a_id, b_id = "aaaa-1111", "bbbb-2222"
+    return {
+        "nodes": [
+            {"id": 30, "type": a_id, "mode": 0,
+             "inputs": [{"name": "seed", "type": "INT", "link": None, "widget": {"name": "seed"}}],
+             "widgets_values": [4242]},
+            {"id": 31, "type": "SaveImage", "mode": 0, "widgets_values": ["out"]},
+        ],
+        "links": [[44, 30, 0, 31, 0, "IMAGE"]],
+        "definitions": {"subgraphs": [
+            {"id": a_id, "name": "A",
+             "inputs": [{"name": "seed", "type": "INT", "id": "in-a-seed"}],
+             "nodes": [
+                 {"id": 5, "type": b_id, "mode": 0,
+                  "inputs": [{"name": "seed", "type": "INT", "link": 70, "widget": {"name": "seed"}},
+                             {"name": "cfg", "type": "FLOAT", "link": 71, "widget": {"name": "cfg"}}],
+                  "widgets_values": [1, 1.0]},
+                 {"id": 6, "type": "PrimitiveFloat", "mode": 0, "widgets_values": [2.5]},
+             ],
+             "links": [{"id": 70, "origin_id": -10, "origin_slot": 0, "target_id": 5, "target_slot": 0, "type": "INT"},
+                       {"id": 71, "origin_id": 6, "origin_slot": 0, "target_id": 5, "target_slot": 1, "type": "FLOAT"}]},
+            {"id": b_id, "name": "B",
+             "inputs": [{"name": "image", "type": "IMAGE", "id": "in-b-img"},
+                        {"name": "seed", "type": "INT", "id": "in-b-seed"},
+                        {"name": "cfg", "type": "FLOAT", "id": "in-b-cfg"}],
+             "nodes": [
+                 {"id": 3, "type": "KSampler", "mode": 4 if bypass_inner else 0,
+                  "inputs": [{"name": "model", "type": "MODEL", "link": 1},
+                             {"name": "seed", "type": "INT", "link": 77, "widget": {"name": "seed"}},
+                             {"name": "cfg", "type": "FLOAT", "link": 78, "widget": {"name": "cfg"}}],
+                  "widgets_values": [735915477938686, "randomize", 8, 1, "euler", "simple", 1]},
+                 {"id": 4, "type": "KSampler", "mode": 4,  # bypassed Upscale-Pass
+                  "widgets_values": [1, "fixed", 99, 7, "dpmpp_2m", "karras", 0.5]},
+             ],
+             "links": [{"id": 77, "origin_id": -10, "origin_slot": 1, "target_id": 3, "target_slot": 1, "type": "INT"},
+                       {"id": 78, "origin_id": -10, "origin_slot": 2, "target_id": 3, "target_slot": 2, "type": "FLOAT"}]},
+        ]},
+    }
+
+
+def test_comfyui_workflow_only_steps_from_nested_subgraph():
+    workflow = _nested_subgraph_workflow()
+    fields = _fields(comfyui.parse([text_item("workflow", json.dumps(workflow))]))
+    assert fields["steps"] == ["8"]
+    assert fields["seed"] == ["4242"]  # zweimal promotet, IMAGE-Input vor seed
+    assert fields["cfg_scale"] == ["2.5"]  # Primitive im Elterngraphen
+    assert fields["sampler"] == ["euler"]
+    assert fields["scheduler"] == ["simple"]
+    assert "99" not in fields["steps"]
+
+
+def test_comfyui_workflow_only_bypassed_sampler_skipped():
+    workflow = _nested_subgraph_workflow(bypass_inner=True)
+    fields = _fields(comfyui.parse([text_item("workflow", json.dumps(workflow))]))
+    assert "steps" not in fields
+    assert "seed" not in fields
+
+
+def test_comfyui_workflow_only_split_nodes_and_sigmas():
+    """LTX-Bauform im UI-Graphen: BasicScheduler/KSamplerSelect/RandomNoise/
+    CFGGuider-Widgets, ManualSigmas-String → steps."""
+    workflow = {
+        "nodes": [
+            {"id": 1, "type": "RandomNoise", "mode": 0, "widgets_values": [123, "randomize"]},
+            {"id": 2, "type": "KSamplerSelect", "mode": 0, "widgets_values": ["res_multistep"]},
+            {"id": 3, "type": "BasicScheduler", "mode": 0, "widgets_values": ["simple", 30, 1]},
+            {"id": 4, "type": "CFGGuider", "mode": 0, "widgets_values": [3]},
+            {"id": 5, "type": "ManualSigmas", "mode": 2,  # stumm — zählt nicht
+             "widgets_values": ["1., 0.5, 0.0"]},
+            {"id": 6, "type": "SamplerEulerAncestral", "mode": 0, "widgets_values": [0, 1]},
+        ],
+        "links": [],
+    }
+    fields = _fields(comfyui.parse([text_item("workflow", json.dumps(workflow))]))
+    assert fields["steps"] == ["30"]
+    assert fields["seed"] == ["123"]
+    assert fields["cfg_scale"] == ["3"]
+    assert fields["scheduler"] == ["simple"]
+    assert fields["sampler"] == ["res_multistep", "euler_ancestral"]
+
+
+def test_comfyui_partial_sigma_pass_ranks_after_main_pass():
+    """LTX-2-Zweitstufe (Remove-Watermark-Template): zweite ManualSigmas-Liste
+    ist der Schwanz der ersten (Start 0.909) — ein Verfeinerungspass. Er steht
+    im Graphen ZUERST und muss trotzdem hinter dem Hauptpass landen."""
+    graph = {
+        "9": {"class_type": "ManualSigmas", "inputs": {"sigmas": "0.909375, 0.725, 0.421875, 0.0"}},
+        "1": {"class_type": "ManualSigmas", "inputs": {
+            "sigmas": "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"}},
+    }
+    result = comfyui.parse(_comfy_items(graph))
+    assert _fields(result)["steps"] == ["8", "3"]
+    assert all(f.field != "_partial" for f in result.fields)
+
+    workflow = {"nodes": [
+        {"id": 9, "type": "ManualSigmas", "mode": 0, "widgets_values": ["0.909375, 0.725, 0.421875, 0.0"]},
+        {"id": 1, "type": "ManualSigmas", "mode": 0, "widgets_values": ["1.0, 0.5, 0.25, 0.1, 0.0"]},
+    ], "links": []}
+    fields = _fields(comfyui.parse([text_item("workflow", json.dumps(workflow))]))
+    assert fields["steps"] == ["4", "3"]

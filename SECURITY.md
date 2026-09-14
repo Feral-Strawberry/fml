@@ -22,6 +22,13 @@ The most important safeguards (full write-up in
 - **Host-header guard against DNS rebinding** (only
   `localhost`/`127.0.0.1`/`::1` are accepted) plus
   `X-Content-Type-Options: nosniff` on all responses.
+- **File-system jumps are whitelisted**: "show in file manager" and the
+  location breadcrumbs open only locations stored for that item (content
+  verified by hash before revealing); media delivery serves cataloged
+  files by hash only and stops reading when the browser aborts.
+- **Log injection is neutralised**: control characters in logged file
+  names (line breaks, ANSI, bidi) are made visible instead of written
+  raw; the admin log page reads two fixed files only.
 
 Operating recommendation: keep the server on `localhost` — there is
 deliberately no login and no tenant separation.

@@ -2,17 +2,34 @@
 
 Die Population einer Arena ist ihr Filterausdruck, live ausgewertet (wie
 Smart Folders); ein leerer Ausdruck heißt „ganze Bibliothek" (ADR 0040).
-Die Treffermenge wird als Temp-Tabelle materialisiert (Bauform ADR 0037) und
-mit ``ranking_scores`` geschnitten — Items ohne Score zählen mit
-``START_SCORE``/0 Duellen. Abgelehnte/verschwundene Items fallen automatisch
-heraus: sie stehen nicht mehr in ``items`` (ihre Duell-Geschichte bleibt,
-siehe ``db/rankings.py``).
+Abgelehnte/verschwundene Items fallen automatisch heraus: sie stehen nicht
+mehr in ``items`` (ihre Duell-Geschichte bleibt, siehe ``db/rankings.py``).
 
-Paar-Auswahl „Abdeckung, dann Nähe" (ADR 0045): Kandidat A ist einer der
-seltenst-verglichenen (Zufall unter Gleichen), Kandidat B kommt zufällig aus
-einem Score-Fenster um A — knappe Duelle liefern die meiste Information;
-ist das Fenster leer, irgendein anderes Item. Die Seiten werden gemischt,
-damit der Seltener-Verglichene nicht immer links steht.
+Bauform seit Issue #98 (ADR 0072): **EIN Filterlauf je Aufruf, keine
+Temp-Tabelle.** Die frühere Temp-Tabelle ``arena_pop`` (Muster ADR 0037:
+Kopie + Unique-Index + ANALYZE + vier Joins) kostete bei einer Arena über
+die ganze Bibliothek die 250k-Kopie, bei kleinen Arenen mit schweren
+Filtern den Filterlauf — beides je Duell. Jetzt zwei Pfade mit derselben
+Auswahl-Logik:
+
+- **Gefilterte Arena:** die Population wird EINMAL als materialisierte
+  CTE gebaut (ein Filterlauf) und Zähler, Score-Schnitt und Stichprobe
+  kommen in EINEM Statement aus derselben Kopie — Feral Strawberrys Arenen
+  sind ein paar tausend Medien mit 3–20 Prädikaten, da ist der Filterlauf
+  der Kostenblock, nicht die Kopie.
+- **Ganze Bibliothek:** kein Filter, nichts zu kopieren — Zähler aus
+  ``library.count_items`` (Epochen-Cache), Score-Zeilen der Arena als
+  Dict, Stichprobe als Index-Pass über ``items``.
+
+Paar-Auswahl „Abdeckung, dann Nähe" (ADR 0045), unverändert in der
+Semantik: Kandidat A ist einer der seltenst-verglichenen (Zufall unter
+Gleichen — gibt es unbewertete Items, hat A 0 Duelle und kommt aus der
+Stichprobe), Kandidat B kommt zufällig aus einem Score-Fenster um A —
+knappe Duelle liefern die meiste Information; ist das Fenster leer,
+irgendein anderes aktives Item. Unbewertete stehen bei ``START_SCORE`` und
+werden gegenüber den Bewerteten im Fenster nach ihrer Anzahl gewichtet, so
+dass B wie zuvor gleichverteilt über die Fenster-Mitglieder ist. Die Seiten
+werden gemischt, damit der Seltener-Verglichene nicht immer links steht.
 """
 
 from __future__ import annotations
@@ -22,115 +39,254 @@ import sqlite3
 from typing import Any
 
 from ..db.rankings import START_SCORE
-from . import filters
+from . import filters, library
+from .cache import EpochCache
 
 # Score-Fenster der Nähe-Stufe: ±150 Elo ≈ 70/30-Erwartung — noch offen genug,
 # dass Duelle nicht vorentschieden wirken.
 SCORE_WINDOW = 150.0
 
-_POP = "arena_pop"
+# Stichprobe je Paarung (#98): so viele zufällige unbewertete Populations-
+# Items liefert der eine Lauf; A und B kommen daraus. Klein genug, dass der
+# Sortierer nichts kostet; groß genug, dass beide Kandidaten fast immer
+# dabei sind (im Bibliotheks-Pfad sonst der exakte, seltene Fallback-Lauf).
+SAMPLE_SIZE = 8
+
+_ALL = "1"   # Populationsbedingung „ganze Bibliothek"
+_COLS = "i.file_hash, i.media_kind, i.container"
+_FIELDS = ("file_hash", "media_kind", "container", "score", "duels", "eliminated")
+
+# Gefilterte Arena, Paarung: Population EINMAL materialisiert (``AS
+# MATERIALIZED``, SQLite ≥ 3.35 — Python 3.12+ bringt neuere mit), daraus
+# Zähler ('n', Zahl in file_hash), Score-Schnitt ('s') und Stichprobe der
+# Unbewerteten ('u') in EINEM Statement. Spaltennamen kommen aus dem ersten
+# SELECT der UNION.
+_FILTERED_PAIR = """
+WITH p AS MATERIALIZED (SELECT {cols} FROM items i WHERE {pop})
+SELECT 'n' AS kind, COUNT(*) AS file_hash, NULL AS media_kind, NULL AS container,
+       NULL AS score, NULL AS duels, NULL AS eliminated FROM p
+UNION ALL
+SELECT 's', p.file_hash, p.media_kind, p.container, s.score, s.duels, s.eliminated
+  FROM p JOIN ranking_scores s ON s.ranking_id = ? AND s.file_hash = p.file_hash
+UNION ALL
+SELECT * FROM (
+    SELECT 'u', p.file_hash, p.media_kind, p.container, NULL, NULL, NULL FROM p
+     WHERE NOT EXISTS (SELECT 1 FROM ranking_scores s
+                        WHERE s.ranking_id = ? AND s.file_hash = p.file_hash)
+     ORDER BY RANDOM() LIMIT ?)
+"""
+
+# Gefilterte Arena, Bestenliste: dieselbe Kopie, daraus Population ('n'),
+# Gelistete + Ausgeschiedene ('t': COUNT in file_hash, SUM in eliminated)
+# und die Seite ('r'; Reihenfolge wird in Python noch einmal festgezogen —
+# eine UNION garantiert die Ordnung der Teil-Abfrage nicht).
+_FILTERED_BOARD = """
+WITH p AS MATERIALIZED (SELECT {cols} FROM items i WHERE {pop})
+SELECT 'n' AS kind, COUNT(*) AS file_hash, NULL AS media_kind, NULL AS container,
+       NULL AS score, NULL AS duels, NULL AS eliminated FROM p
+UNION ALL
+SELECT 't', COUNT(*), NULL, NULL, NULL, NULL, COALESCE(SUM(s.eliminated), 0)
+  FROM p JOIN ranking_scores s ON s.ranking_id = ? AND s.file_hash = p.file_hash
+UNION ALL
+SELECT * FROM (
+    SELECT 'r', p.file_hash, p.media_kind, p.container, s.score, s.duels, s.eliminated
+      FROM p JOIN ranking_scores s ON s.ranking_id = ? AND s.file_hash = p.file_hash
+     ORDER BY s.eliminated, s.score DESC, s.duels DESC, p.file_hash
+     LIMIT ? OFFSET ?)
+"""
+
+# Ganze Bibliothek: Score-Zeilen der Arena, nur Items, die es noch gibt.
+# CROSS JOIN legt die Reihenfolge fest (SQLite-Konvention): außen die
+# kleine Score-Menge über den Primärschlüssel (ranking_id, file_hash).
+_LIBRARY_SCORED = """
+    FROM ranking_scores s
+    CROSS JOIN items i ON i.file_hash = s.file_hash
+    WHERE s.ranking_id = ?
+"""
+
+_BOARD_ORDER = "ORDER BY s.eliminated, s.score DESC, s.duels DESC, s.file_hash"
 
 
-def _materialize_population(conn: sqlite3.Connection, expression: str) -> int:
-    """Population der Arena als Temp-Tabelle ``arena_pop`` (nur Hashes)."""
-    conn.execute(f"DROP TABLE IF EXISTS {_POP}")
-    fragment, params = "", []
+def _population_where(expression: str) -> tuple[str, list[Any]]:
+    """Populationsbedingung über Alias ``i`` (``_ALL`` = ganze Bibliothek) +
+    Parameter. Wirft bei ungültigem Ausdruck (``UserError``, ein
+    ``ValueError``)."""
     if expression and expression.strip():
         fragment, params = filters.build_where(filters.parse(expression))
-    where = f"WHERE ({fragment})" if fragment else ""
-    conn.execute(
-        f"CREATE TEMP TABLE {_POP} AS SELECT i.file_hash FROM items i {where}",
-        params,
-    )
-    conn.execute(f"CREATE UNIQUE INDEX idx_{_POP} ON {_POP}(file_hash)")
-    conn.execute(f"ANALYZE {_POP}")   # Planer-Statistik (Muster ADR 0037)
-    return conn.execute(f"SELECT COUNT(*) FROM {_POP}").fetchone()[0]
+        if fragment:
+            return f"({fragment})", params
+    return _ALL, []
 
 
-# Population × Scores: Items ohne Score-Zeile starten bei START_SCORE/0.
-# Als Subquery gekapselt, damit WHERE/ORDER BY die Aliasse sauber sehen.
-# media_kind kommt mit (Block R2): die Duell-Ansicht rendert <img> vs.
-# <video>, ohne je Kandidat das volle Item nachzuladen. container ebenso
-# (ADR 0052): TIFF/PSD laufen über die gerenderte Vorschau statt /api/media.
-_POP_SCORED = f"""
-    SELECT * FROM (
-        SELECT p.file_hash, i.media_kind, i.container,
-               COALESCE(s.score, {START_SCORE}) AS score,
-               COALESCE(s.duels, 0) AS duels
-          FROM {_POP} p
-          JOIN items i ON i.file_hash = p.file_hash
-          LEFT JOIN ranking_scores s
-            ON s.ranking_id = ? AND s.file_hash = p.file_hash
-    )
-"""
+def _entry(row: sqlite3.Row) -> dict[str, Any]:
+    return {k: row[k] for k in _FIELDS}
+
+
+def _unscored(entry: dict[str, Any]) -> dict[str, Any]:
+    """Ein Populations-Item ohne Score-Zeile: Startwert, 0 Duelle, aktiv."""
+    return {**entry, "score": START_SCORE, "duels": 0, "eliminated": 0}
+
+
+def _filtered_population(
+    conn: sqlite3.Connection, ranking_id: int, pop: str, params: list[Any], sample_n: int
+) -> tuple[int, dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """(Population, Score-Zeilen je Hash, Stichprobe Unbewerteter) — ein
+    Filterlauf, ein Statement."""
+    population, scored, sample = 0, {}, []
+    for row in conn.execute(
+        _FILTERED_PAIR.format(cols=_COLS, pop=pop), (*params, ranking_id, ranking_id, sample_n)
+    ):
+        if row["kind"] == "n":
+            population = row["file_hash"]
+        elif row["kind"] == "s":
+            scored[row["file_hash"]] = _entry(row)
+        else:
+            sample.append(_unscored(_entry(row)))
+    return population, scored, sample
+
+
+def _library_population(
+    conn: sqlite3.Connection, ranking_id: int, sample_n: int,
+    cache: EpochCache | None, scope: dict | None,
+) -> tuple[int, dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """Wie ``_filtered_population`` für die ganze Bibliothek: nichts zu
+    kopieren — Zähler aus dem Epochen-Cache, Stichprobe als Index-Pass."""
+    population = library.count_items(conn, None, cache=cache, scope=scope)
+    scored = {
+        row["file_hash"]: _entry(row) for row in conn.execute(
+            f"SELECT s.file_hash, i.media_kind, i.container, s.score, s.duels, s.eliminated"
+            f"{_LIBRARY_SCORED}", (ranking_id,))
+    }
+    sample = [
+        _unscored(_entry(row)) for row in conn.execute(
+            f"SELECT {_COLS}, NULL AS score, NULL AS duels, NULL AS eliminated"
+            f" FROM items i ORDER BY RANDOM() LIMIT ?", (sample_n,))
+        if row["file_hash"] not in scored
+    ]
+    return population, scored, sample
+
+
+def _random_unscored(
+    conn: sqlite3.Connection, ranking_id: int, pop: str, params: list[Any],
+    exclude: str | None,
+) -> dict[str, Any]:
+    """Exakter Fallback (Bibliotheks-Pfad, selten): ein zufälliges
+    unbewertetes Item per Lauf über den Bestand — wenn die Stichprobe nur
+    Bewertete traf. Aufrufer garantieren, dass es eines gibt."""
+    row = conn.execute(
+        f"""SELECT {_COLS}, NULL AS score, NULL AS duels, NULL AS eliminated
+              FROM items i
+             WHERE {pop} AND i.file_hash != ?
+               AND NOT EXISTS (SELECT 1 FROM ranking_scores s
+                                WHERE s.ranking_id = ? AND s.file_hash = i.file_hash)
+             ORDER BY RANDOM() LIMIT 1""",
+        (*params, exclude or "", ranking_id),
+    ).fetchone()
+    return _unscored(_entry(row))
 
 
 def next_pair(
-    conn: sqlite3.Connection, ranking: dict[str, Any], *, rng: random.Random | None = None
+    conn: sqlite3.Connection, ranking: dict[str, Any], *,
+    rng: random.Random | None = None,
+    cache: EpochCache | None = None, scope: dict | None = None,
 ) -> dict[str, Any] | None:
     """Nächstes Duell-Paar der Arena — oder ``None`` bei Population < 2.
 
-    ``rng`` ist für Tests injizierbar (bestimmt nur die Seiten-Mischung;
-    die SQL-Zufälle laufen über SQLites ``RANDOM()``).
+    Ausgeschiedene (#87) gehören nicht zum Pool; bleiben weniger als zwei
+    aktive Items, kommt ``pair: None`` mit den Zahlen (die UI zeigt „n von m
+    ausgeschieden" und den Weg zur Bestenliste, wo „Wieder rein" wohnt).
+
+    ``rng`` ist für Tests injizierbar (Wahl innerhalb der Stichprobe bzw.
+    unter Gleichen und die Seiten-Mischung; die Stichprobe selbst zieht
+    SQLites ``RANDOM()``). ``cache``/``scope`` (ADR 0048/0071) gehen an den
+    Populationszähler des Bibliotheks-Pfads.
     """
     rng = rng or random.Random()
-    population = _materialize_population(conn, ranking["expression"])
-    try:
-        if population < 2:
-            return None
-        a = conn.execute(
-            f"{_POP_SCORED} ORDER BY duels ASC, RANDOM() LIMIT 1",
-            (ranking["id"],),
-        ).fetchone()
-        b = conn.execute(
-            f"""{_POP_SCORED}
-                WHERE file_hash != ? AND ABS(score - ?) <= ?
-                ORDER BY RANDOM() LIMIT 1""",
-            (ranking["id"], a["file_hash"], a["score"], SCORE_WINDOW),
-        ).fetchone()
-        if b is None:   # Fenster leer — irgendein anderes Item (ADR 0045)
-            b = conn.execute(
-                f"{_POP_SCORED} WHERE file_hash != ? ORDER BY RANDOM() LIMIT 1",
-                (ranking["id"], a["file_hash"]),
-            ).fetchone()
-        pair = [dict(a), dict(b)]
-        rng.shuffle(pair)
-        return {"population": population, "pair": pair}
-    finally:
-        conn.execute(f"DROP TABLE IF EXISTS {_POP}")
+    rid = ranking["id"]
+    pop, params = _population_where(ranking["expression"])
+    if pop == _ALL:
+        population, scored, sample = _library_population(conn, rid, SAMPLE_SIZE, cache, scope)
+    else:
+        population, scored, sample = _filtered_population(conn, rid, pop, params, SAMPLE_SIZE)
+    if population < 2:
+        return None
+    eliminated = sum(1 for s in scored.values() if s["eliminated"])
+    result: dict[str, Any] = {"population": population, "eliminated": eliminated}
+    if population - eliminated < 2:
+        return {**result, "pair": None}
+    unscored = population - len(scored)
+    active = [s for s in scored.values() if not s["eliminated"]]
+
+    # Kandidat A: seltenst verglichen. Unbewertete haben 0 Duelle und gewinnen
+    # damit immer, solange es welche gibt.
+    if unscored > 0:
+        if sample:
+            a = sample.pop(rng.randrange(len(sample)))
+        else:
+            a = _random_unscored(conn, rid, pop, params, None)
+        a_unscored = True
+    else:
+        fewest = min(s["duels"] for s in active)
+        a = rng.choice([s for s in active if s["duels"] == fewest])
+        a_unscored = False
+    others = [s for s in active if s["file_hash"] != a["file_hash"]]
+    unscored_others = unscored - (1 if a_unscored else 0)
+
+    # Kandidat B: Fenster um A — Unbewertete zählen mit ihrer Anzahl, damit
+    # die Wahl gleichverteilt über alle Fenster-Mitglieder bleibt.
+    near = [s for s in others if abs(s["score"] - a["score"]) <= SCORE_WINDOW]
+    near_unscored = unscored_others if abs(START_SCORE - a["score"]) <= SCORE_WINDOW else 0
+    if near_unscored + len(near) == 0:   # Fenster leer — irgendein anderes (ADR 0045)
+        near, near_unscored = others, unscored_others
+    if rng.randrange(near_unscored + len(near)) < near_unscored:
+        b = sample.pop(rng.randrange(len(sample))) if sample \
+            else _random_unscored(conn, rid, pop, params, a["file_hash"])
+    else:
+        b = rng.choice(near)
+    pair = [a, b]
+    rng.shuffle(pair)
+    return {**result, "pair": pair}
 
 
 def leaderboard(
-    conn: sqlite3.Connection, ranking: dict[str, Any], *, limit: int = 100, offset: int = 0
+    conn: sqlite3.Connection, ranking: dict[str, Any], *,
+    limit: int = 100, offset: int = 0,
+    cache: EpochCache | None = None, scope: dict | None = None,
 ) -> dict[str, Any]:
-    """Bestenliste der Arena: Population ∩ Scores, bester Score zuerst.
+    """Bestenliste der Arena: Population ∩ Scores, bester Score zuerst;
+    Ausgeschiedene (#87) geschlossen am Ende, unter sich nach Score.
 
     Items ohne Duell tauchen nicht auf (kein Rang ohne Urteil); ``total``
-    zählt die Gelisteten, ``population`` die ganze Arena.
+    zählt die Gelisteten (inklusive Ausgeschiedene, ``eliminated`` sagt wie
+    viele), ``population`` die ganze Arena. ``rank`` ist die Position in der
+    Liste — für Ausgeschiedene zeigt die UI statt der Zahl den Marker.
     """
-    population = _materialize_population(conn, ranking["expression"])
-    try:
-        total = conn.execute(
-            f"""SELECT COUNT(*) FROM {_POP} p
-                 JOIN ranking_scores s
-                   ON s.ranking_id = ? AND s.file_hash = p.file_hash""",
-            (ranking["id"],),
-        ).fetchone()[0]
-        rows = conn.execute(
-            f"""SELECT p.file_hash, i.media_kind, i.container, s.score, s.duels FROM {_POP} p
-                 JOIN items i ON i.file_hash = p.file_hash
-                 JOIN ranking_scores s
-                   ON s.ranking_id = ? AND s.file_hash = p.file_hash
-                ORDER BY s.score DESC, s.duels DESC, p.file_hash
-                LIMIT ? OFFSET ?""",
-            (ranking["id"], limit, offset),
-        ).fetchall()
-        return {
-            "population": population,
-            "total": total,
-            "entries": [
-                {"rank": offset + i + 1, **dict(row)} for i, row in enumerate(rows)
-            ],
-        }
-    finally:
-        conn.execute(f"DROP TABLE IF EXISTS {_POP}")
+    rid = ranking["id"]
+    pop, params = _population_where(ranking["expression"])
+    if pop == _ALL:
+        population = library.count_items(conn, None, cache=cache, scope=scope)
+        total, eliminated = conn.execute(
+            f"SELECT COUNT(*), COALESCE(SUM(s.eliminated), 0){_LIBRARY_SCORED}", (rid,)
+        ).fetchone()
+        rows = [_entry(r) for r in conn.execute(
+            f"SELECT s.file_hash, i.media_kind, i.container, s.score, s.duels, s.eliminated"
+            f"{_LIBRARY_SCORED} {_BOARD_ORDER} LIMIT ? OFFSET ?", (rid, limit, offset))]
+    else:
+        population, total, eliminated, rows = 0, 0, 0, []
+        for row in conn.execute(
+            _FILTERED_BOARD.format(cols=_COLS, pop=pop),
+            (*params, rid, rid, limit, offset),
+        ):
+            if row["kind"] == "n":
+                population = row["file_hash"]
+            elif row["kind"] == "t":
+                total, eliminated = row["file_hash"], row["eliminated"]
+            else:
+                rows.append(_entry(row))
+        rows.sort(key=lambda e: (e["eliminated"], -e["score"], -e["duels"], e["file_hash"]))
+    return {
+        "population": population,
+        "total": total,
+        "eliminated": eliminated,
+        "entries": [{"rank": offset + i + 1, **row} for i, row in enumerate(rows)],
+    }

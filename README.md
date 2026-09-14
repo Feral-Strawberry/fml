@@ -16,51 +16,83 @@ server is only reachable at `127.0.0.1`.
 > the six-digit range and is designed for 250,000+ media. It is a hobby
 > project under active development - make backups (see "Good to know").
 
-## The two operating philosophies
+## Three goals, three modes
 
-fml is **one** application with **two clearly separated ways of working**.
-The difference is exactly one thing: whether fml is allowed to touch your
-files. The switch for that is called **Library management** (Admin →
-Configuration) and is **off** by default.
+Every intake in fml is a folder plus a **mode**. The mode alone decides
+what happens to the **source**, and with it which of the three goals you
+reach:
 
-### 1. Read-only mode (default): view and organize without touching
+| Goal | Mode | What happens to the source | Needs |
+| --- | --- | --- | --- |
+| **1. Overview** | **catalog** | nothing: the media are recorded where they are | nothing |
+| **2. Collect** | **copy** | stays untouched; the copy sits in the media library | library management |
+| **3. Consolidate** | **move** | what has verifiably arrived is deleted from it; only doubtful cases stay visibly in place | library management, safety prompt |
+
+Every mode comes in two **frequencies**: **once now** (the folder is
+processed once) or **watch permanently** (the folder becomes a watch
+folder: whatever ComfyUI & co. drop there is taken in by itself as soon
+as the file has finished writing). Bit-identical duplicates are detected
+by content on every path.
+
+### Goal 1: Overview. View and organize without touching
 
 For the case: "My media are scattered (or already neatly sorted) across the
 disk, and I want **overview, search and curation** - but nobody except me
 should ever move a file."
 
-- **Hands-off guarantee:** in this mode fml **copies, moves and deletes not
-  a single file.** The guarantee is enforced server-side - the affected
-  functions are not hidden but locked, and they say so honestly. A badge
-  "👁 Read-only mode" in the top bar shows the state.
-- **What works in this mode:** **cataloging** folders or entire drives
-  (recording in place, also permanently as watch folders), searching,
-  filtering, rating, tagging, writing notes, **rejecting** (removes a
-  medium from the catalog only - the file stays put) and jumping to the
-  file in Explorer/Finder via the 📂 button.
-- **What deliberately does not work in this mode:** copying or moving
-  imports and moving out rejected files - everything that creates or moves
-  files.
+- **Hands-off guarantee:** in read-only mode (the factory default) fml
+  **copies, moves and deletes not a single file.** The guarantee is
+  enforced server-side - the affected functions are not hidden but locked,
+  and they say so honestly. A badge "👁 Read-only mode" in the top bar
+  shows the state.
+- **What works:** **cataloging** folders or entire drives (once or
+  permanently as watch folders), searching, filtering, rating, tagging,
+  writing notes, **rejecting** (removes a medium from the catalog only -
+  the file stays put) and jumping to the file in Explorer/Finder via the
+  📂 button.
+- **What deliberately does not work:** copy, move and moving out rejected
+  files - everything that creates or moves files.
 
 You can safely let fml loose on a foreign or organically grown collection
 in this mode, just to **understand** it first.
 
-### 2. Library management: consolidating sprawl into one collection
+### Goal 2: Collect. Build a library, the sources stay
+
+For the case: "I want an organized, duplicate-free collection - but my
+backups and tool folders should stay untouched until I trust the result."
+
+- **copy** places every new file in the **media library** (date-based
+  structure `YYYY/MM/DD/`), verifies the copy against the source via
+  SHA-256 and does **not store bit-identical duplicates again**. The
+  source is never touched; the import is read-only.
+- Everyday operation: a **watch folder** in copy mode on the output folder
+  of ComfyUI, A1111 & co. Whatever appears there lands in the library by
+  itself, the originals stay in place.
+- **End state:** the library is complete and duplicate-free, the sources
+  are provably obsolete - but still there. If you want them gone, go to
+  goal 3.
+
+### Goal 3: Consolidate. One collection, no copies anywhere else
 
 For the case: "My media are sprawled across old backups, download and
 output folders - much of it duplicated two or three times. In the end I
-want **one consolidated, duplicate-free file collection**."
+want **a single collection**, and the old folders should be empty."
 
-- **Import copies - it never moves on its own.** Source folders are copied
-  into the **media library** (date-based structure `YYYY/MM/DD/`), every
-  copy is verified against the source via SHA-256, **bit-identical
-  duplicates are detected and not stored again**. What happens to the
-  source is up to you per import: mode "copy" leaves it completely
-  untouched; mode "move" (with its own safety prompt) deletes only what
-  has verifiably arrived in the collection and leaves every doubtful case
-  visibly in place. Details: [`docs/en/import.md`](docs/en/import.md).
-- **Watch folders** automate this: whatever ComfyUI & co. drop there is
-  imported by itself as soon as the file has finished writing.
+- **move** is copy plus cleanup: the same copy into the library, the same
+  verification - and afterwards the file is **deleted** from the source.
+  Deleted is only what verifiably sits bit-identically in the library
+  with its catalog entry stored. The mode asks for explicit confirmation.
+- **What remains in the source is for review,** never a loss:
+  `_dubletten/` (content was already in the collection, the library copy
+  was freshly verified), `_fehler/` (errors), `_unbekanntes-format/`
+  (unknown format), `_gesperrt/` (rejected in fml) and `_ausgefiltert/`
+  (import rules). The names are fixed identifiers and stay the same
+  (German) in every language. You look at these folders and delete them
+  yourself - fml never cleans up behind you.
+- **In practice:** take in backup after backup with "move", or create a
+  watch folder in move mode and tip the old folders into it one by one;
+  "delete empty folders" removes subfolders that have become empty.
+  Duplicates are detected by content, whichever backup they come from.
 - **Cleaning up without a delete key:** there is no "delete" in fml.
   **Rejecting** removes a medium from the catalog and puts its hash on the
   blocklist (it will not come back in through any import) - the file stays
@@ -68,15 +100,21 @@ want **one consolidated, duplicate-free file collection**."
   the one designated path: **"Move rejected out"** (Admin → Maintenance)
   moves them, hash-verified, into a target folder outside the library.
   Final disposal is then deliberately the file manager's job, not fml's.
-- **End state:** a collection in which every content exists exactly once,
-  sorted by date, fully cataloged - and the old source folders are
-  provably obsolete.
+- **End state:** every content sits exactly once in the library, sorted by
+  date, fully cataloged; the source folders are empty except for what you
+  deliberately wanted to review. Details on the process and outcome
+  folders: [`docs/en/import.md`](docs/en/import.md).
 
-Both ways of working use the same interface, the same search, the same
-curation. They can also be **combined**: manage a library and additionally
-just catalog external places - the sidebar facet "Location" (in the
-library / external only) keeps the two apart, including separate size
-figures.
+### The switch: library management
+
+Goal 1 works out of the box. Goals 2 and 3 need the **Library management**
+checkbox (Admin → Configuration), which is **off** by default - without it,
+copy, move and moving out are locked server-side. That is the whole
+difference: whether fml may touch your files. Interface, search and
+curation are the same for all three goals, and they can be **combined**:
+manage a library and additionally just catalog external places - the
+sidebar facet "Location" (in the library / external only) keeps the two
+apart, including separate size figures.
 
 ## What fml can do - and how exactly it works
 
@@ -162,6 +200,19 @@ figures.
 Windows installer, tick "Add to PATH"). Everything else happens
 automatically.
 
+**Download:** on GitHub via the green "Code" button → "Download ZIP" and
+unpack into a folder, or with Git:
+
+```bash
+git clone https://github.com/Feral-Strawberry/fml.git
+```
+
+If you know ComfyUI, you know the pattern: one folder, one start script
+that sets up the Python environment the first time, then the interface
+runs in your browser. An update is a new ZIP unpacked over the folder or
+`git pull`; database and `config.toml` live in the same folder and are
+kept.
+
 | System | Start |
 | --- | --- |
 | Windows | double-click `start.bat` |
@@ -173,7 +224,7 @@ metadata and thumbnails, install ffmpeg once (Windows:
 `winget install Gyan.FFmpeg`, macOS: `brew install ffmpeg`) - the
 interface points it out if it is missing.
 
-### Getting started if you only want an overview (philosophy 1)
+### Getting started if you only want an overview (goal 1)
 
 1. Admin button (top right) → **Sources & import** → pick a folder or
    drive, mode **"catalog"**, "once now" or "watch permanently" →
@@ -181,7 +232,7 @@ interface points it out if it is missing.
 2. Browse: grid, search on top, filters on the left, metadata on the
    right. Rate, tag, reject - all pure catalog work.
 
-### Getting started if you want to consolidate (philosophy 2)
+### Getting started if you want to collect or consolidate (goals 2 and 3)
 
 1. Admin → **Configuration** → tick **Library management**, below it set
    "Media library (import target)" to a folder with enough space.
@@ -190,9 +241,10 @@ interface points it out if it is missing.
    Activity; the source stays untouched until you trust the result.
 3. Repeat for every backup/legacy folder - the import recognizes
    duplicates by content and does not store them again.
-4. If you want source folders emptied afterwards, use mode "move" (with
+4. If you want the source folders empty (goal 3), use mode "move" (with
    safety prompt) - only what is verifiably in the collection gets
-   deleted, doubtful cases remain visible in place.
+   deleted, doubtful cases stay visible in review folders and are
+   disposed of by you.
 
 ## Good to know (please read!)
 
@@ -207,6 +259,11 @@ interface points it out if it is missing.
   Everything in it can also be edited in the GUI (Admin → Configuration);
   the commented reference is
   [`config.example.toml`](config.example.toml).
+- **Changed (September 2026) - sidebar click rule as in Lightroom:** a
+  click selects a value (replacing the previous one of the same group),
+  **Cmd/Ctrl-click adds** (OR), clicking the active value removes it.
+  Before, every click widened to an OR. Details in
+  [`docs/en/gui.md`](docs/en/gui.md).
 
 ## More documentation
 
@@ -226,11 +283,15 @@ attribution may get lost in the process. If you want to get more deeply
 involved: just ask - collaboration works via an invitation to the
 working repo.
 
-**About the "ADR" references** in code comments and docs (e.g.
-"ADR 0041"): these are **Architecture Decision Records** - short,
+What changed from release to release is listed in the
+[`CHANGELOG.md`](CHANGELOG.md).
+
+**About the "ADR" and issue references** in code comments and docs (e.g.
+"ADR 0041", "Issue #37"): ADRs are **Architecture Decision Records** - short,
 numbered entries following the pattern *context → decision →
-consequences* that document every notable decision made in this project.
-They live in the private working repo and are not part of the snapshots;
+consequences* that document every notable decision made in this project;
+issue numbers point to the working repo's issue tracker. Both live in the
+private working repo and are not part of the snapshots;
 the references are left in place on purpose so decisions stay
 traceable. If you want to know the reasoning behind a specific number:
 just open an issue.

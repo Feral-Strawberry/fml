@@ -1,2 +1,2 @@
 # Development dependencies (pinned). See DEPENDENCIES.md.
-pytest~=8.0
+pytest~=9.1

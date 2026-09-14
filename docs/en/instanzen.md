@@ -97,7 +97,7 @@ library at `D:\Media\Library`.
    management deliberately stays OFF here.
 3. In the Nature instance: Admin → Sources & import → path
    `D:\Media\Library`, mode **"catalog"**, "watch permanently" → Add.
-   The instance indexes the entire collection in place — no file is
+   The instance catalogs the entire collection in place — no file is
    copied or moved, only its own catalog is created. (A subfolder instead
    of the whole library works just the same.)
 4. Curate: **reject** everything that does not fit the topic —

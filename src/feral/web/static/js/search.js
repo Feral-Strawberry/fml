@@ -8,8 +8,10 @@
 //
 //   [ Modell: flux | krea ✕ ] [ Text: wüste ✕ ] [ ★ ≥ 4 ✕ ]  ☆ Speichern
 //
-// Wege in den Zustand: Sidebar-Klick ('chip-toggle' — zweiter Wert derselben
-// Gruppe erweitert zum ODER, aktiver Wert togglet weg), Texteingabe (filtert
+// Wege in den Zustand: Sidebar-Klick ('chip-toggle' — Lightroom-Regel seit
+// 2026-09-08: Klick ERSETZT den Wert der Gruppe, Cmd/Strg-Klick (additive)
+// erweitert zum ODER, Klick auf den aktiven Wert nimmt ihn heraus; Popover/
+// Tipphilfe schicken additive), Texteingabe (filtert
 // das Grid LIVE, Enter macht text:-Chips) und getippte Grammatik-Ausdrücke
 // (werden zu Chips zerlegt). Die frühere Snippet-Trefferliste ist ersatzlos
 // weg — das Thumbnail-Grid ist die Antwort. Die Dubletten-Ansicht bleibt
@@ -31,6 +33,25 @@ export const looksLikeExpr = (s) =>
 
 // Begriffe der Texteingabe: "…" hält Wortfolgen zusammen (FTS-Phrase).
 const splitTerms = (s) => s.match(/"[^"]*"|\S+/g) || [];
+
+// Getippter Einzelwert (Chip-Editor, Tipphilfe) → {value, exact} nach der
+// Grammatik (ADR 0035 + Nachtrag #132): "…" = exakt, '…' = enthält als
+// Phrase, ein verdoppeltes Anführungszeichen im Wert steht für eines;
+// alles andere ist ein nackter Teilstring-Wert. EIN Helfer für beide
+// Eingabeorte — die Wahrheit über die Schreibweise bleibt im Server
+// (serialize() wählt beim Rückweg selbst zwischen nackt, '…' und "…").
+export function parseTypedValue(raw) {
+  const q = raw[0];
+  if ((q === '"' || q === "'") && raw.length > 1 && raw.endsWith(q)) {
+    return { value: raw.slice(1, -1).split(q + q).join(q), exact: q === '"' };
+  }
+  return { value: raw, exact: false };
+}
+
+// Anzeige eines Chip-Werts im Editor: Spiegel von serialize() — exakt in
+// "…", ein Teilstring mit Leerraum oder führendem Anführungszeichen in '…'.
+export const displayValue = ({ value, exact }) =>
+  exact ? `"${value}"` : (/\s|^["']/.test(value) ? `'${value}'` : value);
 
 // Gruppenschlüssel fürs Zusammenlegen: gleiche Art + Feld + Negation = ein
 // Chip, weitere Werte werden ODER (ADR 0035).
@@ -82,6 +103,7 @@ export function initSearch() {
   const head = document.getElementById("midhead");
   const tools = document.getElementById("midtools");
   const saveBtn = document.getElementById("saveBtn");
+  const arenaBtn = document.getElementById("arenaBtn");
   const resetBtn = document.getElementById("filterReset");
   const bulkBtn = document.getElementById("bulkBtn");
   // Icon und Text als getrennte Spans (Flex, app.css): Symbol-Glyphen
@@ -91,6 +113,10 @@ export function initSearch() {
   // ︎ erzwingt beim ⚡ die Text-Darstellung (sonst Farb-Emoji).
   saveBtn.innerHTML = `<span class="btnicon">☆</span><span>${esc(STRINGS.folderSave)}</span>`;
   saveBtn.title = STRINGS.folderSaveTitle;
+  // ☆ und 🏆 legen NUR Neues an (ADR 0081, Regel 2) — das Geladene pflegt
+  // das Kontext-Segment im Breadcrumb (context.js).
+  arenaBtn.innerHTML = `<span class="btnicon">🏆</span><span>${esc(STRINGS.arenaNew)}</span>`;
+  arenaBtn.title = STRINGS.arenaNewTitle;
   resetBtn.innerHTML = `<span class="btnicon">✕</span><span class="btnlabel">${esc(STRINGS.filterReset)}</span>`;
   resetBtn.title = STRINGS.filterResetTitle;
   bulkBtn.innerHTML = `<span class="btnicon">⚡︎</span><span class="btnlabel">${esc(STRINGS.bulkOpen)}</span>`;
@@ -119,6 +145,7 @@ export function initSearch() {
   let galleryTotal = 0;
   let stateSeq = 0;         // entwertet überholte Server-Antworten
   let editorIndex = null;   // offener Chip-Editor (Index in predicates)
+  let rankingsEnabled = false;   // Modul-Schalter (Sidebar meldet ihn, ADR 0045)
 
   // -- Zustand anwenden ---------------------------------------------------------
 
@@ -128,20 +155,26 @@ export function initSearch() {
     [state.expression, ...liveTerms.map((t) => `text: ${t}`)]
       .filter(Boolean).join(" ");
 
-  function announce() {
+  // reset: true = NUR der explizite Klick auf „Alle Medien" in der Sidebar
+  // — das Grid startet dann oben ohne Rücksprung (Issue #33). Alles andere
+  // (Chips, ✕ Filter zurücksetzen, Esc) behält den Rücksprung zum
+  // ausgewählten Bild (ADR 0060).
+  function announce(reset = false) {
     emit("search-state-changed", {
       expression: effectiveExpression(),
+      canonical: state.expression,   // ohne Live-Begriffe — Vergleichsbasis (context.js)
       predicates: state.predicates,
       sort: state.sort,
+      reset,
     });
   }
 
-  function setState(d) {
+  function setState(d, { reset = false } = {}) {
     state = d;
     dupes = false;
     hideError();
     renderChips();
-    announce();
+    announce(reset);
   }
 
   /** Getippten/gespeicherten Ausdruck übernehmen (ersetzt den Zustand). */
@@ -182,8 +215,10 @@ export function initSearch() {
   // -- Chips rendern --------------------------------------------------------------
 
   function renderChips() {
-    // Präfix als eigenes Element: unter FullHD-Breite ausgeblendet (app.css).
-    const parts = [`<span class="crumbroot">${STRINGS.crumbLibrary} /</span>`];
+    // Vorn der Slot fürs Kontext-Segment (context.js, ADR 0081): „Bearbeiten:
+    // ☆ Name" bzw. „🏆 Name", wenn eine Suche/ein Ranking geladen ist. Das
+    // frühere Präfix „Bibliothek /" ist weg (#133: trug nichts).
+    const parts = [`<span class="ctxslot"></span>`];
     if (dupes) {
       parts.push(`<b>${esc(STRINGS.dupes)}</b>`);
     } else if (!state.predicates.length) {
@@ -206,8 +241,10 @@ export function initSearch() {
     // Speichern + Sammel-Aktion (Großbaustelle K) + Filter zurücksetzen
     // sitzen als EINE Gruppe in #midtools statt im Chip-Fluss.
     saveBtn.hidden = !(state.expression && !dupes);
+    arenaBtn.hidden = !(rankingsEnabled && !dupes);
     bulkBtn.hidden = dupes || galleryTotal <= 0;
     resetBtn.hidden = !(state.predicates.length || liveTerms.length || dupes);
+    emit("chips-rendered", {});   // context.js hängt sein Segment ein — VOR der Messung
     layoutHead();
     if (editorIndex !== null) positionEditor();
   }
@@ -252,11 +289,11 @@ export function initSearch() {
     editor.innerHTML = `
       <div class="cevalues">
         ${p.values.map((v, k) => `
-          <span class="cechip">${esc(v.exact ? `"${v.value}"` : v.value)}
+          <span class="cechip">${esc(displayValue(v))}
             <button type="button" class="cevx" data-k="${k}" title="${STRINGS.chipEditRemoveValue}">✕</button>
           </span>`).join("")}
       </div>
-      ${canAddValues(p) ? `<input type="text" class="ceadd" placeholder="${STRINGS.chipEditAddValue}">` : ""}
+      ${canAddValues(p) ? `<input type="text" class="ceadd" placeholder="${esc(STRINGS.chipEditAddValue)}">` : ""}
       ${p.kind !== "sort" ? `
         <label class="ceneg"><input type="checkbox" class="cenegbox"${p.negated ? " checked" : ""}>
           ${STRINGS.chipEditNegate}</label>` : ""}
@@ -309,9 +346,10 @@ export function initSearch() {
     if (e.key !== "Enter" || !e.target.matches(".ceadd")) return;
     const raw = e.target.value.trim();
     if (!raw) return;
-    const exact = raw.startsWith('"') && raw.endsWith('"') && raw.length > 1;
+    const typed = parseTypedValue(raw);
+    if (!typed.value) return;
     const preds = clonePreds();
-    preds[editorIndex].values.push({ value: exact ? raw.slice(1, -1) : raw, exact });
+    preds[editorIndex].values.push(typed);
     await setPredicates(preds);
     state.predicates[editorIndex] ? renderEditor() : closeEditor();
   });
@@ -355,19 +393,31 @@ export function initSearch() {
     });
   });
 
+  // 🏆 Neue Arena aus den Chips (ADR 0081): rankings.js öffnet den Dialog
+  // mit Chip-Vorschau + Trefferzahl; ohne Chips = ganze Bibliothek.
+  function openArenaDialog() {
+    emit("arena-dialog-open", {
+      expression: state.expression,
+      predicates: state.predicates,
+      total: galleryTotal,
+    });
+  }
+  arenaBtn.addEventListener("click", openArenaDialog);
+
   // -- Kopfzeilen-Knöpfe: Filter zurücksetzen + Sammel-Aktion --------------------------
 
   // Alles leeren — Klick auf „Filter zurücksetzen"/„Alle Medien" oder Esc.
   // setState → announce lässt auch die Dubletten-Spezialansicht hinter sich
   // (dupes wird in setState zurückgesetzt, das Grid lädt neutral).
-  function clearAll() {
+  // reset nur bei „Alle Medien" (Issue #33): ✕ und Esc springen zurück.
+  function clearAll({ reset = false } = {}) {
     q.value = "";
     liveTerms = [];
     closeEditor();
-    setState({ expression: "", predicates: [], sort: null });
+    setState({ expression: "", predicates: [], sort: null }, { reset });
   }
 
-  resetBtn.addEventListener("click", clearAll);
+  resetBtn.addEventListener("click", () => clearAll());
   bulkBtn.addEventListener("click", () => {
     emit("bulk-dialog-open", {
       expression: effectiveExpression(),
@@ -386,7 +436,6 @@ export function initSearch() {
     if (e.target instanceof Element && e.target.matches("input, textarea, select")) return;
     if (!document.getElementById("loupe").hidden) return;
     if (!document.getElementById("single").hidden) return;
-    if (!document.getElementById("admin").hidden) return;
     if (editorIndex !== null) return;                                  // Chip-Editor
     if (document.querySelector(".pickoverlay:not([hidden])")) return;  // Theme-Dialoge
     if (!(document.getElementById("sortmenu")?.hidden ?? true)) return;
@@ -440,6 +489,10 @@ export function initSearch() {
   // Chip zum ODER, aktiver Wert fliegt raus (leerer Chip verschwindet).
   on("chip-toggle", async (d) => {
     const pred = d.pred;
+    // Lightroom-Regel (Feral Strawberry, 2026-09-08, ADR-0035-Nachtrag): nur ein
+    // einfacher Sidebar-Klick ersetzt (additive === false); alle anderen
+    // Auslöser (Popover, Tipphilfe, Cmd/Strg-Klick) erweitern zum ODER.
+    const additive = d.additive !== false;
     const preds = clonePreds();
     // Gegensätzliche has:-Zeilen derselben Facette (Block S4, „mit/ohne
     // Eingangsbild") ersetzen einander — beide zusammen wären immer 0 Treffer.
@@ -461,6 +514,14 @@ export function initSearch() {
         hit.values = pred.values;
         hit.op = pred.op;
       }
+    } else if (!additive) {
+      // Einfacher Klick: genau dieser Wert ist die Auswahl der Gruppe. Ist er
+      // schon die ganze Auswahl → weg; sonst ersetzt er sie (auch, wenn er
+      // Teil eines ODER war — wie ein Klick in eine Mehrfachauswahl).
+      const same = hit.values.length === pred.values.length
+        && pred.values.every((v) => hit.values.some((h) => h.value === v.value));
+      if (same) preds.splice(preds.indexOf(hit), 1);
+      else hit.values = pred.values.map((v) => ({ ...v }));
     } else {
       // Werte-Bündel (z. B. WAN-2.2 High/Low, Block N) togglen als EINHEIT:
       // sind alle Werte aktiv, fliegen alle raus — sonst fehlende ergänzen.
@@ -509,13 +570,8 @@ export function initSearch() {
     await setPredicates(d.predicates);
   });
 
-  // „Alle Medien": Zustand leeren.
-  on("state-clear", () => {
-    q.value = "";
-    liveTerms = [];
-    closeEditor();
-    setState({ expression: "", predicates: [], sort: null });
-  });
+  // „Alle Medien" (Sidebar): Zustand leeren UND oben anfangen (Issue #33).
+  on("state-clear", () => clearAll({ reset: true }));
 
   // Dubletten: Spezialansicht außerhalb des Chip-Zustands (gallery filtert).
   on("source-changed", (d) => {
@@ -538,6 +594,12 @@ export function initSearch() {
     galleryTotal = d.total;
     renderChips();
   });
+  // Modul-Schalter des Ranking-Moduls (Sidebar liest ihn aus /api/stats).
+  on("rankings-enabled", (d) => {
+    rankingsEnabled = !!d.enabled;
+    renderChips();
+  });
 
   renderChips();
+
 }

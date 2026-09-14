@@ -87,3 +87,49 @@ def test_reparse_replaces_stale_interpretations(db):
         "SELECT value_text FROM interpreted_metadata WHERE file_hash='h1' AND field='seed'"
     ).fetchone()
     assert row["value_text"] == "777"
+
+
+def test_reparse_with_process_pool_matches_single_process(db):
+    """ADR 0067: Parser sind rein — der Pool-Lauf schreibt byte-gleich
+    dieselben Schicht-2-Zeilen wie der Einzelprozess, in Schüben committet."""
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+
+    def rows():
+        return db.execute(
+            """SELECT file_hash, parser, parser_version, ordinal, field, value_text
+                 FROM interpreted_metadata ORDER BY file_hash, parser, ordinal"""
+        ).fetchall()
+
+    for n in range(5):
+        _store_png(db, f"h{n}", text_chunk("parameters", A1111 + f"\nSeed: {n}"))
+    _store_png(db, "h9", text_chunk("title", "kein AI-Werkzeug"))
+    calls = []
+    reparse_database(db, chunk_size=2, progress=lambda r: calls.append(r.items_total))
+    single = [tuple(r) for r in rows()]
+    assert single and calls == [2, 4, 6]     # ein Fortschritt je Schub
+    db.execute("DELETE FROM interpreted_metadata")
+    db.commit()
+    with ProcessPoolExecutor(max_workers=2, mp_context=mp.get_context("spawn")) as pool:
+        report = reparse_database(db, chunk_size=2, pool=pool)
+    assert [tuple(r) for r in rows()] == single
+    assert report.items_total == report.items_planned == 6
+
+
+def test_reparse_skips_unchanged_items(db):
+    """ADR 0067: gleiches Ergebnis wie im Bestand → keine Schreibarbeit
+    (interpreted_at bleibt stehen, items_unchanged zählt)."""
+    _store_png(db, "h1", text_chunk("parameters", A1111))
+    first = reparse_database(db)
+    assert first.items_unchanged == 0
+    stamp = db.execute(
+        "SELECT DISTINCT interpreted_at FROM interpreted_metadata WHERE file_hash = 'h1'"
+    ).fetchall()
+    assert len(stamp) == 1
+    db.execute("UPDATE interpreted_metadata SET interpreted_at = 'T-alt'")
+    db.commit()
+    second = reparse_database(db)
+    assert second.items_unchanged == 1 and second.items_interpreted == 1
+    assert db.execute(
+        "SELECT DISTINCT interpreted_at FROM interpreted_metadata WHERE file_hash = 'h1'"
+    ).fetchall()[0][0] == "T-alt"

@@ -13,6 +13,7 @@
 import { STRINGS } from "./strings.js";
 import { bulkApply, getTags, getModels } from "./api.js";
 import { emit, on } from "./main.js";
+import { registerDialog } from "./overlays.js";
 import { chipText } from "./search.js";
 import { selectionHashes } from "./curate.js";
 
@@ -32,7 +33,9 @@ export function initBulkDialog() {
   overlay.hidden = true;
   document.body.appendChild(overlay);
 
+  let unregister = () => {};   // Dialog-Stapel (ADR 0069)
   function close() {
+    unregister();
     overlay.hidden = true;
     current = null;
   }
@@ -215,13 +218,12 @@ export function initBulkDialog() {
     }
   }
   overlay.addEventListener("input", disarm);
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !overlay.hidden) close();
-  });
 
   on("bulk-dialog-open", (d) => {
     current = d;
     rating = 0;
+    unregister();
+    unregister = registerDialog(overlay, close);
     overlay.hidden = false;
     render();
   });

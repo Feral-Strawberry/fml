@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from feral.db import connect, manual, store_extraction
@@ -140,7 +142,9 @@ def test_reject_blocks_and_keeps_files(db, tmp_path):
         "SELECT reason, last_paths FROM blocked_hashes WHERE file_hash = ?", (A,)
     ).fetchone()
     assert blocked["reason"] == '{"key": "blockedRejected"}'
-    assert str(source) in blocked["last_paths"]       # Pfad-Gedächtnis für I3
+    # Pfad-Gedächtnis für I3 — last_paths ist JSON; roh verglichen scheitert
+    # das unter Windows (Backslashes sind im JSON verdoppelt, Issue #50).
+    assert str(source) in json.loads(blocked["last_paths"])
     assert _fts_manuell(db, A) == ""                  # FTS-Zeile weg
     assert db.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 2   # B, C unberührt
 

@@ -301,3 +301,272 @@ def test_leaderboard_paging(db, arena):
     assert page["total"] == 3
     assert len(page["entries"]) == 1
     assert page["entries"][0]["rank"] == 2
+
+
+# -- Ausscheiden aus der Arena (#87, ADR-0045-Nachtrag 2026-09-08) ------------------
+
+
+def _eliminated(db, arena):
+    return {
+        r[0]: r[1]
+        for r in db.execute(
+            "SELECT file_hash, eliminated FROM ranking_scores WHERE ranking_id=?", (arena,)
+        )
+    }
+
+
+def test_both_lost_eliminates_both(db, arena):
+    # „Beide raus": Punktabzug bleibt (Entscheidung 1), dazu sind beide ab
+    # jetzt aus dem Pool dieser Arena — abgeleitet aus dem Log, keine
+    # eigene Tabelle (Entscheidung 4).
+    rankings_db.record_duel(db, arena, A, B, outcome=rankings_db.BOTH_LOST, now=T0)
+    assert _eliminated(db, arena) == {A: 1, B: 1}
+
+
+def test_win_duel_keeps_elimination(db, arena):
+    # Ein vorgeholtes Sieg-Duell darf den Zustand nicht zurücksetzen.
+    rankings_db.record_duel(db, arena, A, B, outcome=rankings_db.BOTH_LOST, now=T0)
+    rankings_db.record_duel(db, arena, A, C, now=T1)
+    assert _eliminated(db, arena) == {A: 1, B: 1, C: 0}
+
+
+def test_next_pair_excludes_eliminated(db, arena):
+    rankings_db.record_duel(db, arena, A, B, outcome=rankings_db.BOTH_LOST, now=T0)
+    ranking = rankings_db.get(db, arena)
+    for _ in range(10):
+        pair = rankings_web.next_pair(db, ranking, rng=random.Random(5))
+        assert pair["eliminated"] == 2
+        assert _pair_hashes(pair) == {C, D}
+
+
+def test_next_pair_reports_exhausted_pool(db, arena):
+    # Weniger als zwei Aktive: kein 409 („Arena zu klein"), sondern die
+    # Zahlen für den Hinweis (Entscheidung „Pool leer": Hinweis mit Zahlen).
+    rankings_db.record_duel(db, arena, A, B, outcome=rankings_db.BOTH_LOST, now=T0)
+    rankings_db.record_duel(db, arena, C, D, outcome=rankings_db.BOTH_LOST, now=T0)
+    ranking = rankings_db.get(db, arena)
+    assert rankings_web.next_pair(db, ranking) == {
+        "population": 4, "eliminated": 4, "pair": None,
+    }
+
+
+def test_reinstate_restores_pool_keeps_score_and_logs(db, arena):
+    # Rückweg append-only (Entscheidung 3): eine zurueck-Zeile, kein Löschen;
+    # Score und Duell-Zahl bleiben.
+    rankings_db.record_duel(db, arena, A, B, outcome=rankings_db.BOTH_LOST, now=T0)
+    rankings_db.reinstate(db, arena, A, now=T1)
+    assert _eliminated(db, arena) == {A: 0, B: 1}
+    row = db.execute(
+        "SELECT score, duels FROM ranking_scores WHERE ranking_id=? AND file_hash=?",
+        (arena, A),
+    ).fetchone()
+    assert (row[0], row[1]) == (pytest.approx(984.0), 1)
+    log = db.execute(
+        "SELECT winner_hash, loser_hash, outcome FROM ranking_duels ORDER BY id"
+    ).fetchall()
+    assert [tuple(r) for r in log] == [(A, B, "beide_verloren"), (A, A, "zurueck")]
+    ranking = rankings_db.get(db, arena)
+    hashes = set()
+    for _ in range(20):
+        hashes |= _pair_hashes(rankings_web.next_pair(db, ranking, rng=random.Random(6)))
+    assert A in hashes and B not in hashes
+
+
+def test_reinstate_requires_eliminated(db, arena):
+    rankings_db.record_duel(db, arena, A, B, now=T0)
+    with pytest.raises(rankings_db.UserError):
+        rankings_db.reinstate(db, arena, A, now=T1)       # aktiv
+    with pytest.raises(rankings_db.UserError):
+        rankings_db.reinstate(db, arena, C, now=T1)       # nie verglichen
+    assert db.execute("SELECT COUNT(*) FROM ranking_duels").fetchone()[0] == 1
+
+
+def test_reinstate_is_not_a_duel(db, arena):
+    rankings_db.record_duel(db, arena, A, B, outcome=rankings_db.BOTH_LOST, now=T0)
+    rankings_db.reinstate(db, arena, A, now=T1)
+    assert rankings_db.list_rankings(db)[0]["duels"] == 1
+
+
+def test_recompute_restores_elimination_state(db, arena):
+    # Replay muss auch den Ausscheide-Zustand reproduzieren: raus, wieder
+    # rein, erneut raus — die letzte Zeile zählt. Zahl = echte Duelle.
+    steps = [
+        ("both", A, B), ("re", A, None), ("win", A, C), ("both", A, D), ("re", D, None),
+        ("out", D, C),
+    ]
+    for i, (kind, x, y) in enumerate(steps):
+        ts = f"2026-01-0{i + 1}T00:00:00+00:00"
+        if kind == "both":
+            rankings_db.record_duel(db, arena, x, y, outcome=rankings_db.BOTH_LOST, now=ts)
+        elif kind == "win":
+            rankings_db.record_duel(db, arena, x, y, now=ts)
+        elif kind == "out":
+            rankings_db.record_out(db, arena, x, y, now=ts)
+        else:
+            rankings_db.reinstate(db, arena, x, now=ts)
+    before = {
+        r[0]: (r[1], r[2], r[3])
+        for r in db.execute(
+            "SELECT file_hash, score, duels, eliminated FROM ranking_scores WHERE ranking_id=?",
+            (arena,),
+        )
+    }
+    assert {h: e for h, (_, _, e) in before.items()} == {A: 1, B: 1, C: 1, D: 0}
+    assert rankings_db.recompute_scores(db, arena, now=T1) == 4
+    after = {
+        r[0]: (r[1], r[2], r[3])
+        for r in db.execute(
+            "SELECT file_hash, score, duels, eliminated FROM ranking_scores WHERE ranking_id=?",
+            (arena,),
+        )
+    }
+    assert after.keys() == before.keys()
+    for h, (score, duels, eliminated) in before.items():
+        assert after[h][0] == pytest.approx(score)
+        assert after[h][1:] == (duels, eliminated)
+
+
+def test_leaderboard_puts_eliminated_last(db, arena):
+    # Entscheidung 2: Ausgeschiedene geschlossen am Ende, unter sich nach
+    # Score; total zählt alle Gelisteten, eliminated sagt wie viele.
+    rankings_db.record_duel(db, arena, A, B, now=T0)                        # A 1016, B 984
+    rankings_db.record_duel(db, arena, C, D, outcome=rankings_db.BOTH_LOST, now=T0)  # 984
+    rankings_db.record_duel(db, arena, C, B, now=T1)                        # C 1000, B 968
+    ranking = rankings_db.get(db, arena)
+    board = rankings_web.leaderboard(db, ranking)
+    assert (board["total"], board["eliminated"]) == (4, 2)
+    assert [e["file_hash"] for e in board["entries"]] == [A, B, C, D]
+    assert [e["eliminated"] for e in board["entries"]] == [0, 0, 1, 1]
+    assert [e["rank"] for e in board["entries"]] == [1, 2, 3, 4]
+
+
+def test_migration_0023_backfills_old_both_lost(db, arena):
+    # Bestehende „Beide verlieren"-Urteile gelten rückwirkend als
+    # Ausscheiden: den Zustand vor der Migration nachstellen und nur den
+    # UPDATE-Teil der Migrationsdatei erneut anwenden.
+    from pathlib import Path
+
+    from feral.db import database
+
+    rankings_db.record_duel(db, arena, A, B, outcome=rankings_db.BOTH_LOST, now=T0)
+    rankings_db.record_duel(db, arena, C, D, now=T0)
+    db.execute("UPDATE ranking_scores SET eliminated = 0")
+    db.commit()
+    sql = (Path(database.__file__).parent / "migrations" / "0023_arena_ausscheiden.sql").read_text(
+        encoding="utf-8"
+    )
+    updates = [s for s in database._statements(sql) if "UPDATE ranking_scores" in s]
+    assert len(updates) == 1
+    db.execute(updates[0])
+    db.commit()
+    assert _eliminated(db, arena) == {A: 1, B: 1, C: 0, D: 0}
+
+
+def test_out_is_a_win_for_the_partner_and_eliminates_the_loser(db, arena):
+    # „raus" an der Duellkarte (#87-Nachtrag, Variante 2): der Partner gewinnt
+    # nach Elo-Formel, der Verlierer verliert und ist raus — EINE Log-Zeile.
+    scores = rankings_db.record_out(db, arena, B, A, now=T0)
+    assert scores[B] == pytest.approx(1016.0)
+    assert scores[A] == pytest.approx(984.0)
+    rows = {
+        r[0]: (r[1], r[2])
+        for r in db.execute(
+            "SELECT file_hash, duels, eliminated FROM ranking_scores WHERE ranking_id=?", (arena,)
+        )
+    }
+    assert rows == {A: (1, 1), B: (1, 0)}
+    log = db.execute("SELECT winner_hash, loser_hash, outcome FROM ranking_duels").fetchall()
+    assert [tuple(r) for r in log] == [(B, A, "raus")]
+    assert rankings_db.list_rankings(db)[0]["duels"] == 1
+    ranking = rankings_db.get(db, arena)
+    for _ in range(10):
+        assert A not in _pair_hashes(rankings_web.next_pair(db, ranking, rng=random.Random(7)))
+    # Replay reproduziert Sieg + Ausscheiden.
+    assert rankings_db.recompute_scores(db, arena, now=T1) == 1
+    assert _eliminated(db, arena) == {A: 1, B: 0}
+
+
+def test_out_legacy_rows_replay_one_sided(db, arena):
+    # Zeilen aus dem ersten Bauzustand (winner == loser) bleiben abspielbar.
+    db.execute(
+        "INSERT INTO ranking_duels (ranking_id, winner_hash, loser_hash, outcome, created_at)"
+        " VALUES (?, ?, ?, 'raus', ?)",
+        (arena, A, A, T0),
+    )
+    db.commit()
+    assert rankings_db.recompute_scores(db, arena, now=T1) == 1
+    row = db.execute(
+        "SELECT score, duels, eliminated FROM ranking_scores WHERE ranking_id=? AND file_hash=?",
+        (arena, A),
+    ).fetchone()
+    assert (row[0], row[1], row[2]) == (pytest.approx(984.0), 1, 1)
+
+
+# -- Paarung ohne Populations-Kopie (#98, ADR 0072) -------------------------------
+
+
+def test_next_pair_without_sample_uses_exact_fallback(db, arena, monkeypatch):
+    # Stichprobe leer erzwingen: A (und ggf. B) kommen über den exakten
+    # Fallback-Lauf — die Semantik „Unbewertete zuerst" bleibt.
+    monkeypatch.setattr(rankings_web, "SAMPLE_SIZE", 0)
+    rankings_db.record_duel(db, arena, A, B, now=T0)
+    ranking = rankings_db.get(db, arena)
+    for seed in range(10):
+        hashes = _pair_hashes(rankings_web.next_pair(db, ranking, rng=random.Random(seed)))
+        assert len(hashes) == 2
+        assert hashes & {C, D}   # ein Unbewerteter ist immer dabei
+
+
+def test_next_pair_all_scored_picks_fewest_duels_and_window(db, arena):
+    # Alle bewertet: A = seltenst verglichen (C), B aus dem Fenster um C —
+    # A mit 1400 liegt außerhalb und darf nie kommen.
+    db.executemany(
+        "INSERT INTO ranking_scores (ranking_id, file_hash, score, duels, updated_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        [(arena, A, 1400.0, 5, T0), (arena, B, 1000.0, 5, T0),
+         (arena, C, 1050.0, 1, T0), (arena, D, 1100.0, 5, T0)],
+    )
+    db.commit()
+    ranking = rankings_db.get(db, arena)
+    for seed in range(10):
+        hashes = _pair_hashes(rankings_web.next_pair(db, ranking, rng=random.Random(seed)))
+        assert C in hashes
+        assert A not in hashes
+
+
+def test_next_pair_population_count_uses_epoch_cache(db, arena, tmp_path):
+    from feral.web.cache import COLD_KEY, EpochCache
+
+    cache = EpochCache(tmp_path / "feral.sqlite")
+    ranking = rankings_db.get(db, arena)
+    scope: dict = {}
+    assert rankings_web.next_pair(db, ranking, cache=cache, scope=scope)["population"] == 4
+    assert scope[COLD_KEY] == "start"
+    scope = {}
+    rankings_web.next_pair(db, ranking, cache=cache, scope=scope)
+    assert COLD_KEY not in scope   # warm: Zahl aus dem Cache
+    rankings_db.record_duel(db, arena, A, B, now=T0)   # Commit ⇒ neue Epoche
+    scope = {}
+    assert rankings_web.leaderboard(db, ranking, cache=cache, scope=scope)["population"] == 4
+    assert scope[COLD_KEY] == "write"
+    cache.close()
+
+
+def test_filtered_arena_scores_and_elimination(db, arena):
+    # Gefilterter Pfad (materialisierte CTE, ADR 0072): Population „nur PNG"
+    # (A/B/C), A ausgeschieden ⇒ Paar aus {B, C}, Zahlen stimmen, D (JPEG)
+    # bleibt draußen — auch in der Bestenliste.
+    rid = rankings_db.create(db, "Nur PNG", "container: png", now=T0)
+    rankings_db.record_duel(db, rid, A, B, now=T0)
+    rankings_db.record_duel(db, rid, A, D, outcome=rankings_db.OUT, now=T0)   # D raus (außerhalb)
+    db.execute("UPDATE ranking_scores SET eliminated = 1 WHERE ranking_id = ? AND file_hash = ?",
+               (rid, A))
+    db.commit()
+    ranking = rankings_db.get(db, rid)
+    for seed in range(10):
+        pair = rankings_web.next_pair(db, ranking, rng=random.Random(seed))
+        assert (pair["population"], pair["eliminated"]) == (3, 1)
+        assert _pair_hashes(pair) == {B, C}
+    board = rankings_web.leaderboard(db, ranking)
+    assert (board["population"], board["total"], board["eliminated"]) == (3, 2, 1)
+    assert [e["file_hash"] for e in board["entries"]] == [B, A]   # Ausgeschiedene zuletzt

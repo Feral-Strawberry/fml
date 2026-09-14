@@ -474,6 +474,93 @@ def test_resolve_media_skips_foreign_bytes_at_stale_location(db, tmp_path):
     assert path == str(kopie)
 
 
+def test_location_kind_classifies_by_config_roots():
+    """Herkunftsklasse eines Fundorts (ADR-0062-Nachtrag): Library-Root und
+    Watch-Quellen aus der Config, separator- und ASCII-case-unempfindlich
+    (wie das fundort:-Prädikat per LIKE), sonst extern."""
+    kind = library.location_kind
+    assert kind("D:/fml/bestand/2026/09/08/a.png", r"D:\fml\bestand", []) == "library"
+    assert kind(r"d:\FML\Bestand\2026\a.png", "D:/fml/bestand", []) == "library"
+    assert kind("/media/usb/out/a.png", "/lib", ["/media/usb/out"]) == "watch"
+    assert kind("/media/usb/output/a.png", "/lib", ["/media/usb/out"]) == "extern"  # kein Präfix-Treffer auf Namensteil
+    assert kind("/alt/scan/a.png", None, []) == "extern"
+
+
+def test_ordered_locations_library_before_watch_before_extern(db, tmp_path, monkeypatch):
+    """Fundort-Priorisierung (Issue #37): brauchbar vor unbrauchbar, darin
+    Library > Watch-Quelle > extern, zuletzt Einfüge-Reihenfolge; genau
+    einer ist ``preferred`` — den nimmt resolve_media."""
+    from feral.web import filters
+
+    data = build_png(text_chunk("parameters", "x"))
+    lib = tmp_path / "bestand" / "2026"; lib.mkdir(parents=True)
+    quelle = tmp_path / "quelle"; quelle.mkdir()
+    extern = tmp_path / "alt"; extern.mkdir()
+    paths = {
+        "extern": extern / "a.png", "watch": quelle / "a.png", "library": lib / "a.png",
+    }
+    for p in paths.values():
+        p.write_bytes(data)
+    weg = extern / "weg.png"                     # existiert nicht
+    fremd = extern / "fremd.png"; fremd.write_bytes(data + b"!")   # falsche Größe
+
+    monkeypatch.setattr(filters, "library_root_provider", lambda: str(tmp_path / "bestand"))
+    monkeypatch.setattr(library, "watch_roots_provider", lambda: [str(quelle)])
+
+    # Einfüge-Reihenfolge absichtlich verkehrt herum: extern zuerst.
+    ext = png.extract(io.BytesIO(data))
+    for p in (weg, paths["extern"], fremd, paths["watch"], paths["library"]):
+        store_extraction(db, file_hash="h1", file_size=len(data), path=str(p), extraction=ext)
+
+    locs = library.ordered_locations(db, "h1", len(data))
+    assert [l["path"] for l in locs] == [
+        str(paths["library"]), str(paths["watch"]), str(paths["extern"]), str(weg), str(fremd)]
+    assert [l["kind"] for l in locs] == ["library", "watch", "extern", "extern", "extern"]
+    assert [l["preferred"] for l in locs] == [True, False, False, False, False]
+    assert locs[3] == {"path": str(weg), "exists": False, "usable": False,
+                       "kind": "extern", "preferred": False}
+    assert locs[4]["exists"] is True and locs[4]["usable"] is False
+
+    path, _mime = library.resolve_media(db, "h1")
+    assert path == str(paths["library"])
+    detail = library.item_detail(db, "h1")
+    assert detail["locations"] == locs
+
+    # Ohne Library-Kopie rückt die Watch-Quelle nach.
+    paths["library"].unlink()
+    assert library.resolve_media(db, "h1")[0] == str(paths["watch"])
+
+
+def test_match_location_whitelists_locations_and_dir_prefixes():
+    locs = [{"path": r"D:\fml\bestand\2026\a.png", "usable": True},
+            {"path": "/media/usb/out/b.png", "usable": False}]
+    m = library.match_location
+    assert m(locs, r"d:\FML\bestand\2026\a.png", what="file") is locs[0]
+    assert m(locs, "D:/fml/bestand/2026/a.png", what="file") is locs[0]
+    assert m(locs, r"D:\fml\bestand", what="folder") is locs[0]
+    assert m(locs, "D:\\", what="folder") is locs[0]              # Laufwerkswurzel
+    assert m(locs, "/media/usb/out", what="folder") is locs[1]
+    assert m(locs, "/media/usb/ou", what="folder") is None        # Namensteil
+    assert m(locs, "/media/usb/out/b.png", what="folder") is None # Datei ≠ Ordner
+    assert m(locs, r"D:\fml\bestand\2026", what="file") is None
+    assert m(locs, "", what="folder") is None
+
+
+def test_resolve_media_verify_respects_size_guard(db, tmp_path, monkeypatch):
+    """verify hasht nur bis VERIFY_MAX_BYTES (Issue #37); darüber trägt der
+    Größen-Wächter allein, und resolve_media_verified sagt das ehrlich."""
+    data = build_png(text_chunk("parameters", "x"))
+    p = tmp_path / "a.png"; p.write_bytes(data)
+    _store(db, "h1", str(p), text_chunk("parameters", "x"), file_size=len(data))
+
+    # Kleine Datei: wird gehasht — Hash "h1" stimmt nicht mit dem Inhalt überein.
+    assert library.resolve_media(db, "h1", verify=True) is None
+    monkeypatch.setattr(library, "VERIFY_MAX_BYTES", len(data) - 1)
+    assert library.resolve_media_verified(db, "h1", verify=True) == (str(p), "image/png", False)
+    monkeypatch.setattr(library, "VERIFY_MAX_BYTES", len(data))
+    assert library.resolve_media_verified(db, "h1", verify=True) is None
+
+
 # -- Manuelle Schicht in Bestand & Suche (Stufe 3.2, ADR 0017) ---------------------
 
 
@@ -706,6 +793,32 @@ def test_facets_payload_loras(db):
     assert out["loras"][0] == {"lora": "detail-tweaker", "count": 2}
 
 
+def test_facets_payload_tools_generator_facet(db):
+    from feral.db import manual
+
+    _store_fields(db, "h1" * 32, "/h1.png", [("tool", "comfyui")])
+    _store_fields(db, "h2" * 32, "/h2.png", [("tool", "comfyui")])
+    _store_fields(db, "h3" * 32, "/h3.png", [("tool", "gemini"), ("tool", "gemini")])
+    manual.set_rating(db, "h3" * 32, 5)
+
+    out = library.facets_payload(db)
+    assert out["tools"] == [
+        {"tool": "comfyui", "count": 2},
+        {"tool": "gemini", "count": 1},        # je Item einmal gezählt
+    ]
+
+    out = library.facets_payload(db, filter_expr="rating>=4")
+    assert out["tools"] == [
+        {"tool": "comfyui", "count": 0},       # gedimmt, nicht versteckt
+        {"tool": "gemini", "count": 1},
+    ]
+
+    # Eigener Generator-Chip klammert sich aus — auch über den Alias.
+    for expr in ('tool: "gemini"', 'generator: "gemini"'):
+        out = library.facets_payload(db, filter_expr=expr)
+        assert out["tools"][0] == {"tool": "comfyui", "count": 2}, expr
+
+
 def test_facets_payload_input_image(db):
     from feral.db import manual
 
@@ -779,11 +892,77 @@ def test_facet_hits_tables_are_shared_and_cleaned(db):
 
     _store_models(db, "k1" * 32, "/k1.png", ["sdxl"])
     manual.set_rating(db, "k1" * 32, 5)
-    library.facets_payload(db, filter_expr="rating>=4")
+    # datei: + text: laufen über Memo-Tabellen (#99) — auch die sind danach weg.
+    library.facets_payload(db, filter_expr="rating>=4 datei: k1 -text: zzz")
+    leftover = db.execute(
+        "SELECT name FROM sqlite_temp_master WHERE type='table' AND name LIKE 'facet_%'"
+    ).fetchall()
+    assert leftover == []
+
+
+# -- Sidebar-Zähler aus EINEM Lauf (#99, ADR 0073) ---------------------------------
+
+
+def _seed_sidebar(db):
+    from feral.db import manual
+
+    _store_models(db, "s1" * 32, "/s1.png", ["sdxl"])
+    _store_models(db, "s2" * 32, "/s2.png", ["sdxl"])
+    _store_models(db, "s3" * 32, "/s3.jpg", ["flux"])
+    manual.set_rating(db, "s1" * 32, 5)
+    manual.set_rating(db, "s3" * 32, 2)
+    manual.add_tag(db, "s2" * 32, "wald")
+
+
+def _bases(db):
+    models, unknown = library.model_base(db)
+    return dict(base_models=models, base_unknown=unknown,
+                base_facets=library.facets_payload(db), base_ratings=library.ratings_facet(db))
+
+
+@pytest.mark.parametrize("expr", [
+    'model: "sdxl"', "rating>=4", 'model: "sdxl" rating>=2 tag: wald', "sort: name",
+])
+def test_sidebar_payload_equals_the_three_endpoints(db, expr):
+    # EIN _FacetHits für alle drei Gruppen liefert exakt das, was die drei
+    # Einzelendpunkte je für sich rechnen — und räumt seine Temp-Tabellen auf.
+    _seed_sidebar(db)
+    side = library.sidebar_payload(db, filter_expr=expr, **_bases(db))
+    assert side["models"] == library.models_facet(db, filter_expr=expr)
+    assert side["facets"] == library.facets_payload(db, filter_expr=expr)
+    assert side["ratings"] == library.ratings_facet(db, filter_expr=expr)
     leftover = db.execute(
         "SELECT name FROM sqlite_temp_master WHERE type='table' AND name LIKE 'facet_hits%'"
     ).fetchall()
     assert leftover == []
+
+
+def test_sidebar_payload_context_counts(db):
+    _seed_sidebar(db)
+    side = library.sidebar_payload(db, filter_expr="rating>=4", **_bases(db))
+    # Modelle im Kontext des Ratings (nur s1 hat >= 4): sdxl 1, flux 0 (gedimmt, nicht weg).
+    assert {m["model"]: m["count"] for m in side["models"]["models"]} == {"sdxl": 1, "flux": 0}
+    # Die Bewertungs-Gruppe klammert ihren eigenen Chip aus: volle Verteilung.
+    assert {r["rating"]: r["count"] for r in side["ratings"]} == {5: 1, 2: 1}
+    # Dateityp im Kontext: nur s1.png.
+    assert {c["container"]: c["count"] for c in side["facets"]["containers"]} == {"png": 1}
+
+
+def test_filtered_facets_leave_the_cached_base_untouched(db):
+    # Die Basis kann aus dem Epochen-Cache kommen (unveränderlich, ADR 0048):
+    # der Kontext-Pfad darf keine Zähler darin überschreiben — vorher wurde
+    # years["undated"] im geladenen Objekt umgebogen.
+    import copy
+
+    _seed_sidebar(db)
+    base = library.facets_payload(db)
+    frozen = copy.deepcopy(base)
+    filtered = library.facets_payload(db, filter_expr='model: "flux"', base=base)
+    assert base == frozen
+    assert filtered == library.facets_payload(db, filter_expr='model: "flux"')
+    assert filtered["undated"] == 1 and base["undated"] == 3   # Kontext vs. Basis
+    rated = library.ratings_facet(db, filter_expr='model: "flux"', base=library.ratings_facet(db))
+    assert rated == library.ratings_facet(db, filter_expr='model: "flux"')
 
 
 # -- Library vs. Extern (ADR 0041, I2) -----------------------------------------------
@@ -829,3 +1008,33 @@ def test_fundort_facet_counts_and_context(db, monkeypatch):
 def test_fundort_facet_hidden_without_root(db):
     assert library.fundort_counts(db) is None
     assert library.facets_payload(db)["fundort"] is None
+
+
+def test_grid_display_tool_subquery_uses_hash_index(db):
+    """Issue #85: ohne Planer-Statistik (frische DB) wählte SQLite für die
+    tool-Unterabfrage den Covering-Index aus Migration 0009 (``field=?``) —
+    ein Scan über alle tool-Zeilen je Kachel, 1,1 s statt 1 ms je Seite.
+    Das unäre Plus zwingt den Hash-Index, unabhängig von ``sqlite_stat1``."""
+    assert not db.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name = 'sqlite_stat1'"
+    ).fetchone()[0], "Test braucht eine DB OHNE Statistik"
+    plan = " ".join(
+        row[3] for row in db.execute(
+            "EXPLAIN QUERY PLAN " + library._GRID_DISPLAY_SQL
+            + " ORDER BY i.file_size DESC, i.file_hash LIMIT 200"
+        )
+    )
+    assert "idx_interpreted_hash" in plan
+    assert "idx_interpreted_field_value" not in plan
+
+
+def test_optimize_writes_planner_statistics(db):
+    """``db.optimize`` (#85): nach Abfragen liegt Statistik in sqlite_stat1."""
+    from feral.db import optimize
+
+    _store(db, "a" * 64, "/x/a.png", text_chunk("parameters", "p\nSteps: 1"))
+    db.execute("SELECT COUNT(*) FROM interpreted_metadata WHERE field = 'tool'").fetchone()
+    optimize(db)
+    assert db.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name = 'sqlite_stat1'"
+    ).fetchone()[0] == 1

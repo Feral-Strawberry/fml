@@ -15,7 +15,7 @@ from ..db import manual
 from ..hashing import hash_file
 from . import filters
 from .cache import EpochCache
-from typing import Any
+from typing import Any, Callable
 
 
 def list_roots() -> list[dict[str, str]]:
@@ -436,9 +436,30 @@ class _FacetHits:
     def __init__(self, conn: sqlite3.Connection):
         self._conn = conn
         self._tables: dict[str, str] = {}
+        self._memos: dict[str, str] = {}
+
+    def _memo(self, sql: str, params: list[Any]) -> str:
+        """Teuren Mengen-Subselect (FTS-Volltext, Fundort-LIKE-Scan) EINMAL je
+        Aufruf materialisieren (#99, ADR 0073). Die Gruppen-Treffermengen
+        (voll, ohne Modell-Chips, ohne Jahres-Chips, …) unterscheiden sich
+        nur in billigen Prädikaten; ohne Memo lief jede von ihnen die
+        Volltext-Subselects erneut — bei zwanzig Kriterien fünfmal ~400 ms.
+        Mit Memo ist jede weitere Menge ein Index-Lauf über ``items``."""
+        key = sql + "\x00" + repr(params)
+        name = self._memos.get(key)
+        if name is None:
+            name = f"facet_memo_{len(self._memos)}"
+            self._conn.execute(
+                f"CREATE TEMP TABLE {name} AS SELECT DISTINCT file_hash FROM ({sql})",
+                params,
+            )
+            self._conn.execute(f"CREATE UNIQUE INDEX idx_{name} ON {name}(file_hash)")
+            self._conn.execute(f"ANALYZE {name}")
+            self._memos[key] = name
+        return f"SELECT file_hash FROM {name}"
 
     def table(self, predicates: list[filters.Predicate]) -> str | None:
-        fragment, params = filters.build_where(predicates)
+        fragment, params = filters.build_where(predicates, memo=self._memo)
         if not fragment:
             return None
         key = fragment + "\x00" + repr(params)
@@ -459,9 +480,10 @@ class _FacetHits:
         return name
 
     def close(self) -> None:
-        for name in self._tables.values():
+        for name in (*self._tables.values(), *self._memos.values()):
             self._conn.execute(f"DROP TABLE IF EXISTS {name}")
         self._tables.clear()
+        self._memos.clear()
 
 
 def _filtered_model_counts(
@@ -520,9 +542,31 @@ def _filtered_model_counts(
     return folded
 
 
+def model_base(
+    conn: sqlite3.Connection, *, order: str = "zuletzt",
+    cache: EpochCache | None = None, scope: dict | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    """Globale Modell-Basisliste + „(unbekanntes Modell)"-Zähler.
+
+    Beides ist filterunabhängig und teuer (Basisliste ~330 ms, Unbekannt-
+    Zähler ~90 ms bei 250k); ``cache`` (ADR 0048/0073) merkt sich die Liste
+    je Sortier-Reihenfolge und den Zähler einmal bis zum nächsten
+    Schreibvorgang. ``scope`` (ASGI-Scope) bekommt bei einer Neuberechnung
+    die Kalt-Markierung (``cache.COLD_KEY``, ADR 0071).
+    """
+    if cache is None:
+        return model_counts(conn, order=order), model_unknown_count(conn)
+    base = cache.get(("model_counts", order),
+                     lambda: model_counts(conn, order=order), scope=scope)
+    unknown = cache.get(("model_unknown",),
+                        lambda: model_unknown_count(conn), scope=scope)
+    return base, unknown
+
+
 def models_facet(
     conn: sqlite3.Connection, *, order: str = "zuletzt",
     filter_expr: str | None = None, cache: EpochCache | None = None,
+    scope: dict | None = None,
 ) -> dict[str, Any]:
     """„Nach Modell" mit mitfilternden Zählern (Block S4).
 
@@ -531,48 +575,51 @@ def models_facet(
     gäbe); bei aktivem Filter werden die Zähler im Kontext gerechnet.
     Wirft ``ValueError`` bei ungültigem Ausdruck.
 
-    ``cache`` (ADR 0048) merkt sich die teure globale Basisliste
-    (``model_counts``, filter-unabhängig — ein Eintrag je Sortier-
-    Reihenfolge) bis zum nächsten Schreibvorgang; die filterabhängigen
-    Kontext-Zähler bleiben ungecacht.
+    ``cache``/``scope`` gehen an ``model_base`` (Basisliste + Unbekannt-
+    Zähler aus dem Epochen-Cache); die filterabhängigen Kontext-Zähler
+    rechnen je Ausdruck. Die Sidebar holt alle drei Gruppen über
+    ``sidebar_payload`` (ein Filterlauf, #99); dieser Endpunkt bleibt für
+    Einzelabfragen (Modell-Liste in Detail/Sammel-Dialog).
     """
-    if cache is not None:
-        base = cache.get(("model_counts", order),
-                         lambda: model_counts(conn, order=order))
-    else:
-        base = model_counts(conn, order=order)
-    unknown = model_unknown_count(conn)
+    base, unknown = model_base(conn, order=order, cache=cache, scope=scope)
     predicates = filters.parse(filter_expr) if filter_expr else []
-    effective = _group_predicates(predicates, field="model")
     hits_mgr = _FacetHits(conn)
     try:
-        hits = hits_mgr.table(effective)
-        if hits is None:
-            return {"models": base, "unknown": unknown, "unknown_total": unknown}
-        # Roh-Name → gefalteter Basis-Eintrag (Block N): die Kontext-Zähler
-        # müssen unter denselben Schlüsseln laufen wie die Basisliste.
-        alias = {raw: m["model"] for m in base for raw in m.get("variants", [])}
-        counts = _filtered_model_counts(conn, hits, alias)
-        total = conn.execute(f"SELECT COUNT(*) FROM {hits}").fetchone()[0]
-        known = conn.execute(
-            f"""SELECT COUNT(*) FROM {hits} ht
-                 WHERE ht.file_hash IN (
-                       SELECT file_hash FROM interpreted_metadata
-                        WHERE field = 'model' AND value_text != ''
-                       UNION
-                       SELECT file_hash FROM annotations
-                        WHERE model IS NOT NULL AND model != '')"""
-        ).fetchone()[0]
-        return {
-            "models": [{**m, "count": counts.get(m["model"], 0)} for m in base],
-            # unknown = Kontext-Zähler; unknown_total = global — die Zeile
-            # „(unbekanntes Modell)" bleibt sichtbar (gedimmt), wenn es sie
-            # überhaupt gibt (0-Dimmen statt Verstecken, Design-Doc §3.4).
-            "unknown": total - known if unknown else 0,
-            "unknown_total": unknown,
-        }
+        return _models_context(conn, hits_mgr, predicates, base, unknown)
     finally:
         hits_mgr.close()
+
+
+def _models_context(
+    conn: sqlite3.Connection, hits_mgr: _FacetHits, predicates: list[filters.Predicate],
+    base: list[dict[str, Any]], unknown: int,
+) -> dict[str, Any]:
+    """Modell-Zähler im Kontext der anderen Chips über der globalen Basis."""
+    hits = hits_mgr.table(_group_predicates(predicates, field="model"))
+    if hits is None:
+        return {"models": base, "unknown": unknown, "unknown_total": unknown}
+    # Roh-Name → gefalteter Basis-Eintrag (Block N): die Kontext-Zähler
+    # müssen unter denselben Schlüsseln laufen wie die Basisliste.
+    alias = {raw: m["model"] for m in base for raw in m.get("variants", [])}
+    counts = _filtered_model_counts(conn, hits, alias)
+    total = conn.execute(f"SELECT COUNT(*) FROM {hits}").fetchone()[0]
+    known = conn.execute(
+        f"""SELECT COUNT(*) FROM {hits} ht
+             WHERE ht.file_hash IN (
+                   SELECT file_hash FROM interpreted_metadata
+                    WHERE field = 'model' AND value_text != ''
+                   UNION
+                   SELECT file_hash FROM annotations
+                    WHERE model IS NOT NULL AND model != '')"""
+    ).fetchone()[0]
+    return {
+        "models": [{**m, "count": counts.get(m["model"], 0)} for m in base],
+        # unknown = Kontext-Zähler; unknown_total = global — die Zeile
+        # „(unbekanntes Modell)" bleibt sichtbar (gedimmt), wenn es sie
+        # überhaupt gibt (0-Dimmen statt Verstecken, Design-Doc §3.4).
+        "unknown": total - known if unknown else 0,
+        "unknown_total": unknown,
+    }
 
 
 def lora_counts(
@@ -589,6 +636,27 @@ def lora_counts(
                   FROM interpreted_metadata m {join}
                  WHERE m.field = 'lora' AND m.value_text != ''
                  GROUP BY m.value_text ORDER BY count DESC, lora ASC LIMIT ?""",
+            (limit,),
+        )
+    ]
+
+
+def tool_counts(
+    conn: sqlite3.Connection, *, limit: int = 200, hits: str | None = None
+) -> list[dict[str, Any]]:
+    """Sidebar-Gruppe „Generator" (ADR 0066): alle ``tool``-Werte aus
+    Schicht 2 (a1111, comfyui, gemini, chatgpt, …) mit Item-Zählern,
+    häufigste zuerst; optional innerhalb einer Treffermenge. Gleiche
+    Bauform wie ``lora_counts`` — ein Index-Bereichsscan über den
+    Covering-Index aus Migration 0009."""
+    join = f"JOIN {hits} ht ON ht.file_hash = m.file_hash" if hits else ""
+    return [
+        dict(r)
+        for r in conn.execute(
+            f"""SELECT m.value_text AS tool, COUNT(DISTINCT m.file_hash) AS count
+                  FROM interpreted_metadata m {join}
+                 WHERE m.field = 'tool' AND m.value_text != ''
+                 GROUP BY m.value_text ORDER BY count DESC, tool ASC LIMIT ?""",
             (limit,),
         )
     ]
@@ -630,7 +698,7 @@ def fundort_counts(
     conn: sqlite3.Connection, *, hits: str | None = None
 ) -> dict[str, int] | None:
     """Facette „Fundort" (ADR 0041, I2): Items in der Library vs. nur extern
-    indiziert, optional innerhalb einer Treffermenge. ``None``, wenn keine
+    katalogisiert, optional innerhalb einer Treffermenge. ``None``, wenn keine
     ``library.root`` konfiguriert ist — dann gibt es die Unterscheidung nicht
     (die Sidebar blendet die Gruppe aus)."""
     prefix = filters.library_like_prefix()
@@ -648,98 +716,188 @@ def fundort_counts(
 
 
 def facets_payload(
-    conn: sqlite3.Connection, *, filter_expr: str | None = None
+    conn: sqlite3.Connection, *, filter_expr: str | None = None,
+    base: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Alle Gruppen des ``/api/facets``-Endpunkts, je Gruppe im Kontext der
-    anderen Chips (Block S4). Wirft ``ValueError`` bei ungültigem Ausdruck."""
+    anderen Chips (Block S4). Wirft ``ValueError`` bei ungültigem Ausdruck.
+
+    ``base`` ist das ungefilterte Ergebnis (aus dem Epochen-Cache, ADR 0071):
+    es bestimmt Zeilenmenge und Reihenfolge der globalen Listen, die Zähler
+    kommen aus dem Kontext. Ohne ``base`` werden die globalen Listen
+    mitgerechnet (~140 ms bei 250k — vor #99 bei jedem gefilterten Aufruf).
+    """
     predicates = filters.parse(filter_expr) if filter_expr else []
+    if base is None:
+        base = _facets_base(conn)
+    if not predicates:
+        return base
     hits_mgr = _FacetHits(conn)
     try:
-        # Dateityp: globale Liste bestimmt die Zeilen, Zähler im Kontext.
-        hits = hits_mgr.table(_group_predicates(predicates, kinds=("container",)))
-        containers = container_counts(conn)
-        if hits is not None:
-            counts = {r["container"]: r["n"] for r in conn.execute(
-                f"SELECT container, COUNT(*) AS n FROM {hits} GROUP BY container")}
-            containers = [{"container": c["container"],
-                           "count": counts.get(c["container"], 0)} for c in containers]
-
-        # Format/Auflösung: feste Eimer — dieselben Grenzen wie die Prädikate.
-        hits = hits_mgr.table(_group_predicates(predicates, kinds=("format",)))
-        formats = (format_counts(conn) if hits is None
-                   else _bucket_counts(conn, hits, filters.FORMATS, _FORMAT_CASE))
-        hits = hits_mgr.table(_group_predicates(predicates, kinds=("mp",)))
-        megapixels = (megapixel_counts(conn) if hits is None
-                      else _bucket_counts(conn, hits, filters.MEGAPIXELS, _MP_CASE))
-
-        # Jahr/Monat: globale Struktur, Zähler im Kontext (inkl. „ohne Datum").
-        hits = hits_mgr.table(_group_predicates(predicates, kinds=("year", "month")))
-        years = year_counts(conn)
-        years["undated_total"] = years["undated"]   # Zeile dimmen statt verstecken
-        if hits is not None:
-            by_month: dict[str | None, int] = {r["month"]: r["n"] for r in conn.execute(
-                f"""SELECT substr(media_date, 1, 7) AS month, COUNT(*) AS n
-                      FROM {hits} GROUP BY month""")}
-            for y in years["years"]:
-                for m in y["months"]:
-                    m["count"] = by_month.get(m["month"], 0)
-                y["count"] = sum(m["count"] for m in y["months"])
-            years["undated"] = by_month.get(None, 0) if years["undated"] else 0
-
-        # Nach LoRA + Eingangsbild (neu in S4).
-        hits = hits_mgr.table(_group_predicates(predicates, field="lora"))
-        loras = lora_counts(conn)
-        if hits is not None:
-            counts = {r["lora"]: r["count"] for r in lora_counts(conn, hits=hits)}
-            loras = [{"lora": l["lora"], "count": counts.get(l["lora"], 0)}
-                     for l in loras]
-        hits = hits_mgr.table(_group_predicates(predicates, field="input_image"))
-        input_image = input_image_counts(conn, hits=hits)
-
-        # Fundort: Library vs. Extern (ADR 0041, I2) — None ohne library.root.
-        hits = hits_mgr.table(_group_predicates(predicates, kinds=("fundort",)))
-        fundort = fundort_counts(conn, hits=hits)
-
-        # Tags (neu in S5): fürs „+ Kriterium"-Popover und die Tipphilfe —
-        # globale Liste bestimmt die Zeilen, Zähler im Kontext.
-        hits = hits_mgr.table(_group_predicates(predicates, kinds=("tag",)))
-        tags = tag_counts(conn)
-        if hits is not None:
-            counts = {r["tag"]: r["count"] for r in tag_counts(conn, hits=hits)}
-            tags = [{"tag": t["tag"], "count": counts.get(t["tag"], 0)}
-                    for t in tags]
-
-        return {
-            "containers": containers,
-            "formats": formats,
-            "megapixels": megapixels,
-            **years,
-            "loras": loras,
-            "input_image": input_image,
-            "fundort": fundort,
-            "tags": tags,
-        }
+        return _facets_context(conn, hits_mgr, predicates, base)
     finally:
         hits_mgr.close()
 
 
+def _facets_base(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Der ungefilterte Weg: globale Listen und Verteilungen (schneller als
+    die Temp-Tabelle über den ganzen Bestand, ADR 0037)."""
+    years = year_counts(conn)
+    years["undated_total"] = years["undated"]   # Zeile dimmen statt verstecken
+    return {
+        "containers": container_counts(conn),
+        "formats": format_counts(conn),
+        "megapixels": megapixel_counts(conn),
+        **years,
+        "loras": lora_counts(conn),
+        "tools": tool_counts(conn),
+        "input_image": input_image_counts(conn),
+        "fundort": fundort_counts(conn),
+        "tags": tag_counts(conn),
+    }
+
+
+def _facets_context(
+    conn: sqlite3.Connection, hits_mgr: _FacetHits, predicates: list[filters.Predicate],
+    base: dict[str, Any],
+) -> dict[str, Any]:
+    """Zähler je Gruppe im Kontext der ANDEREN Chips über der globalen Basis.
+    ``base`` wird nicht verändert (kann aus dem Cache stammen)."""
+    # Dateityp: globale Liste bestimmt die Zeilen, Zähler im Kontext.
+    hits = hits_mgr.table(_group_predicates(predicates, kinds=("container",)))
+    containers = base["containers"]
+    if hits is not None:
+        counts = {r["container"]: r["n"] for r in conn.execute(
+            f"SELECT container, COUNT(*) AS n FROM {hits} GROUP BY container")}
+        containers = [{"container": c["container"],
+                       "count": counts.get(c["container"], 0)} for c in base["containers"]]
+
+    # Format/Auflösung: feste Eimer — dieselben Grenzen wie die Prädikate.
+    hits = hits_mgr.table(_group_predicates(predicates, kinds=("format",)))
+    formats = (base["formats"] if hits is None
+               else _bucket_counts(conn, hits, filters.FORMATS, _FORMAT_CASE))
+    hits = hits_mgr.table(_group_predicates(predicates, kinds=("mp",)))
+    megapixels = (base["megapixels"] if hits is None
+                  else _bucket_counts(conn, hits, filters.MEGAPIXELS, _MP_CASE))
+
+    # Jahr/Monat: globale Struktur, Zähler im Kontext (inkl. „ohne Datum").
+    hits = hits_mgr.table(_group_predicates(predicates, kinds=("year", "month")))
+    years: dict[str, Any] = {"years": base["years"], "undated": base["undated"],
+                             "undated_total": base["undated_total"]}
+    if hits is not None:
+        by_month: dict[str | None, int] = {r["month"]: r["n"] for r in conn.execute(
+            f"""SELECT substr(media_date, 1, 7) AS month, COUNT(*) AS n
+                  FROM {hits} GROUP BY month""")}
+        years["years"] = []
+        for y in base["years"]:
+            months = [{"month": m["month"], "count": by_month.get(m["month"], 0)}
+                      for m in y["months"]]
+            years["years"].append({"year": y["year"],
+                                   "count": sum(m["count"] for m in months),
+                                   "months": months})
+        years["undated"] = by_month.get(None, 0) if base["undated_total"] else 0
+
+    # Nach LoRA + Eingangsbild (neu in S4).
+    hits = hits_mgr.table(_group_predicates(predicates, field="lora"))
+    loras = base["loras"]
+    if hits is not None:
+        counts = {r["lora"]: r["count"] for r in lora_counts(conn, hits=hits)}
+        loras = [{"lora": l["lora"], "count": counts.get(l["lora"], 0)}
+                 for l in base["loras"]]
+    hits = hits_mgr.table(_group_predicates(predicates, field="input_image"))
+    input_image = base["input_image"] if hits is None else input_image_counts(conn, hits=hits)
+
+    # Generator (ADR 0066): globale Liste bestimmt die Zeilen, Zähler im
+    # Kontext der anderen Chips; der eigene tool:-Chip klammert sich aus.
+    hits = hits_mgr.table(_group_predicates(predicates, field="tool"))
+    tools = base["tools"]
+    if hits is not None:
+        counts = {r["tool"]: r["count"] for r in tool_counts(conn, hits=hits)}
+        tools = [{"tool": t["tool"], "count": counts.get(t["tool"], 0)}
+                 for t in base["tools"]]
+
+    # Fundort: Library vs. Extern (ADR 0041, I2) — None ohne library.root.
+    hits = hits_mgr.table(_group_predicates(predicates, kinds=("fundort",)))
+    fundort = base["fundort"] if hits is None else fundort_counts(conn, hits=hits)
+
+    # Tags (neu in S5): fürs „+ Kriterium"-Popover und die Tipphilfe —
+    # globale Liste bestimmt die Zeilen, Zähler im Kontext.
+    hits = hits_mgr.table(_group_predicates(predicates, kinds=("tag",)))
+    tags = base["tags"]
+    if hits is not None:
+        counts = {r["tag"]: r["count"] for r in tag_counts(conn, hits=hits)}
+        tags = [{"tag": t["tag"], "count": counts.get(t["tag"], 0)}
+                for t in base["tags"]]
+
+    return {
+        "containers": containers,
+        "formats": formats,
+        "megapixels": megapixels,
+        **years,
+        "loras": loras,
+        "tools": tools,
+        "input_image": input_image,
+        "fundort": fundort,
+        "tags": tags,
+    }
+
+
 def ratings_facet(
-    conn: sqlite3.Connection, *, filter_expr: str | None = None
+    conn: sqlite3.Connection, *, filter_expr: str | None = None,
+    base: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Bewertungs-Verteilung im Kontext der anderen Chips (Block S4)."""
-    base = rating_counts(conn)
+    """Bewertungs-Verteilung im Kontext der anderen Chips (Block S4).
+    ``base`` = ungefilterte Verteilung (Epochen-Cache), sonst mitgerechnet."""
+    if base is None:
+        base = rating_counts(conn)
+    predicates = filters.parse(filter_expr) if filter_expr else []
+    if not predicates:
+        return base
+    hits_mgr = _FacetHits(conn)
+    try:
+        return _ratings_context(conn, hits_mgr, predicates, base)
+    finally:
+        hits_mgr.close()
+
+
+def _ratings_context(
+    conn: sqlite3.Connection, hits_mgr: _FacetHits, predicates: list[filters.Predicate],
+    base: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    hits = hits_mgr.table(_group_predicates(predicates, kinds=("rating",)))
+    if hits is None:
+        return base
+    counts = {r["rating"]: r["n"] for r in conn.execute(
+        f"""SELECT a.rating, COUNT(*) AS n
+              FROM {hits} ht JOIN annotations a ON a.file_hash = ht.file_hash
+             WHERE a.rating IS NOT NULL GROUP BY a.rating""")}
+    return [{"rating": b["rating"], "count": counts.get(b["rating"], 0)}
+            for b in base]
+
+
+def sidebar_payload(
+    conn: sqlite3.Connection, *, filter_expr: str | None,
+    base_models: list[dict[str, Any]], base_unknown: int,
+    base_facets: dict[str, Any], base_ratings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Alle drei Zählergruppen der Sidebar (Modelle, Facetten, Bewertungen)
+    für EINEN Suchzustand in EINEM Lauf (#99, ADR 0073).
+
+    Vorher holte die Sidebar drei Endpunkte parallel, und jeder
+    materialisierte dieselbe Treffermenge erneut (bis zu fünf Filterläufe
+    je Klick). Hier teilen sich die Gruppen einen ``_FacetHits``: jede
+    effektive Treffermenge (voll, ohne eigene Chips) entsteht genau einmal.
+    Die globalen Basen kommen vom Aufrufer (Epochen-Caches, ADR 0048/0071).
+    Wirft ``ValueError`` bei ungültigem Ausdruck.
+    """
     predicates = filters.parse(filter_expr) if filter_expr else []
     hits_mgr = _FacetHits(conn)
     try:
-        hits = hits_mgr.table(_group_predicates(predicates, kinds=("rating",)))
-        if hits is None:
-            return base
-        counts = {r["rating"]: r["n"] for r in conn.execute(
-            f"""SELECT a.rating, COUNT(*) AS n
-                  FROM {hits} ht JOIN annotations a ON a.file_hash = ht.file_hash
-                 WHERE a.rating IS NOT NULL GROUP BY a.rating""")}
-        return [{"rating": b["rating"], "count": counts.get(b["rating"], 0)}
-                for b in base]
+        return {
+            "models": _models_context(conn, hits_mgr, predicates, base_models, base_unknown),
+            "facets": _facets_context(conn, hits_mgr, predicates, base_facets),
+            "ratings": _ratings_context(conn, hits_mgr, predicates, base_ratings),
+        }
     finally:
         hits_mgr.close()
 
@@ -965,6 +1123,35 @@ def _materialize_hits(
         f" ORDER BY {order_by}", params)]
 
 
+def count_items(
+    conn: sqlite3.Connection,
+    filter_expr: str | None,
+    *,
+    cache: EpochCache | None = None,
+    scope: dict | None = None,
+) -> int:
+    """Trefferzahl eines Ausdrucks — für Smart-Folder- und Arena-Zähler (#69).
+
+    Nur die Zahl, keine Seite und keine Hash-Liste: EIN ``COUNT(*)`` mit
+    demselben WHERE-Bau wie ``list_items`` (``_grid_query_parts``); ``None``
+    oder leer = ganze Bibliothek. Wirft ``ValueError`` bei ungültigem
+    Ausdruck. ``cache`` (ADR 0048/0071) merkt sich die Zahl bis zum
+    nächsten Schreibvorgang — Schlüssel = WHERE-Fragment + Parameter, die
+    ``fundort:``-Library-Root läuft wie bei ``list_items`` als Parameter
+    mit; ``scope`` bekommt bei einer Neuberechnung die Kalt-Markierung.
+    """
+    where_sql, params, _sort_key = _grid_query_parts(
+        sort="added", model=None, rating=None, filter_expr=filter_expr or None, dupes=False
+    )
+
+    def compute() -> int:
+        return conn.execute(f"SELECT COUNT(*) FROM items i{where_sql}", params).fetchone()[0]
+
+    if cache is None:
+        return compute()
+    return cache.get(("count", where_sql, tuple(params)), compute, scope=scope)
+
+
 def list_items(
     conn: sqlite3.Connection,
     *,
@@ -977,6 +1164,7 @@ def list_items(
     dupes: bool = False,
     with_total: bool = True,
     cache: EpochCache | None = None,
+    scope: dict | None = None,
 ) -> dict[str, Any]:
     """Eine Seite des Bestands fürs Grid, Sortierung per Whitelist (``_SORTS``).
 
@@ -995,21 +1183,13 @@ def list_items(
     sortierte Hash-Liste der Treffer wird einmal materialisiert und an die
     Schreib-Epoche gebunden; jede Seite ist dann Listen-Slice + eine
     Anzeige-Query. Der ungefilterte Pfad bleibt der Index-Spaziergang.
+    ``scope`` (ASGI-Scope) bekommt beim Listenaufbau die Kalt-Markierung
+    (``cache.COLD_KEY``, ADR 0071).
     """
     where_sql, params, sort_key = _grid_query_parts(
         sort=sort, model=model, rating=rating, filter_expr=filter_expr, dupes=dupes
     )
-    display = """
-        SELECT i.file_hash, i.container, i.media_kind, i.file_size, i.first_seen_at,
-               i.width, i.height, i.fps,
-               (SELECT rating FROM annotations a
-                 WHERE a.file_hash = i.file_hash) AS rating,
-               (SELECT path FROM file_locations l
-                 WHERE l.file_hash = i.file_hash ORDER BY l.id LIMIT 1) AS path,
-               (SELECT value_text FROM interpreted_metadata m
-                 WHERE m.file_hash = i.file_hash AND m.field = 'tool' LIMIT 1) AS tool
-          FROM items i
-        """
+    display = _GRID_DISPLAY_SQL
     if cache is not None and where_sql:
         # Trefferlisten-Cache (ADR 0048), NUR für gefilterte Zustände: die
         # fertig sortierte Hash-Liste einmal materialisieren, an die
@@ -1019,7 +1199,8 @@ def list_items(
         # LIKE-Präfix in den Parametern und läuft damit automatisch mit.
         key = ("items", sort_key, where_sql, tuple(params))
         hashes = cache.get(
-            key, lambda: _materialize_hits(conn, sort_key, where_sql, params)
+            key, lambda: _materialize_hits(conn, sort_key, where_sql, params),
+            scope=scope,
         )
         total = len(hashes)  # die COUNT-Query je Filterwechsel entfällt mit
         page_hashes = hashes[offset:offset + limit]
@@ -1110,6 +1291,27 @@ def item_position(
     return row[0] - 1 if row else None
 
 
+# Anzeige-Spalten einer Galerie-Seite (Issue #85): das unäre Plus vor
+# ``m.field`` verbietet dem Planer den Index auf dieser Spalte. Ohne
+# Planer-Statistik (die App fuhr nie ANALYZE über die echten Tabellen) wählte
+# SQLite für die tool-Unterabfrage den Covering-Index aus Migration 0009
+# ``(field, value_text, file_hash)`` mit ``field=?`` als einziger Bedingung —
+# ein Bereichs-Scan über ALLE tool-Zeilen je Kachel: 1,1 s statt 1 ms je
+# 200er-Seite (250k-Bench). So läuft es immer über ``idx_interpreted_hash``,
+# unabhängig davon, ob ``sqlite_stat1`` existiert (Test sichert den Plan).
+_GRID_DISPLAY_SQL = """
+    SELECT i.file_hash, i.container, i.media_kind, i.file_size, i.first_seen_at,
+           i.width, i.height, i.fps,
+           (SELECT rating FROM annotations a
+             WHERE a.file_hash = i.file_hash) AS rating,
+           (SELECT path FROM file_locations l
+             WHERE l.file_hash = i.file_hash ORDER BY l.id LIMIT 1) AS path,
+           (SELECT value_text FROM interpreted_metadata m
+             WHERE m.file_hash = i.file_hash AND +m.field = 'tool' LIMIT 1) AS tool
+      FROM items i
+    """
+
+
 def _item_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     """Anzeige-Zeilen der Galerie-Query → Item-Dicts fürs Grid."""
     return [
@@ -1142,13 +1344,10 @@ def item_detail(conn: sqlite3.Connection, file_hash: str) -> dict[str, Any] | No
     if item is None:
         return None
 
-    locations = [
-        {"path": r["path"], "exists": Path(r["path"]).is_file()}
-        for r in conn.execute(
-            "SELECT path FROM file_locations WHERE file_hash = ? ORDER BY id",
-            (file_hash,),
-        )
-    ]
+    # Fundorte in der Reihenfolge, in der Auslieferung und „Im Dateimanager
+    # anzeigen" sie probieren (ADR-0062-Nachtrag): der erste brauchbare ist
+    # als ``preferred`` markiert — genau den öffnet der 📂-Knopf.
+    locations = ordered_locations(conn, file_hash, item["file_size"])
     interpreted = [
         {"parser": r["parser"], "field": r["field"], "value": r["value_text"]}
         for r in conn.execute(
@@ -1221,14 +1420,117 @@ def a1111_fields(conn: sqlite3.Connection, file_hash: str) -> dict[str, list[str
     return fields
 
 
+# Watch-Quellen fürs Fundort-Ranking (ADR-0062-Nachtrag): wie
+# filters.library_root_provider von create_app injiziert, je Aufruf frisch
+# aus der Config — library darf config nicht importieren.
+watch_roots_provider: Callable[[], list[str]] = lambda: []
+
+# Hash-Verifikation (ADR 0062) nur bis zu dieser Dateigröße: darüber trägt
+# allein der Größen-Wächter (ADR 0049). 64 MiB hasht eine SSD in einem
+# Sekundenbruchteil; ein 2-GB-Video ließ den Reveal-Request minutenlang
+# hängen (Issue #37).
+VERIFY_MAX_BYTES = 64 * 1024 * 1024
+
+# Rang eines Fundorts nach seiner Herkunft — kleiner gewinnt.
+LOCATION_KINDS = ("library", "watch", "extern")
+
+
+def _norm_dir(root: str) -> str:
+    """Verzeichnis-Präfix wie ``filters.library_like_prefix``: expanduser,
+    ``/``-Separatoren, ohne Schluss-Slash, ASCII-klein (SQLites LIKE
+    vergleicht die Facette genauso)."""
+    return str(Path(str(root)).expanduser()).replace("\\", "/").rstrip("/").lower()
+
+
+def location_kind(
+    path: str, library_root: str | None, watch_roots: list[str]
+) -> str:
+    """Herkunftsklasse eines Fundort-Pfads: ``library`` (unter
+    ``library.root``), ``watch`` (unter einer konfigurierten Watch-Quelle,
+    typisch katalogisieren), sonst ``extern`` (Alt-Scan, fremde Platte)."""
+    norm = path.replace("\\", "/").lower()
+    if library_root and norm.startswith(_norm_dir(library_root) + "/"):
+        return "library"
+    for root in watch_roots:
+        if root and root.strip() and norm.startswith(_norm_dir(root) + "/"):
+            return "watch"
+    return "extern"
+
+
+def ordered_locations(
+    conn: sqlite3.Connection, file_hash: str, file_size: int | None
+) -> list[dict[str, Any]]:
+    """Alle Fundorte eines Items, sortiert nach der Regel aus dem
+    ADR-0062-Nachtrag (Issue #37): **brauchbar vor unbrauchbar** (Datei
+    existiert UND Größe stimmt — Größen-Wächter ADR 0049), darin **Library
+    vor Watch-Quelle vor extern**, zuletzt die Einfüge-Reihenfolge (``id``,
+    stabil). Der erste brauchbare trägt ``preferred = True``.
+
+    Je Zeile: ``path``, ``exists`` (Datei da), ``usable`` (da + Größe
+    stimmt), ``kind`` (Herkunftsklasse), ``preferred``.
+    """
+    library_root = filters.library_root_provider()
+    watch_roots = watch_roots_provider()
+    rows = conn.execute(
+        "SELECT id, path FROM file_locations WHERE file_hash = ? ORDER BY id",
+        (file_hash,),
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        p = Path(row["path"])
+        try:
+            exists = p.is_file()
+            usable = exists and (file_size is None or p.stat().st_size == file_size)
+        except OSError:
+            exists = usable = False
+        out.append({
+            "path": row["path"],
+            "exists": exists,
+            "usable": usable,
+            "kind": location_kind(row["path"], library_root, watch_roots),
+            "preferred": False,
+            "_id": row["id"],
+        })
+    out.sort(key=lambda l: (not l["usable"], LOCATION_KINDS.index(l["kind"]), l["_id"]))
+    for loc in out:
+        del loc["_id"]
+    for loc in out:
+        if loc["usable"]:
+            loc["preferred"] = True
+            break
+    return out
+
+
+def match_location(
+    locations: list[dict[str, Any]], path: str, *, what: str
+) -> dict[str, Any] | None:
+    """Whitelist für den Öffnen-Endpunkt (ADR-0041-Nachtrag): ``file`` ⇒
+    ``path`` ist exakt ein Fundort (separator-/case-normalisiert wie
+    ``location_kind``); ``folder`` ⇒ ``path`` ist ein Verzeichnis-Präfix
+    eines Fundorts (Laufwerkswurzel ``D:`` eingeschlossen). Liefert die
+    passende Fundort-Zeile oder ``None``."""
+    want = path.replace("\\", "/").rstrip("/").lower()
+    if not want:
+        return None
+    for loc in locations:
+        have = loc["path"].replace("\\", "/").lower()
+        if what == "file" and have == want:
+            return loc
+        if what == "folder" and have.startswith(want + "/"):
+            return loc
+    return None
+
+
 def resolve_media(
     conn: sqlite3.Connection, file_hash: str, *, verify: bool = False
 ) -> tuple[str, str] | None:
-    """Der erste noch existierende Fundort eines Items plus MIME-Type.
+    """Der erste brauchbare Fundort eines Items plus MIME-Type.
 
     Nur Pfade aus `file_locations` kommen infrage — der Endpunkt kann also
     ausschließlich katalogisierte Dateien ausliefern. ``None``, wenn keiner
-    der Fundorte mehr existiert.
+    der Fundorte mehr existiert. Reihenfolge = ``ordered_locations``
+    (Library vor Watch-Quelle vor extern, ADR-0062-Nachtrag) — dieselbe,
+    die das Detail-Panel zeigt und als ``preferred`` markiert.
 
     Größen-Wächter (ADR 0049): gleicher Hash ⇒ exakt gleiche Bytezahl.
     Weicht die Dateigröße auf der Platte von ``items.file_size`` ab, liegt
@@ -1242,24 +1544,39 @@ def resolve_media(
     Datei hashen und gegen ``file_hash`` prüfen — schließt auch das
     Größengleich-Fenster. Bewusst NICHT im Streaming-Pfad (jede Vorschau
     würde sonst die ganze Datei lesen), sondern nur für seltene, explizite
-    Nutzeraktionen, bei denen der falsche Treffer teuer ist.
+    Nutzeraktionen, bei denen der falsche Treffer teuer ist. Größen-Wächter
+    fürs Hashen selbst (Issue #37): Dateien über ``VERIFY_MAX_BYTES``
+    werden NICHT gehasht — dort trägt allein die Größenprüfung; ob wirklich
+    gehasht wurde, sagt ``resolve_media_verified``.
     """
-    rows = conn.execute(
-        """SELECT l.path, i.file_size, i.container FROM file_locations l
-             JOIN items i USING(file_hash) WHERE l.file_hash = ? ORDER BY l.id""",
-        (file_hash,),
-    ).fetchall()
-    for row in rows:
-        p = Path(row["path"])
-        try:
-            if not p.is_file() or p.stat().st_size != row["file_size"]:
-                continue
-            if verify and hash_file(p) != file_hash:
-                continue
-        except OSError:
+    resolved = resolve_media_verified(conn, file_hash, verify=verify)
+    return None if resolved is None else resolved[:2]
+
+
+def resolve_media_verified(
+    conn: sqlite3.Connection, file_hash: str, *, verify: bool = False
+) -> tuple[str, str, bool] | None:
+    """Wie ``resolve_media``, zusätzlich mit dem Flag, ob der Fundort per
+    Hash verifiziert wurde (``False`` = nur Größen-Wächter, weil ``verify``
+    aus war oder die Datei größer als ``VERIFY_MAX_BYTES`` ist)."""
+    item = conn.execute(
+        "SELECT file_size, container FROM items WHERE file_hash = ?", (file_hash,)
+    ).fetchone()
+    if item is None:
+        return None
+    mime = _MIME.get(item["container"], "application/octet-stream")
+    for loc in ordered_locations(conn, file_hash, item["file_size"]):
+        if not loc["usable"]:
             continue
-        mime = _MIME.get(row["container"], "application/octet-stream")
-        return row["path"], mime
+        verified = False
+        if verify and (item["file_size"] or 0) <= VERIFY_MAX_BYTES:
+            try:
+                if hash_file(loc["path"]) != file_hash:
+                    continue
+            except OSError:
+                continue
+            verified = True
+        return loc["path"], mime, verified
     return None
 
 

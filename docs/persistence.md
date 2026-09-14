@@ -33,7 +33,14 @@ store_extraction(
 | `interpreted_metadata` | die strukturierten Felder ([Schicht 2](interpretation.md)): pro Eintrag Parser (+ Version), Feldname (`prompt`, `seed`, `model`, …) und Wert. |
 | `annotations` | die **manuelle Schicht** (ADR 0017): Rating (1–5, NULL = unbewertet) und Notizen — strikt getrennt von allem Extrahierten. |
 | `tags` / `item_tags` | eigenes Tag-Vokabular (case-insensitiv einmalig) und die Zuordnung Tag ↔ Item, jeweils mit Zeitstempeln. |
-| `scan_issues` | beim Scannen aufgelaufene Probleme (Admin-Bereich, ADR 0014). |
+| `scan_issues` | beim Scannen aufgelaufene Probleme (Admin → Probleme). |
+| `smart_folders` | gespeicherte Suchen: Name + Filterausdruck (die Sortierung steckt im Ausdruck). |
+| `blocked_hashes` | die **Sperrliste** abgelehnter Medien (Hash, Grund, zuletzt bekannte Pfade). |
+| `import_log` | jede beim Import/Rausverschieben angefasste Datei mit Ausgang, Ziel, Hash und Datumsquelle. |
+| `scan_memory` | Größe + Änderungszeit der von Watchordnern katalogisierten Dateien (Neustarts überspringen Unverändertes). |
+| `rankings` / `ranking_duels` / `ranking_scores` | das Ranking-Modul: Rankings (Name + Ausdruck), das append-only **Duell-Log** und die daraus abgeleiteten Elo-Scores samt Ausgeschieden-Marker. |
+| `search_index` (FTS5) | der Volltextindex über interpretierte Felder, Dateinamen und manuelle Schicht; jederzeit neu aufbaubar (Admin → Wartung). |
+| `app_state` | kleine Schlüssel-Wert-Ablage für gemerkte Admin-Kennzahlen (mit Herkunftsstempel des Rechners). |
 
 Zugriff auf die manuelle Schicht läuft über `feral/db/manual.py`
 (`set_rating`, `set_notes`, `add_tag`, `remove_tag`, `annotations_for`,
@@ -65,5 +72,7 @@ SELECT DISTINCT file_hash FROM interpreted_metadata
 
 - Die DB-Datei **nie auf ein Netzlaufwerk** legen (SMB/NFS) — SQLite-Locking bricht
   dort. Lokal halten, sinnvollerweise neben dem Datenverzeichnis.
-- Es schreibt immer nur **ein** Prozess (der Server). Mehrere Leser gleichzeitig
-  sind dank WAL kein Problem.
+- Es schreibt immer nur **der Server** (der Webprozess für kurze Schreibgriffe,
+  sein Arbeitsprozess für Langläufer; beide gehören zu einer Instanz). Nie zwei
+  fml-Instanzen oder GUI und CLI-Scan gleichzeitig auf dieselbe Datei. Mehrere
+  Leser gleichzeitig sind dank WAL kein Problem.

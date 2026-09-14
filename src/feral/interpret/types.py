@@ -8,7 +8,11 @@ Datenverlust. Die Objekte hier sind rein (keine DB, keine Seiteneffekte).
 Kanonisches Feldvokabular (Parser bilden Tool-Begriffe hierauf ab, damit die
 Suche werkzeugübergreifend funktioniert):
 
-    tool             Erzeuger-Werkzeug: 'a1111', 'comfyui', …
+    tool             Erzeuger-PLATTFORM (ADR 0066 + Nachtrag 2026-09-08):
+                     'a1111', 'comfyui', 'midjourney', 'google', 'openai',
+                     'azure-openai', 'adobe', 'flux', 'topaz'; 'c2pa' = Manifest
+                     erkannt, nicht zugeordnet. Das Produkt darunter (Gemini,
+                     GPT-4o, Topaz Gigapixel, Midjourney V7) steht in `model`.
     prompt           positiver Prompt
     negative_prompt  negativer Prompt
     model            Modell-/Checkpoint-Name
@@ -33,6 +37,23 @@ Suche werkzeugübergreifend funktioniert):
     input_image      Dateiname eines Eingangsbilds/-videos (img2img/i2v;
                      mehrfach möglich — Vorhandensein heißt: kein reines
                      text-to-image)
+    topaz_version    Programmversion eines Topaz-Werkzeugs (ADR 0066;
+                     `model` trägt dann „Topaz Photo AI" / „Topaz Gigapixel"
+                     / „Topaz Video AI")
+    topaz_model      Topaz-Modellname/-Kürzel ('High Compression', 'prob-3';
+                     mehrfach möglich)
+    upscale_factor   Vergrößerungsfaktor der Nachbearbeitung ('2x')
+    source_size      Größe vor der Nachbearbeitung "BxH"
+    topaz_settings   vollständige Einstellungszeile des Topaz-Werkzeugs, roh
+    claim_generator  exakter Rohstring des C2PA-Claim-Erzeugers
+                     ('DALL-E/3.0 c2pa-rs/0.28.4', 'Adobe Photoshop/25.7.0 …';
+                     mehrfach möglich)
+    software_agent   exakter Rohstring der C2PA-Aktion ('GPT-4o',
+                     'Adobe Firefly 1.0'; mehrfach möglich)
+    video_codec      Codec des ersten Video-Streams, wie ffprobe ihn nennt
+                     ('prores', 'hevc', 'h264', 'vp9', 'av1'; Issue #71/ADR 0070)
+    video_profile    Codec-Profil ('HQ', 'Main 10', 'High 10')
+    pixel_format     Pixelformat des Video-Streams ('yuv420p', 'yuv422p10le')
 
 Ein Feld darf mehrfach vorkommen (z. B. mehrere `prompt`-Kandidaten in einem
 ComfyUI-Graphen); die Reihenfolge bleibt erhalten.

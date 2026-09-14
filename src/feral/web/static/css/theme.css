@@ -1,5 +1,5 @@
 /* theme.css — NUR Variablen (Paletten aus dem Design-Leitbild, siehe
-   docs/plans/2026-07-07-ui-umbau-design.md). Layout/Komponenten: app.css. */
+   Design-Notiz vom 2026-07-07 im Arbeitsrepo). Layout/Komponenten: app.css. */
 
 /* Dunkel (Standard) */
 :root {
@@ -35,4 +35,8 @@
   --accent-dim: rgba(255, 59, 72, .14);
   --accent-line: rgba(255, 59, 72, .5);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  /* Zustandsfarben (Admin-Neubau, ADR 0074): ok / Fehler / Warnung */
+  --ok: #4bbf82;
+  --bad: #e05252;
+  --warnc: #e0a832;
 }

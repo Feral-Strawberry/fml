@@ -17,33 +17,33 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m feral.interpret",
         description=(
-            "Lässt alle Schicht-2-Parser rückwirkend über die gespeicherten "
-            "Roh-Metadaten laufen (kein Datei-Scan nötig)."
+            "Runs all layer-2 parsers retroactively over the stored raw "
+            "metadata (no file scan needed)."
         ),
     )
     parser.add_argument(
         "--db",
         default="./feral.sqlite",
-        help="Pfad zur SQLite-Datei (Standard: ./feral.sqlite)",
+        help="path to the SQLite file (default: ./feral.sqlite)",
     )
-    parser.add_argument("--quiet", action="store_true", help="keine Fortschrittsausgabe")
+    parser.add_argument("--quiet", action="store_true", help="no progress output")
     parser.add_argument(
         "--lora-report",
         action="store_true",
         help=(
-            "Nur Diagnose (schreibt nichts): Bei welchen Items steckt »lora« "
-            "in den Roh-Blobs, ohne dass die Parser ein lora-Feld liefern? "
-            "Listet die betroffenen Node-Typen — Grundlage für Parser-Ausbau."
+            "Diagnosis only (writes nothing): which items carry 'lora' in the "
+            "raw blobs without the parsers yielding a lora field? Lists the "
+            "affected node types, the basis for extending the parsers."
         ),
     )
     parser.add_argument(
         "--prompt-report",
         action="store_true",
         help=(
-            "Nur Diagnose (schreibt nichts): ComfyUI-Items OHNE erkannten "
-            "prompt, klassifiziert nach Ursache (kein prompt-Blob / JSON "
-            "kaputt / Text an unbekannten Knoten / Graph unter unerwartetem "
-            "Keyword). Listet die textführenden Node-Typen samt Input-Namen."
+            "Diagnosis only (writes nothing): ComfyUI items WITHOUT a recognised "
+            "prompt, classified by cause (no prompt blob / broken JSON / text "
+            "on unknown nodes / graph under an unexpected keyword). Lists the "
+            "text-carrying node types with their input names."
         ),
     )
     args = parser.parse_args(argv)
@@ -62,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def progress(report: ReparseReport) -> None:
         if not args.quiet and report.items_total % 1000 == 0:
-            print(f"  … {report.items_total} Items", file=sys.stderr)
+            print(f"  … {report.items_total} items", file=sys.stderr)
 
     conn = connect(args.db)
     try:
@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         conn.close()
 
-    print("\nInterpretation abgeschlossen.")
+    print("\nInterpretation finished.")
     print(report.summary())
     return 0
 
@@ -90,7 +90,7 @@ def _lora_report(conn) -> int:
                  AND LOWER(value_text) LIKE '%lora%'"""
         ).fetchall()
     ]
-    print(f"Items mit »lora« irgendwo in den Roh-Blobs: {len(hashes)}")
+    print(f"Items with 'lora' anywhere in the raw blobs: {len(hashes)}")
 
     missed_nodes: Counter[str] = Counter()
     missed_keys: dict[str, set[str]] = {}
@@ -133,34 +133,34 @@ def _lora_report(conn) -> int:
                     if sample and node_type not in missed_samples:
                         missed_samples[node_type] = sample
         if index % 1000 == 0:
-            print(f"  … {index}/{len(hashes)} geprüft", file=sys.stderr)
+            print(f"  … {index}/{len(hashes)} checked", file=sys.stderr)
 
-    print(f"  davon liefern die Parser ein lora-Feld: {covered}")
-    print(f"  davon OHNE lora-Feld: {len(hashes) - covered}")
+    print(f"  of which the parsers yield a lora field: {covered}")
+    print(f"  of which WITHOUT lora field: {len(hashes) - covered}")
     if missed_a1111:
-        print(f"\nA1111-Infotexte mit <lora:>-Tag, aber ohne Feld: {missed_a1111}")
+        print(f"\nA1111 infotexts with <lora:> tag but without field: {missed_a1111}")
         for snippet in a1111_snippets:
             print(f"  … {snippet!r}")
     if missed_nodes:
-        print("\nAKTIVE Node-Typen mit »lora« in nicht abgedeckten Items:")
+        print("\nACTIVE node types with 'lora' in uncovered items:")
         for node_type, count in missed_nodes.most_common(40):
             keys = ", ".join(sorted(missed_keys.get(node_type, set()))) or "–"
             print(f"  {node_type}  ·  {count}×  ·  [{keys}]")
             if node_type in missed_samples:
-                print(f"    Beispielwerte: {missed_samples[node_type]}")
+                print(f"    sample values: {missed_samples[node_type]}")
     if inactive_nodes:
-        print("\nUnkritische LoRA-Knoten (»kein Feld« ist hier korrekt —"
-              " leer = keine aktiven Slots, inaktiv = Bypass/Mute):")
+        print("\nHarmless LoRA nodes ('no field' is correct here:"
+              " empty = no active slots, inactive = bypass/mute):")
         for node_type, count in inactive_nodes.most_common(10):
             print(f"  {node_type}  ·  {count}×")
     if note_nodes:
-        print(f"\nNotiz-Knoten (Note/MarkdownNote), die »lora« nur im Text erwähnen: {note_nodes}× — Rauschen, kein Handlungsbedarf.")
+        print(f"\nNote nodes (Note/MarkdownNote) mentioning 'lora' only in text: {note_nodes}x, noise, nothing to do.")
     if examples:
-        print("\nBeispiel-Hashes (für /api/item/<hash> bzw. Suche):")
+        print("\nSample hashes (for /api/item/<hash> or the search):")
         for h in examples:
             print(f"  {h}")
     if len(hashes) - covered == 0:
-        print("\nAlles abgedeckt — kein Handlungsbedarf.")
+        print("\nEverything covered, nothing to do.")
     return 0
 
 
@@ -187,7 +187,7 @@ def _prompt_report(conn) -> int:
                   OR (value_text LIKE '%class_type%')"""
         ).fetchall()
     ]
-    print(f"ComfyUI-verdächtige Items (prompt-/workflow-Blob oder Graph-JSON): {len(hashes)}")
+    print(f"ComfyUI candidates (prompt/workflow blob or graph JSON): {len(hashes)}")
 
     covered = 0
     categories: Counter[str] = Counter()
@@ -244,27 +244,27 @@ def _prompt_report(conn) -> int:
         if len(category_examples[category]) < 8:
             category_examples[category].append(file_hash)
         if index % 1000 == 0:
-            print(f"  … {index}/{len(hashes)} geprüft", file=sys.stderr)
+            print(f"  … {index}/{len(hashes)} checked", file=sys.stderr)
 
-    print(f"  davon mit erkanntem prompt-Feld: {covered}")
-    print(f"  davon OHNE prompt: {len(hashes) - covered}")
+    print(f"  of which with a recognised prompt field: {covered}")
+    print(f"  of which WITHOUT prompt: {len(hashes) - covered}")
     for category, count in categories.most_common():
         print(f"\n[{category}] {count}×")
         for h in category_examples.get(category, []):
             print(f"  {h}")
     if text_nodes:
-        print("\nTextführende Knoten in den Fehlfällen (Node-Typ · Input) —"
-              " Kandidaten für den nächsten Parser-Ausbau:")
+        print("\nText-carrying nodes in the failure cases (node type · input),"
+              " candidates for the next parser extension:")
         for label, count in text_nodes.most_common(30):
             print(f"  {label}  ·  {count}×")
             if label in text_samples:
-                print(f"    Beispieltext: {text_samples[label]!r}")
+                print(f"    sample text: {text_samples[label]!r}")
     if foreign_keywords:
-        print("\nGraph-JSON unter fremdem Keyword (Quelle · Keyword):")
+        print("\nGraph JSON under a foreign keyword (source · keyword):")
         for label, count in foreign_keywords.most_common(10):
             print(f"  {label}  ·  {count}×")
     if len(hashes) - covered == 0:
-        print("\nAlles abgedeckt — kein Handlungsbedarf.")
+        print("\nEverything covered, nothing to do.")
     return 0
 
 

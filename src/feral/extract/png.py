@@ -17,8 +17,11 @@ PNG-Aufbau (PNG-Spezifikation):
   - ``iTXt``: ``keyword \0 flag(1) methode(1) sprache \0 übersetzt \0 text``
               (Text UTF-8, optional zlib-komprimiert)
 - ``eXIf``: roher EXIF-/TIFF-Block (binär).
+- ``caBX``: C2PA-Manifest (JUMBF-Baum, binär; Content Credentials von
+  Gemini, ChatGPT, Firefly, … — ADR 0066). Wird byte-treu gesichert, nicht
+  gedeutet; die Zuordnung zum Erzeuger macht Schicht 2 (``provenance``).
 
-Der Extraktor ist **defensiv** (CLAUDE.md §8): beschädigte oder abgeschnittene
+Der Extraktor ist **defensiv** (Projektregel): beschädigte oder abgeschnittene
 Dateien werfen nicht, sondern sammeln `warnings`. Große, uninteressante Chunks
 (z. B. ``IDAT`` mit den Pixeldaten) werden übersprungen, ohne sie in den Speicher
 zu laden.
@@ -38,6 +41,7 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # Chunk-Typen, aus denen wir Metadaten ziehen.
 _TEXT_CHUNKS = frozenset({b"tEXt", b"zTXt", b"iTXt"})
 _EXIF_CHUNK = b"eXIf"
+_C2PA_CHUNK = b"caBX"
 _END_CHUNK = b"IEND"
 
 # Schutz gegen absurde Längenangaben in defekten Dateien (PNG-Chunks sind << das).
@@ -113,7 +117,7 @@ def _extract_from_stream(stream: BinaryIO) -> ContainerExtraction:
             stream.read(4)  # CRC — für die Maße unerheblich
             if len(data) >= 8:
                 result.width, result.height = struct.unpack(">II", data[:8])
-        elif ctype in _TEXT_CHUNKS or ctype == _EXIF_CHUNK:
+        elif ctype in _TEXT_CHUNKS or ctype in (_EXIF_CHUNK, _C2PA_CHUNK):
             data = stream.read(length)
             if len(data) < length:
                 result.warnings.append(
@@ -165,6 +169,16 @@ def _decode_chunk(ctype: bytes, data: bytes, result: ContainerExtraction) -> Non
         result.items.append(
             RawMetadataItem(
                 source="png:eXIf",
+                keyword=None,
+                text=None,
+                data=data,
+                encoding="binary",
+            )
+        )
+    elif ctype == _C2PA_CHUNK:
+        result.items.append(
+            RawMetadataItem(
+                source="png:caBX",
                 keyword=None,
                 text=None,
                 data=data,

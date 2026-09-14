@@ -1,4 +1,8 @@
-"""Tests für die ScanEngine (ein Writer-Thread) und den Watcher."""
+"""Tests für die ScanEngine (Warteschlange + Worker-Prozess, ADR 0067) und den Watcher.
+
+Die Engine-Tests laufen gegen den ECHTEN Worker-Prozess (spawn) — kein
+Inline-Modus (Entscheidung 2, ADR 0067): Protokoll, Pickling und Statusleitung
+werden mitgeprüft."""
 
 from __future__ import annotations
 
@@ -7,7 +11,7 @@ import time
 import pytest
 
 from feral.db import connect
-from feral.web.engine import HotfolderWatcher, ScanEngine
+from feral.web.engine import AlreadyQueued, HotfolderWatcher, ScanEngine
 
 from .pngbuild import build_png, itxt_chunk, text_chunk
 
@@ -93,12 +97,135 @@ def test_watch_source_management(engine, media):
 
 # --- Wartungsaufgaben (Stufe 2A) -----------------------------------------------
 
-def test_run_write_executes_in_worker_and_returns(engine):
+def _wait_running(engine: ScanEngine, timeout: float = 5.0) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        s = engine.status()
+        if s["running"]:
+            return s
+        time.sleep(0.02)
+    raise TimeoutError(f"Aufgabe läuft nicht an: {engine.status()}")
+
+
+def test_run_write_works_from_changing_pool_threads(engine):
+    """Issue #72: FastAPI führt synchrone Routen auf wechselnden Threads aus.
+    Die gemeinsame Schreibverbindung darf daran nicht scheitern — vorher kam
+    ab dem zweiten Thread »SQLite objects created in a thread can only be
+    used in that same thread« als sumFailed zurück, der Schreibgriff war weg."""
+    import threading
+
+    def write(tag):
+        return engine.run_write(
+            {"key": "x"},
+            lambda conn, _p: {"ok": conn.execute("SELECT 1").fetchone()[0], "tag": tag},
+        )
+
+    results = {}
+    for tag in ("t1", "t2", "t3"):
+        t = threading.Thread(target=lambda tag=tag: results.__setitem__(tag, write(tag)))
+        t.start(); t.join()
+    results["main"] = write("main")
+    assert all(r.get("ok") == 1 for r in results.values()), results
+    assert not any("summary" in r for r in results.values()), results
+
+
+def test_run_write_runs_in_web_process_while_worker_is_busy(engine):
+    """Kurze Schreibgriffe schreibt der Web-Prozess selbst (ADR 0007, Nachtrag):
+    sie warten NICHT hinter einem Langläufer im Worker."""
+    engine.enqueue("_sleep", {"seconds": 1.5, "steps": 15}, {"key": "sleep"})
+    _wait_running(engine)
+    t0 = time.time()
     result = engine.run_write(
         {"key": "testWriter"},
-        lambda conn, _p: {"who": __import__("threading").current_thread().name},
+        lambda conn, _p: {
+            "who": __import__("threading").current_thread().name,
+            "n": conn.execute("SELECT COUNT(*) FROM items").fetchone()[0],
+        },
     )
-    assert result["who"] == "feral-writer"  # lief wirklich im Writer-Thread
+    assert time.time() - t0 < 1.0           # nicht auf den Langläufer gewartet
+    assert result["who"] == "MainThread"    # im Aufrufer-Thread des Web-Prozesses
+    assert result["n"] == 0
+    assert engine.status()["running"] is True
+    # Fehler in fn kommen als summary zurück, nicht als Exception (Routen-Vertrag).
+    failed = engine.run_write({"key": "x"}, lambda conn, _p: 1 / 0)
+    assert failed["summary"]["key"] == "sumFailed"
+    _wait_idle(engine, until_label="sleep")
+
+
+def test_status_shows_queue_and_rejects_duplicates(engine):
+    """Mehrfachklick (ADR 0067): gleiche Aufgabe (Name + Parameter) läuft oder
+    wartet schon → AlreadyQueued; die Warteschlange ist im Status sichtbar."""
+    engine.enqueue("_sleep", {"seconds": 0.8, "steps": 8}, {"key": "sleepA"})
+    _wait_running(engine)
+    with pytest.raises(AlreadyQueued) as info:
+        engine.enqueue("_sleep", {"seconds": 0.8, "steps": 8}, {"key": "sleepA"})
+    assert info.value.running is True
+    engine.enqueue("_sleep", {"seconds": 0.1}, {"key": "sleepB"})
+    with pytest.raises(AlreadyQueued) as info:
+        engine.enqueue("_sleep", {"seconds": 0.1}, {"key": "sleepB"})
+    assert info.value.running is False
+    s = engine.status()
+    assert s["running"] and s["label"] == {"key": "sleepA"}
+    assert s["queue_pending"] == 1 and s["queue"] == [{"key": "sleepB"}]
+    assert s["worker_alive"] is True
+    assert s["elapsed"] is not None and s["started_at"]
+    # dedupe="pending": ein laufender Lauf blockiert den Nachläufer nicht.
+    engine.enqueue("_sleep", {"seconds": 0.8, "steps": 8}, {"key": "sleepA"}, dedupe="pending")
+    assert engine.status()["queue_pending"] == 2
+    s = _wait_idle(engine, until_label="sleepA", timeout=10)
+    assert s["last_result"]["key"] == "sumTest"
+    assert s["queue"] == []
+    assert s["finished_seq"] == 3        # drei Aufgaben fertig — das Frontend zählt, statt Labels zu vergleichen
+
+
+def test_on_finished_hook_gets_task_name_and_ok(engine):
+    """#118 (ADR 0077): nach jeder erledigten Aufgabe ruft die Engine ihre
+    Haken mit (Aufgabenname, ok) — außerhalb der Sperre; ein kaputter Haken
+    stört weder Engine noch die anderen Haken."""
+    seen: list[tuple[str, bool]] = []
+    engine.on_finished.append(lambda name, ok: 1 / 0)
+    engine.on_finished.append(lambda name, ok: seen.append((name, ok)))
+    engine.enqueue("_sleep", {"seconds": 0.05}, {"key": "sleepA"})
+    engine.enqueue("_boom", {}, {"key": "boomA"})
+    _wait_idle(engine, until_label="boomA", timeout=10)
+    assert seen == [("_sleep", True), ("_boom", False)]
+    assert engine.status()["finished_seq"] == 2
+
+
+def test_worker_death_is_reported_and_worker_restarts(engine, media):
+    """Aufsicht (ADR 0067): stirbt der Worker, meldet der Status die Aufgabe
+    als fehlgeschlagen; der nächste Auftrag startet einen neuen Worker."""
+    engine.enqueue("_die", {}, {"key": "die"})
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        s = engine.status()
+        if (s["last_finished"] or {}).get("key") == "die":
+            break
+        time.sleep(0.05)
+    else:
+        raise TimeoutError(engine.status())
+    assert s["last_result"]["key"] == "sumWorkerDied"
+    assert s["worker_alive"] is False and s["running"] is False
+
+    engine.enqueue_folder(media)      # startet den Worker neu
+    s = _wait_idle(engine, until_label="taskScan", timeout=10)
+    assert s["report"]["media_files"] == 2
+    assert s["worker_alive"] is True
+
+
+def test_worker_logs_tasks_to_rotating_file(tmp_path, media):
+    """Serverlog (#64): der Worker schreibt Start/Ende jeder Aufgabe nach
+    logs/fml-worker.log."""
+    eng = ScanEngine(tmp_path / "feral.sqlite", log_dir=tmp_path / "logs")
+    try:
+        eng.enqueue_folder(media)
+        eng.enqueue_reparse()
+        _wait_idle(eng, until_label="taskReparse", timeout=15)
+    finally:
+        eng.shutdown()
+    text = (tmp_path / "logs" / "fml-worker.log").read_text(encoding="utf-8")
+    assert "Start taskScan" in text
+    assert "Done reparse" in text and "sumReparse" in text
 
 
 def test_admin_task_reports_last_result(engine, media):
@@ -107,13 +234,41 @@ def test_admin_task_reports_last_result(engine, media):
     s = _wait_idle(engine, until_label="taskReparse")
     # Der Scan hat interpretiert; der Reparse-Lauf meldet seine Zusammenfassung.
     assert s["last_result"]["key"] == "sumReparse"
+    # Verlauf (ADR 0074 Nachtrag): jüngste zuerst, mit Dauer und Ergebnis.
+    hist = s["history"]
+    assert [h["label"]["key"] for h in hist] == ["taskReparse", "taskScan"]
+    assert hist[0]["result"]["key"] == "sumReparse" and hist[0]["ok"] is True
+    assert hist[0]["elapsed"] is not None and hist[0]["elapsed"] >= 0
+    assert hist[0]["finished_at"].endswith("Z")
+
+
+def test_history_marks_failed_tasks_and_is_capped(engine):
+    engine.enqueue("_boom", {"text": "kaputt"}, {"key": "boom"})
+    for i in range(engine.HISTORY_MAX + 2):
+        engine.enqueue("_sleep", {"seconds": 0.01, "n": i}, {"key": "sleepA"}, dedupe="pending")
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        s = engine.status()
+        if s["finished_seq"] == engine.HISTORY_MAX + 3 and not s["running"]:
+            break
+        time.sleep(0.02)
+    else:
+        raise TimeoutError(engine.status())
+    assert len(s["history"]) == engine.HISTORY_MAX
+    assert all(h["ok"] for h in s["history"])          # boom ist bereits rausgerutscht
+    # Der Fehlschlag steht mit ok=False im Verlauf, solange er drin ist.
+    engine.enqueue("_boom", {"text": "nochmal"}, {"key": "boom"})
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        s = engine.status()
+        if s["history"][0]["label"]["key"] == "boom":
+            break
+        time.sleep(0.02)
+    assert s["history"][0]["ok"] is False and s["history"][0]["result"]["key"] == "sumFailed"
 
 
 def test_failing_task_does_not_kill_worker(engine, media):
-    def boom(conn, _p):
-        raise RuntimeError("kaputt")
-
-    engine._submit({"key": "boom"}, boom)
+    engine.enqueue("_boom", {"text": "kaputt"}, {"key": "boom"})
     engine.enqueue_folder(media)          # muss danach trotzdem laufen
     s = _wait_idle(engine, until_label="taskScan")
     assert s["report"]["media_files"] == 2
@@ -128,6 +283,25 @@ def test_rescan_only_touches_existing_paths(engine, media, tmp_path):
     engine.enqueue_rescan()
     s = _wait_idle(engine, until_label="taskRescan")
     assert s["report"]["scanned_files"] == 1   # nur die noch existierende Datei
+
+
+def test_rescan_uses_configured_min_date(engine, media, tmp_path):
+    """#113: Der Re-Scan bekommt die Import-Regeln (min_date) aus der Config —
+    ein 1970er-Stempel ist mit dem Standard ausgefiltert, mit gesenktem
+    min_date wird er erneut katalogisiert (und datiert)."""
+    import os
+    engine.enqueue_folder(media)
+    _wait_idle(engine)
+    os.utime(media / "a.png", (0, 0))
+
+    engine.enqueue_rescan()
+    s = _wait_idle(engine, until_label="taskRescan")
+    assert s["report"]["ausgefiltert"] == 1 and s["report"]["known_items"] == 1
+
+    engine.enqueue_rescan({"min_kante": 0, "max_kante": 0, "formate": [],
+                           "min_date": "1970-01-01"})
+    s = _wait_idle(engine, until_label="taskRescan")
+    assert s["report"]["ausgefiltert"] == 0 and s["report"]["known_items"] == 2
 
 
 # -- Hotfolder (Block 4.2, ADR 0025) -----------------------------------------------
@@ -295,3 +469,31 @@ def test_engine_stat_memory_includes_scan_memory(engine, media):
     )
     ready = w.poll_once(now=100.0)
     assert str(kaputt) not in {str(p) for p in ready}
+
+
+def test_status_never_waits_for_worker_start(tmp_path, monkeypatch):
+    """Der Worker-Start (spawn + Importe, unter Windows 10–30 s) läuft im
+    Dispatcher-Thread ohne Sperre: /api/status antwortet währenddessen
+    sofort — sonst füllt der 700-ms-Poll den Request-Threadpool und mit ihm
+    stehen alle Bildanfragen (Feral Strawberrys 30-s-Hänger, 2026-09-07)."""
+    eng = ScanEngine(tmp_path / "feral.sqlite")
+    original = eng._start_worker
+
+    def slow_start():
+        time.sleep(1.5)
+        original()
+
+    monkeypatch.setattr(eng, "_start_worker", slow_start)
+    try:
+        eng.enqueue("_sleep", {"seconds": 0.1}, {"key": "sleep"})
+        worst = 0.0
+        for _ in range(10):
+            t0 = time.perf_counter()
+            s = eng.status()
+            worst = max(worst, time.perf_counter() - t0)
+            assert s["queue_pending"] + int(s["running"]) >= 0
+            time.sleep(0.1)
+        assert worst < 0.1, f"status() hat auf den Worker-Start gewartet: {worst:.2f}s"
+        _wait_idle(eng, until_label="sleep", timeout=10)
+    finally:
+        eng.shutdown()

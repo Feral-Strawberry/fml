@@ -1,143 +1,363 @@
-"""Scan-Engine: serialisiert alle Schreibzugriffe über EINEN Worker-Thread.
+"""Engine: Warteschlange im Web-Prozess, Langläufer im Worker-Prozess (ADR 0067).
 
-ADR 0007 verlangt, dass ein einzelner Prozess alle Schreibzugriffe serialisiert.
-Hier konkret: genau ein Worker-Thread besitzt die schreibende DB-Verbindung und
-arbeitet eine **allgemeine Aufgaben-Warteschlange** ab — Scans, Auto-Watch und
-seit Stufe 2A auch Wartungsaufgaben (Neu-Interpretieren, Re-Scan, Integritäts-
-check, VACUUM, Aufräumen). Aufrufer **reihen nur Aufgaben ein** — geschrieben
-wird ausschließlich im Worker. Kurze Schreibaufgaben können synchron über
-`run_write()` laufen (der Aufrufer wartet auf das Ergebnis, geschrieben wird
-trotzdem im Worker). Lese-Endpunkte nutzen eigene, kurzlebige Verbindungen
-(dank WAL parallel zum einen Schreiber unproblematisch).
+Bis ADR 0067 lief hier ein Writer-Thread im Web-Prozess — ein rechnender
+Langläufer bremste über den GIL jede HTTP-Antwort (#65). Jetzt:
+
+- **Warteschlange und Status** leben hier im Web-Prozess. ``enqueue(name,
+  params, label)`` reiht eine benannte Aufgabe (``tasks.py``) ein; gleiche
+  Aufgabe (Name + Parameter) läuft oder wartet schon → ``AlreadyQueued``
+  (HTTP 409). Dem **Worker-Prozess** (``worker.py``) geht **eine Aufgabe auf
+  einmal** über eine Pipe zu; seine Ereignisse (Start/Fortschritt/Ende)
+  liest ein Thread und hält den Snapshot für ``/api/status``.
+- **Aufsicht:** stirbt der Worker, wird die laufende Aufgabe als
+  fehlgeschlagen gemeldet und der Worker beim nächsten Auftrag neu gestartet;
+  wartende Aufgaben bleiben erhalten. Der Worker startet lazy beim ersten
+  Auftrag (Tests ohne Aufgaben zahlen keinen Prozess-Start).
+- **Kurze Schreibgriffe** (``run_write``) schreibt der Web-Prozess selbst über
+  eine eigene Verbindung hinter einem Lock — „ein Schreiber je Aufgabenart"
+  (ADR 0007, Nachtrag); SQLite serialisiert die beiden Prozesse über WAL +
+  ``busy_timeout``.
+- Ordner-Wächter (``HotfolderWatcher``) bleiben Threads hier: sie lesen nur
+  und reihen reife Dateien als Aufgabe ein.
 """
 
 from __future__ import annotations
 
+import atexit
+import json
+import logging
+import multiprocessing as mp
 import os
 import queue
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass, field
+from collections import deque
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable
 
 from ..db import connect
-from ..interpret import reparse_database
 from ..messages import msg
-from ..scan import ScanReport, _iter_files, scan_files
+from ..scan import ScanReport, _iter_files
+from .tasks import Progress, report_dict  # noqa: F401 — Progress bleibt exportiert
+from .worker import run_worker
+
+log = logging.getLogger("feral.engine")
+
+WRITE_BUSY_TIMEOUT_MS = 3000       # kurze Schreibgriffe warten höchstens so lange auf den Worker
+RESTART_WINDOW = 60.0              # Sekunden: mehr als RESTART_LIMIT Tode darin → kein Auto-Neustart
+RESTART_LIMIT = 3
 
 
-def _report_dict(r: ScanReport) -> dict[str, int]:
-    return {
-        "scanned_files": r.scanned_files,
-        "media_files": r.media_files,
-        "new_items": r.new_items,
-        "known_items": r.known_items,
-        "with_metadata": r.with_metadata,
-        "interpreted": r.interpreted,
-        "pending_extractor": r.pending_extractor,
-        "skipped_unknown": r.skipped_unknown,
-        "ausgefiltert": r.ausgefiltert,
-        "files_with_warnings": r.files_with_warnings,
-        "failed": len(r.failed),
-    }
+class AlreadyQueued(Exception):
+    """Gleiche Aufgabe läuft oder wartet schon (ADR 0067, Mehrfachklick)."""
 
-
-class Progress(Protocol):
-    """Callback, mit dem eine Aufgabe ihren Zustand sichtbar macht."""
-
-    def __call__(self, *, report: dict | None = None, current: str | None = None) -> None: ...
+    def __init__(self, label: dict[str, Any], *, running: bool) -> None:
+        super().__init__(f"Aufgabe {label.get('key', label)!r} "
+                         f"{'läuft' if running else 'wartet'} bereits")
+        self.label = label
+        self.running = running
 
 
 @dataclass
-class _Task:
-    # Meldungs-Dict (Block M.2, ADR 0054): {"key": ..., "params": ...} —
-    # übersetzt wird erst im Frontend (servermsg.js).
+class _Queued:
+    id: int
+    name: str
+    params: dict[str, Any]
     label: dict[str, Any]
-    fn: Callable[[sqlite3.Connection, Progress], dict[str, Any]]
-    done: threading.Event | None = None          # gesetzt bei synchronen Aufgaben
-    result: dict[str, Any] = field(default_factory=dict)
+    key: str
+
+
+def _dedupe_key(name: str, params: dict[str, Any]) -> str:
+    return name + ":" + json.dumps(params, sort_keys=True, default=str)
+
+
+def _iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class ScanEngine:
-    """Verwaltet den Writer-Thread, die Aufgaben-Warteschlange und den Watcher."""
+    """Warteschlange + Worker-Aufsicht + kurze Schreibgriffe + Watcher."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, *, log_dir: str | Path | None = None,
+                 pool_workers: int | None = None, thumb_workers: int | None = None,
+                 thumb_low_priority: bool = True) -> None:
         self.db_path = str(db_path)
-        self._queue: queue.Queue[_Task | None] = queue.Queue()
-        self._lock = threading.Lock()
+        self.log_dir = str(log_dir) if log_dir is not None else None
+        self.pool_workers = pool_workers
+        self.thumb_workers = thumb_workers
+        self.thumb_low_priority = thumb_low_priority
+        self._ctx = mp.get_context("spawn")
+        self._lock = threading.RLock()
+        self._pending: deque[_Queued] = deque()
+        self._running: _Queued | None = None
+        self._next_id = 1
+        self._proc = None
+        self._task_q = None          # mp.Queue: put() blockiert nie (Feeder-Thread)
+        self._status_q = None
+        self._reader: threading.Thread | None = None
+        self._worker_died = False
+        self._deaths: deque[float] = deque()
+        self._closed = False
+        self._started_at: float | None = None
         self._state: dict[str, Any] = {
             "running": False,
             "label": None,
             "current_file": None,
-            "report": _report_dict(ScanReport()),
+            "report": report_dict(ScanReport()),
             "last_finished": None,
-            "last_result": None,   # Kurz-Zusammenfassung der letzten Wartungsaufgabe
+            "last_result": None,   # Kurz-Zusammenfassung der letzten Aufgabe
+            "started_at": None,
+            # Laufende Nummer fertiger Aufgaben: das Frontend erkennt daran
+            # „etwas ist fertig geworden" — ein Vergleich der Label-Dicts
+            # (Objektidentität) meldete seit M.2 bei JEDEM Poll eine Änderung
+            # und ließ das Dashboard alle 700 ms /api/admin/info & Co. neu
+            # laden (Feral Strawberrys „träge nach dem Lauf", 2026-09-07).
+            "finished_seq": 0,
+            # Verlauf (ADR 0074 Nachtrag): die letzten erledigten Aufgaben,
+            # jüngste zuerst — Label, Dauer, Ergebnis, ok/fehlgeschlagen.
+            # Nur im Speicher; ein Neustart beginnt leer (das Log hat alles).
+            "history": [],
         }
         # Watch-Quellen-Modell (ADR 0030): N überwachte Ordner, je nach Pfad.
         self._watchers: dict[str, "HotfolderWatcher"] = {}
-        self._worker = threading.Thread(
-            target=self._run, name="feral-writer", daemon=True
+        # Haken nach jeder erledigten Aufgabe (#118, ADR 0077): ``fn(name, ok)``
+        # mit dem Aufgabennamen aus ``tasks.TASKS``; läuft im Leser-Thread
+        # AUSSERHALB der Sperre — kurz halten (z. B. Hintergrund-Zählung
+        # anstoßen), nie blockieren.
+        self.on_finished: list[Callable[[str, bool], None]] = []
+        # Kurze Schreibgriffe: eigene Verbindung, ein Lock (ADR 0007, Nachtrag).
+        self._write_conn: sqlite3.Connection | None = None
+        self._write_lock = threading.Lock()
+        # Der Worker ist kein Daemon (er hat selbst Kindprozesse) — beim
+        # Interpreter-Ende würde multiprocessing auf ihn warten. Deshalb
+        # räumt ein atexit-Haken auf, falls niemand shutdown() rief.
+        atexit.register(self.shutdown)
+        # Dispatcher-Thread: startet den Worker und stellt Aufgaben zu — NIE
+        # unter self._lock. Ein Worker-Start dauert unter Windows (spawn +
+        # Importe + Defender) 10–30 s; hielte enqueue() derweil die Sperre,
+        # stünde /api/status (700-ms-Poll) und mit ihm der Request-Threadpool,
+        # aus dem auch FileResponse die Bilder liest (Feral Strawberrys
+        # 30-s-Hänger beim Blättern, 2026-09-07).
+        self._wake = threading.Event()
+        self._dispatcher = threading.Thread(
+            target=self._dispatch_loop, name="feral-dispatch", daemon=True,
         )
-        self._worker.start()
+        self._dispatcher.start()
 
-    # -- Worker ------------------------------------------------------------
+    # -- Worker-Prozess --------------------------------------------------------
 
-    def _run(self) -> None:
-        conn = connect(self.db_path)
-        try:
-            while True:
-                task = self._queue.get()
-                if task is None:  # Sentinel zum Beenden
-                    break
-                self._execute(conn, task)
-        finally:
-            conn.close()
-
-    def _execute(self, conn: sqlite3.Connection, task: _Task) -> None:
+    def _start_worker(self) -> None:
+        """Worker-Prozess starten — läuft im Dispatcher-Thread, ohne Sperre."""
+        task_q = self._ctx.Queue()
+        status_q = self._ctx.Queue()
+        proc = self._ctx.Process(
+            target=run_worker, args=(self.db_path, task_q, status_q),
+            kwargs={"log_dir": self.log_dir, "pool_workers": self.pool_workers,
+                    "thumb_workers": self.thumb_workers,
+                    "thumb_low_priority": self.thumb_low_priority},
+            name="feral-worker",
+        )
+        proc.start()
+        reader = threading.Thread(
+            target=self._read_status, args=(proc, status_q), name="feral-status", daemon=True,
+        )
         with self._lock:
-            self._state.update(
-                running=True, label=task.label, current_file=None,
-                report=_report_dict(ScanReport()),
-            )
+            self._proc, self._task_q, self._status_q, self._reader = proc, task_q, status_q, reader
+            self._worker_died = False
+        reader.start()
+        log.info("Worker process started (pid %s)", proc.pid)
 
-        def progress(*, report: dict | None = None, current: str | None = None) -> None:
+    def _may_restart_locked(self) -> bool:
+        """Serien-Bremse: stirbt der Worker laufend, nicht endlos neu starten."""
+        now = time.monotonic()
+        while self._deaths and now - self._deaths[0] > RESTART_WINDOW:
+            self._deaths.popleft()
+        if len(self._deaths) > RESTART_LIMIT:
+            log.error("Worker died %d times within %.0f s - no automatic restart; "
+                      "the next task will try again.", len(self._deaths), RESTART_WINDOW)
+            self._deaths.clear()
+            return False
+        return True
+
+    def _dispatch_loop(self) -> None:
+        """Dispatcher: wartet auf den Wecker, startet bei Bedarf den Worker und
+        stellt die nächste Aufgabe zu. Blockierende Schritte (Prozess-Start,
+        Queue-Put) passieren hier, außerhalb von self._lock."""
+        while True:
+            self._wake.wait(timeout=1.0)
+            self._wake.clear()
+            if self._closed:
+                return
             with self._lock:
-                if report is not None:
-                    self._state["report"] = report
-                self._state["current_file"] = current
+                if self._running is not None or not self._pending:
+                    continue
+                need_worker = self._proc is None or not self._proc.is_alive()
+                if need_worker and not self._may_restart_locked():
+                    continue
+            if need_worker:
+                try:
+                    self._start_worker()
+                except Exception as exc:  # pragma: no cover — Startfehler sichtbar machen
+                    log.error("Worker process failed to start: %s", exc)
+                    time.sleep(1.0)
+                    continue
+            with self._lock:
+                if self._running is not None or not self._pending or self._task_q is None:
+                    continue
+                item = self._pending.popleft()
+                self._running = item
+                task_q = self._task_q
+                message = {"op": "run", "id": item.id, "name": item.name,
+                           "params": item.params, "label": item.label,
+                           "queue_pending": len(self._pending)}
+            try:
+                task_q.put(message)
+            except (OSError, ValueError) as exc:
+                log.error("Task %s could not be delivered (%s) - worker dead?", item.name, exc)
+                with self._lock:
+                    self._pending.appendleft(item)
+                    self._running = None
+                    self._handle_death_locked(self._proc)
 
-        try:
-            result = task.fn(conn, progress)
-        except Exception as exc:  # Aufgabe kaputt ≠ Worker kaputt
-            result = {"summary": msg("sumFailed",
-                                     error=f"{exc.__class__.__name__}: {exc}")}
+    def _read_status(self, proc, status_q) -> None:
+        """Leser-Thread: Ereignisse des Workers → Snapshot; Tod erkennen."""
+        while True:
+            try:
+                event = status_q.get(timeout=0.5)
+            except queue.Empty:
+                if not proc.is_alive():
+                    # Nachzügler aus der Queue holen, dann den Tod verbuchen.
+                    while True:
+                        try:
+                            self._handle_event(status_q.get(timeout=0.2))
+                        except queue.Empty:
+                            break
+                    with self._lock:
+                        self._handle_death_locked(proc)
+                    return
+                continue
+            except (EOFError, OSError):
+                with self._lock:
+                    self._handle_death_locked(proc)
+                return
+            if not isinstance(event, dict):
+                continue
+            if event.get("ev") == "bye":
+                return
+            self._handle_event(event)
 
+    def _handle_event(self, event: dict[str, Any]) -> None:
+        finished: tuple[str, bool] | None = None
         with self._lock:
+            running = self._running
+            if running is None or event.get("id") != running.id:
+                return
+            kind = event.get("ev")
+            if kind == "started":
+                self._started_at = float(event.get("at") or time.time())
+                self._state.update(
+                    running=True, label=running.label, current_file=None,
+                    report=report_dict(ScanReport()), started_at=_iso(self._started_at),
+                )
+            elif kind == "progress":
+                if event.get("report") is not None:
+                    self._state["report"] = event["report"]
+                self._state["current_file"] = event.get("current")
+            elif kind == "finished":
+                result = event.get("result") or {}
+                if event.get("report") is not None:
+                    self._state["report"] = event["report"]
+                self._state.update(running=False, current_file=None,
+                                   last_finished=running.label, started_at=None,
+                                   finished_seq=self._state["finished_seq"] + 1)
+                if isinstance(result, dict) and "summary" in result:
+                    self._state["last_result"] = result["summary"]
+                # Fehlgeschlagen ist NUR eine Aufgabe, die mit sumFailed
+                # endete (Ausnahme im Worker); ein Scan-Report mit
+                # failed-Zähler ist ein erfolgreicher Lauf mit Befunden.
+                summary = self._state["last_result"]
+                ok = not (isinstance(summary, dict) and summary.get("key") == "sumFailed")
+                self._remember_locked(running.label, summary, ok=ok)
+                finished = (running.name, ok)
+                self._running = None
+                self._started_at = None
+                self._wake.set()
+        if finished is not None:
+            for hook in list(self.on_finished):
+                try:
+                    hook(*finished)
+                except Exception:
+                    log.exception("on_finished hook %r failed", hook)
+
+    HISTORY_MAX = 12
+
+    def _remember_locked(self, label: dict[str, Any], result: Any, *, ok: bool) -> None:
+        """Erledigte Aufgabe in den Verlauf (unter self._lock aufrufen)."""
+        now = time.time()
+        elapsed = (round(now - self._started_at, 1) if self._started_at is not None else None)
+        entry = {"label": label, "result": result, "ok": ok,
+                 "elapsed": elapsed, "finished_at": _iso(now)}
+        self._state["history"] = [entry, *self._state["history"]][: self.HISTORY_MAX]
+
+    def _handle_death_locked(self, proc) -> None:
+        if proc is not self._proc or self._closed:
+            return
+        self._worker_died = True
+        self._deaths.append(time.monotonic())
+        code = getattr(proc, "exitcode", None)
+        running, self._running = self._running, None
+        self._started_at = None
+        if running is not None:
+            log.error("Worker process died (exitcode %s) during %s", code, running.name)
             self._state.update(
-                running=False, current_file=None, last_finished=task.label,
+                running=False, current_file=None, last_finished=running.label,
+                last_result=msg("sumWorkerDied", code=code if code is not None else "?"),
+                started_at=None, finished_seq=self._state["finished_seq"] + 1,
             )
-            if "summary" in result:
-                self._state["last_result"] = result["summary"]
-        task.result.update(result)
-        if task.done is not None:
-            task.done.set()
+            self._remember_locked(running.label, self._state["last_result"], ok=False)
+        else:
+            log.error("Worker process died (exitcode %s)", code)
+        try:
+            self._task_q.close()
+        except Exception:
+            pass
+        self._proc = self._task_q = self._status_q = None
+        if self._pending:
+            self._wake.set()   # Dispatcher startet den Worker neu (mit Serien-Bremse)
 
-    # -- Einreihen ----------------------------------------------------------
+    # -- Einreihen ----------------------------------------------------------------
 
-    def _submit(self, label: dict[str, Any],
-                fn: Callable[[sqlite3.Connection, Progress], dict]) -> None:
-        self._queue.put(_Task(label=label, fn=fn))
+    def enqueue(self, name: str, params: dict[str, Any] | None = None,
+                label: dict[str, Any] | None = None, *, key: str | None = None,
+                dedupe: str = "all") -> int:
+        """Eine benannte Aufgabe (``tasks.TASKS``) einreihen; liefert ihre ID.
 
-    def enqueue_task(
-        self, label: dict[str, Any], fn: Callable[[sqlite3.Connection, Progress], dict]
-    ) -> None:
-        """Reiht eine beliebige **lange** Schreibaufgabe ein (öffentliche Hülle
-        um ``_submit`` für Routen ohne eigene enqueue_*-Methode). Das Label
-        erscheint in der Status-Anzeige; ein ``summary`` im Ergebnis wird zum
-        ``last_result``."""
-        self._submit(label, fn)
+        ``key`` (Standard: Name + Parameter) entscheidet über Dubletten:
+        ``dedupe="all"`` weist ab, wenn die Aufgabe läuft ODER wartet
+        (Mehrfachklick, ADR 0067); ``"pending"`` nur, wenn sie wartet — für
+        Automatik-Nachläufer (Thumbnail-Vorwärmen nach Import), die nach
+        einem laufenden Lauf noch einmal drankommen sollen."""
+        params = dict(params or {})
+        label = label or msg("taskGeneric")
+        key = key or _dedupe_key(name, params)
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("Engine ist beendet")
+            if dedupe == "all" and self._running is not None and self._running.key == key:
+                raise AlreadyQueued(self._running.label, running=True)
+            for queued in self._pending:
+                if queued.key == key:
+                    raise AlreadyQueued(queued.label, running=False)
+            item = _Queued(id=self._next_id, name=name, params=params, label=label, key=key)
+            self._next_id += 1
+            self._pending.append(item)
+            log.info("Queued: %s [%s] (waiting: %d)", label.get("key", label), name,
+                     len(self._pending))
+        self._wake.set()
+        return item.id
 
     def run_write(
         self,
@@ -146,53 +366,61 @@ class ScanEngine:
         *,
         timeout: float = 15.0,
     ) -> dict[str, Any]:
-        """Führe eine **kurze** Schreibaufgabe im Worker aus und warte auf das Ergebnis.
+        """Kurzen Schreibgriff **hier im Web-Prozess** ausführen (ADR 0007,
+        Nachtrag): eigene Verbindung, ein Lock. Wartet höchstens ``timeout``
+        auf einen anderen kurzen Schreibgriff und ``WRITE_BUSY_TIMEOUT_MS``
+        auf eine Transaktion des Workers — sonst ``TimeoutError`` (→ 503).
+        Fehler in ``fn`` kommen wie bisher als ``{"summary": sumFailed}``
+        zurück, nicht als Exception."""
+        if not self._write_lock.acquire(timeout=timeout):
+            raise TimeoutError(f"Schreibaufgabe {label.get('key', label)!r} wartet noch.")
+        try:
+            conn = self._write_conn
+            if conn is None:
+                # EINE Verbindung für alle kurzen Schreibgriffe — FastAPI ruft
+                # synchrone Routen aus wechselnden Pool-Threads auf. sqlite3
+                # bindet Verbindungen standardmäßig an den erzeugenden Thread
+                # (»SQLite objects created in a thread can only be used in
+                # that same thread«, Issue #72: Duelle/Bewertungen gingen
+                # intermittierend verloren). Das Teilen ist erlaubt, weil
+                # JEDER Zugriff unter _write_lock läuft (siehe oben).
+                conn = self._write_conn = connect(self.db_path, check_same_thread=False)
+                conn.execute(f"PRAGMA busy_timeout={WRITE_BUSY_TIMEOUT_MS}")
+            try:
+                result = fn(conn, _noop_progress)
+                if conn.in_transaction:
+                    conn.commit()
+                return result if isinstance(result, dict) else {}
+            except sqlite3.OperationalError as exc:
+                _rollback(conn)
+                if "locked" in str(exc) or "busy" in str(exc):
+                    log.warning("Write %s: database busy (%s)", label.get("key"), exc)
+                    raise TimeoutError(str(exc)) from exc
+                log.error("Write %s failed: %s", label.get("key"), exc)
+                return {"summary": msg("sumFailed", error=f"{exc.__class__.__name__}: {exc}")}
+            except Exception as exc:
+                _rollback(conn)
+                log.error("Write %s failed: %s", label.get("key"), exc)
+                return {"summary": msg("sumFailed", error=f"{exc.__class__.__name__}: {exc}")}
+        finally:
+            self._write_lock.release()
 
-        Für kleine Handgriffe aus HTTP-Handlern (z. B. ein Issue quittieren), die
-        trotzdem durch den einen Schreiber müssen (ADR 0007). Lange Aufgaben
-        gehören in `_submit`.
-        """
-        # Läuft gerade ein Langläufer (Import, VACUUM, …), würde der volle
-        # Timeout den Aufrufer 15 s hängen lassen, nur um dann doch zu
-        # scheitern — lieber kurz abwarten (falls die Aufgabe gerade endet)
-        # und sonst sofort ehrlich melden (Block 4S; wird zur 503 mit Label).
-        with self._lock:
-            busy = self._state["running"]
-        if busy:
-            timeout = min(timeout, 1.0)
-        task = _Task(label=label, fn=fn, done=threading.Event())
-        self._queue.put(task)
-        if not task.done.wait(timeout):
-            raise TimeoutError(
-                f"Schreibaufgabe {label.get('key', label)!r} wartet noch (Queue voll?)."
-            )
-        return task.result
-
-    # -- Scan-Aufgaben -------------------------------------------------------
-
-    @staticmethod
-    def _scan_task(files_provider: Callable[[sqlite3.Connection], list[Path]],
-                   rules: dict[str, Any] | None = None):
-        def fn(conn: sqlite3.Connection, progress: Progress) -> dict[str, Any]:
-            files = files_provider(conn)
-
-            def on_file(report: ScanReport, path: Path) -> None:
-                progress(report=_report_dict(report), current=path.name)
-
-            report = scan_files(conn, files, progress=on_file, rules=rules)
-            progress(report=_report_dict(report), current=None)
-            return {}
-
-        return fn
+    # -- Scan-Aufgaben (Hüllen um enqueue — die Routen bleiben unverändert) -------
 
     def enqueue_folder(self, root: str | Path,
                        rules: dict[str, Any] | None = None) -> int:
         """Reiht einen rekursiven Scan eines Ordners ein. Gibt die Dateianzahl
         zurück. ``rules`` — Import-Regeln (ADR 0046) auch fürs Katalogisieren."""
-        files = list(_iter_files(Path(root)))
-        self._submit(msg("taskScan", root=str(root)),
-                     self._scan_task(lambda _conn: files, rules))
+        files = [str(p) for p in _iter_files(Path(root))]
+        self.enqueue("scan_files", {"files": files, "rules": rules},
+                     msg("taskScan", root=str(root)), key=f"scan_folder:{root}")
         return len(files)
+
+    def enqueue_files(self, files: list[Path], label: dict[str, Any],
+                      rules: dict[str, Any] | None = None) -> None:
+        """Reiht das Scannen konkreter Dateien ein (katalogisieren-Watchordner,
+        ADR 0031: am Ort aufnehmen — weder kopieren noch bewegen)."""
+        self.enqueue("scan_files", {"files": [str(p) for p in files], "rules": rules}, label)
 
     def enqueue_import(
         self, source_root: str | Path, *, target_root: str | Path, min_date,
@@ -200,42 +428,18 @@ class ScanEngine:
         rules: dict[str, Any] | None = None,
     ) -> int:
         """Reiht den Import eines Quellordners ein (ADR 0019). Gibt die Dateizahl
-        zurück. ``source_mode`` (ADR 0031): einsortieren | belassen (Quelle
-        nie anfassen) | loeschen (Verschiebe-Modus, ADR 0025).
+        zurück. ``source_mode`` (ADR 0031): einsortieren | belassen | loeschen;
         ``remove_empty`` (ADR 0033): leer gewordene Unterordner mit abräumen."""
-        from ..importer import import_folder, iter_import_files
+        from ..importer import iter_import_files
 
-        source = Path(source_root)
-        files = iter_import_files(source)
-
-        def fn(conn: sqlite3.Connection, progress: Progress) -> dict[str, Any]:
-            def on_file(path: Path, index: int, total: int, rep) -> None:
-                # Zähler in die Scan-Report-Felder mappen — die Statusanzeige
-                # zeigt damit auch beim Import lebendige Zahlen (54k-Läufe!).
-                progress(
-                    current=msg("progressFile", index=index, total=total,
-                                name=path.name),
-                    report={
-                        "scanned_files": index - 1,
-                        "media_files": rep.importiert + rep.repariert + rep.dublette,
-                        "new_items": rep.importiert + rep.repariert,
-                        "known_items": rep.dublette,
-                        "skipped_unknown": rep.unbekanntes_format,
-                        "ausgefiltert": rep.ausgefiltert,
-                        "failed": rep.fehler,
-                        "with_metadata": 0, "interpreted": 0,
-                        "pending_extractor": 0, "files_with_warnings": 0,
-                    },
-                )
-
-            report = import_folder(
-                conn, source, target_root=Path(target_root), min_date=min_date,
-                progress=on_file, source_mode=source_mode, remove_empty=remove_empty,
-                rules=rules,
-            )
-            return {"summary": _import_summary(report)}
-
-        self._submit(msg("taskImport", root=str(source)), fn)
+        files = iter_import_files(Path(source_root))
+        self.enqueue(
+            "import_folder",
+            {"source_root": str(source_root), "target_root": str(target_root),
+             "min_date": min_date, "source_mode": source_mode,
+             "remove_empty": remove_empty, "rules": rules},
+            msg("taskImport", root=str(source_root)), key=f"import_folder:{source_root}",
+        )
         return len(files)
 
     def enqueue_import_files(
@@ -243,239 +447,76 @@ class ScanEngine:
         min_date, source_mode: str = "einsortieren", remove_empty: bool = False,
         rules: dict[str, Any] | None = None,
     ) -> None:
-        """Konkrete (zur Ruhe gekommene) Dateien importieren — Hotfolder (ADR 0025).
-        ``remove_empty`` (ADR 0033): nach dem Batch leere Unterordner der
-        Quelle abräumen (gefahrlos neben dem Watcher: halbe Kopien machen
-        ihren Ordner nicht leer)."""
-        from ..importer import ImportReport, import_file, remove_empty_dirs
-
-        frozen = list(files)
-
-        def fn(conn: sqlite3.Connection, progress: Progress) -> dict[str, Any]:
-            report = ImportReport()
-            for index, path in enumerate(frozen, start=1):
-                progress(
-                    current=msg("progressFile", index=index, total=len(frozen),
-                                name=path.name),
-                    report={
-                        "scanned_files": index - 1,
-                        "media_files": report.importiert + report.repariert + report.dublette,
-                        "new_items": report.importiert + report.repariert,
-                        "known_items": report.dublette,
-                        "skipped_unknown": report.unbekanntes_format + report.gesperrt,
-                        "ausgefiltert": report.ausgefiltert,
-                        "failed": report.fehler, "with_metadata": 0, "interpreted": 0,
-                        "pending_extractor": 0, "files_with_warnings": 0,
-                    },
-                )
-                try:
-                    action, detail = import_file(
-                        conn, path, source_root=source_root, target_root=target_root,
-                        min_date=min_date, source_mode=source_mode, rules=rules,
-                    )
-                except Exception as exc:  # Einzelfehler töten den Batch nicht
-                    report.fehler += 1
-                    report.probleme.append(f"{path}: {exc}")
-                    continue
-                setattr(report, action, getattr(report, action) + 1)
-            if remove_empty and source_mode != "belassen":
-                report.leere_ordner = remove_empty_dirs(source_root)
-            return {"summary": _import_summary(report, hotfolder=True)}
-
-        self._submit(msg("taskHotfolderImport", n=len(frozen)), fn)
+        """Konkrete (zur Ruhe gekommene) Dateien importieren — Hotfolder (ADR 0025)."""
+        frozen = [str(p) for p in files]
+        self.enqueue(
+            "import_files",
+            {"files": frozen, "source_root": str(source_root), "target_root": str(target_root),
+             "min_date": min_date, "source_mode": source_mode,
+             "remove_empty": remove_empty, "rules": rules},
+            msg("taskHotfolderImport", n=len(frozen)),
+        )
 
     def enqueue_moveout(
         self, *, library_root: str | Path, target_root: str | Path, min_date
     ) -> None:
-        """Reiht den Pauschalweg des Rausverschiebe-Dialogs ein (I3, ADR 0041):
-        alle abgelehnten Dateien unter ``library_root`` in die Datumsstruktur
-        unter ``target_root`` verschieben — der einzige Datei-Bewegungsweg
-        neben dem Import."""
-        from ..moveout import move_out
-
-        def fn(conn: sqlite3.Connection, progress: Progress) -> dict[str, Any]:
-            def on_file(path: Path, index: int, total: int, rep) -> None:
-                progress(
-                    current=msg("progressFile", index=index, total=total,
-                                name=path.name),
-                    report={
-                        "scanned_files": index - 1,
-                        "media_files": rep.verschoben,
-                        "new_items": rep.verschoben,
-                        "known_items": 0,
-                        "skipped_unknown": rep.fehlt + rep.veraendert,
-                        "failed": rep.fehler,
-                        "with_metadata": 0, "interpreted": 0,
-                        "pending_extractor": 0, "files_with_warnings": 0,
-                    },
-                )
-
-            report = move_out(
-                conn, library_root=library_root, target_root=target_root,
-                min_date=min_date, progress=on_file,
-            )
-            return {"summary": _moveout_summary(report)}
-
-        self._submit(msg("taskMoveout"), fn)
+        """Pauschalweg des Rausverschiebe-Dialogs (I3, ADR 0041)."""
+        self.enqueue("moveout", {"library_root": str(library_root),
+                                 "target_root": str(target_root), "min_date": min_date},
+                     msg("taskMoveout"))
 
     def enqueue_thumb_warm(
-        self, cache_dir: str | Path, size: int, pool=None, *, retry_failed: bool = False,
+        self, cache_dir: str | Path, size: int, *, retry_failed: bool = False,
+        auto: bool = False,
     ) -> None:
-        """Reiht „Thumbnails erstellen" ein (ADR 0013-Nachrüstung).
+        """„Thumbnails erstellen" (ADR 0013/0020). ``auto`` = Nachläufer nach
+        Import/Watch-Schub: wartet schon einer, reicht das; läuft gerade einer,
+        kommt der neue trotzdem dran (neue Dateien)."""
+        self.enqueue("thumb_warm",
+                     {"cache_dir": str(cache_dir), "size": int(size),
+                      "retry_failed": bool(retry_failed)},
+                     msg("taskThumbWarm"), dedupe="pending" if auto else "all")
 
-        Läuft nach großen Importen automatisch mit — sonst erzeugt der erste
-        Grid-Besuch zehntausende Thumbnails on-demand und würgt die
-        Oberfläche ab. Die Automatik erzeugt NUR Fehlende; erst
-        ``retry_failed=True`` (Admin-Knopf) versucht Fehlgeschlagene erneut
-        (z. B. nach ffmpeg-Installation) und schreibt dauerhafte Fehler als
-        Scan-Probleme (ADR-0042-Ergänzung: die Automatik machte sonst bei
-        jedem Schub alle quittierten thumbnail-Probleme wieder auf).
-        Mit ``pool`` (ThumbPool, ADR 0020) generieren die Prozesse parallel —
-        DB-Schreiben bleibt trotzdem hier im Writer-Thread.
-        """
-        from ..thumbs import warm_thumbnails
-
-        def fn(conn: sqlite3.Connection, progress: Progress) -> dict[str, Any]:
-            def on_progress(index, total, created, skipped, failed):
-                progress(
-                    current=msg("progressThumb", index=index, total=total),
-                    report={
-                        "scanned_files": index, "media_files": total,
-                        "new_items": created, "known_items": skipped,
-                        "failed": failed, "skipped_unknown": 0,
-                        "with_metadata": 0, "interpreted": 0,
-                        "pending_extractor": 0, "files_with_warnings": 0,
-                    },
-                )
-
-            result = warm_thumbnails(conn, cache_dir, size=size, progress=on_progress,
-                                     pool=pool, retry_failed=retry_failed)
-            parts = [msg("sumThumbsNew", n=result["created"]),
-                     msg("sumThumbsSkipped", n=result["skipped"])]
-            if result["failed"]:
-                parts.append(msg("sumThumbsFailedIssues" if retry_failed
-                                 else "sumThumbsFailed", n=result["failed"]))
-            return {"summary": msg("sumThumbs", parts=parts)}
-
-        self._submit(msg("taskThumbWarm"), fn)
-
-    def enqueue_media_date_backfill(self) -> None:
-        """Erstelldaten für den Alt-Bestand nachtragen (ADR 0021) — läuft beim
-        App-Start automatisch, wenn Items ohne ``media_date`` existieren."""
-        from ..importer import backfill_media_dates
-
-        def fn(conn: sqlite3.Connection, progress: Progress) -> dict[str, Any]:
-            def on_progress(index: int, total: int, dated: int) -> None:
-                progress(
-                    current=msg("progressBackfill", index=index, total=total),
-                    report={
-                        "scanned_files": index, "media_files": total,
-                        "new_items": dated, "known_items": 0, "failed": 0,
-                        "skipped_unknown": 0, "with_metadata": 0,
-                        "interpreted": 0, "pending_extractor": 0,
-                        "files_with_warnings": 0,
-                    },
-                )
-
-            result = backfill_media_dates(conn, progress=on_progress)
-            return {"summary": msg("sumBackfill", dated=result["dated"],
-                                   total=result["total"])}
-
-        self._submit(msg("taskBackfillDates"), fn)
+    def enqueue_media_date_backfill(self, min_date: datetime | None = None) -> None:
+        """``min_date`` (konfiguriert, ``[import] min_date``) wandert mit —
+        picklebar als ISO-Text (#113)."""
+        params = {"min_date": f"{min_date:%Y-%m-%d}"} if min_date is not None else {}
+        self.enqueue("backfill_dates", params, msg("taskBackfillDates"))
 
     def enqueue_search_reindex(self) -> None:
-        """FTS5-Suchindex komplett neu aufbauen (ADR 0024) — läuft beim
-        App-Start automatisch, wenn Item- und Index-Zahl auseinanderliegen
-        (Alt-Bestand vor Migration 0013, Drift nach Aufräum-Aktionen)."""
-        from ..db.store import update_search_index
-
-        def fn(conn: sqlite3.Connection, progress: Progress) -> dict[str, Any]:
-            conn.execute("DELETE FROM search_index")
-            conn.execute("DELETE FROM search_index_map")
-            hashes = [r[0] for r in conn.execute("SELECT file_hash FROM items")]
-            total = len(hashes)
-            for index, file_hash in enumerate(hashes, start=1):
-                update_search_index(conn, file_hash)
-                if index % 500 == 0 or index == total:
-                    conn.commit()
-                    progress(
-                        current=msg("progressReindex", index=index, total=total),
-                        report={
-                            "scanned_files": index, "media_files": total,
-                            "new_items": index, "known_items": 0, "failed": 0,
-                            "skipped_unknown": 0, "with_metadata": 0,
-                            "interpreted": 0, "pending_extractor": 0,
-                            "files_with_warnings": 0,
-                        },
-                    )
-            conn.commit()
-            return {"summary": msg("sumReindex", n=total)}
-
-        self._submit(msg("taskReindex"), fn)
-
-    def enqueue_files(self, files: list[Path], label: dict[str, Any],
-                      rules: dict[str, Any] | None = None) -> None:
-        """Reiht das Scannen konkreter Dateien ein (katalogisieren-Watchordner,
-        ADR 0031: am Ort aufnehmen — weder kopieren noch bewegen)."""
-        frozen = list(files)
-        self._submit(label, self._scan_task(lambda _conn: frozen, rules))
+        self.enqueue("search_reindex", {}, msg("taskReindex"))
 
     # -- Wartungsaufgaben (Stufe 2A, ADR 0014) --------------------------------
 
     def enqueue_reparse(self) -> None:
-        """Schicht 2 rückwirkend über den ganzen Bestand (ohne Datei-Zugriff)."""
+        self.enqueue("reparse", {}, msg("taskReparse"))
 
-        def fn(conn: sqlite3.Connection, _progress: Progress) -> dict[str, Any]:
-            report = reparse_database(conn)
-            return {"summary": msg("sumReparse",
-                                   interpreted=report.items_interpreted,
-                                   total=report.items_total,
-                                   fields=report.fields_written)}
-
-        self._submit(msg("taskReparse"), fn)
-
-    def enqueue_rescan(self) -> None:
-        """Alle bekannten, noch existierenden Fundorte erneut scannen."""
-
-        def files_provider(conn: sqlite3.Connection) -> list[Path]:
-            return [
-                Path(p)
-                for (p,) in conn.execute("SELECT DISTINCT path FROM file_locations")
-                if Path(p).is_file()
-            ]
-
-        self._submit(msg("taskRescan"), self._scan_task(files_provider))
+    def enqueue_rescan(self, rules: dict[str, Any] | None = None) -> None:
+        """``rules`` — Import-Regeln aus der Config; beim Re-Scan zählt vor
+        allem ``min_date`` (Datumsregel, ADR 0075)."""
+        self.enqueue("rescan", {"rules": rules}, msg("taskRescan"))
 
     def enqueue_integrity_check(self) -> None:
-        def fn(conn: sqlite3.Connection, _progress: Progress) -> dict[str, Any]:
-            verdict = conn.execute("PRAGMA integrity_check").fetchone()[0]
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            ok = verdict == "ok"
-            return {"summary": msg("sumIntegrityOk") if ok
-                    else msg("sumIntegrityProblem", verdict=verdict)}
-
-        self._submit(msg("taskIntegrity"), fn)
+        self.enqueue("integrity", {}, msg("taskIntegrity"))
 
     def enqueue_vacuum(self) -> None:
-        def fn(conn: sqlite3.Connection, _progress: Progress) -> dict[str, Any]:
-            before = Path(self.db_path).stat().st_size if Path(self.db_path).is_file() else 0
-            conn.execute("VACUUM")
-            # VACUUM schreibt die DB durchs WAL neu — ohne Checkpoint bleibt
-            # eine WAL-Datei in DB-Größe liegen und die Kennzahl „DB (+WAL)"
-            # zeigt scheinbar das Doppelte (Feral Strawberrys 1,1→2,21-GB-Befund).
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            after = Path(self.db_path).stat().st_size if Path(self.db_path).is_file() else 0
-            return {"summary": msg("sumVacuum", before=f"{before/1e6:.1f}",
-                                   after=f"{after/1e6:.1f}")}
-
-        self._submit(msg("taskVacuum"), fn)
+        self.enqueue("vacuum", {}, msg("taskVacuum"))
 
     # -- Öffentliche API ------------------------------------------------------
 
     def status(self) -> dict[str, Any]:
         with self._lock:
             st = dict(self._state)
-        st["queue_pending"] = self._queue.qsize()
+            st["queue_pending"] = len(self._pending)
+            st["queue"] = [q.label for q in self._pending]
+            if self._worker_died:
+                st["worker_alive"] = False
+            elif self._proc is None:
+                st["worker_alive"] = None       # noch nie gebraucht
+            else:
+                st["worker_alive"] = self._proc.is_alive()
+            st["elapsed"] = (round(time.time() - self._started_at, 1)
+                             if self._started_at is not None else None)
         st["watchers"] = [w.status() for w in self._watchers.values()]
         return st
 
@@ -562,43 +603,50 @@ class ScanEngine:
         return self.watch_key(path) in self._watchers
 
     def shutdown(self) -> None:
-        """Beendet alle Watcher und den Worker sauber (für Tests/Neustart)."""
+        """Beendet Watcher, Worker-Prozess und Schreibverbindung (idempotent)."""
         self.stop_all_watches()
-        self._queue.put(None)
-        self._worker.join(timeout=5)
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            proc, task_q, status_q, reader = self._proc, self._task_q, self._status_q, self._reader
+            self._proc = self._task_q = self._status_q = self._reader = None
+            self._pending.clear()
+        self._wake.set()   # Dispatcher beenden
+        if proc is not None:
+            if proc.is_alive():
+                try:
+                    task_q.put({"op": "stop"})
+                except (OSError, ValueError):
+                    pass
+                proc.join(timeout=5)
+                if proc.is_alive():
+                    log.warning("Worker does not respond to stop - terminating.")
+                    proc.terminate()
+                    proc.join(timeout=2)
+            log.info("Worker process exited (exitcode %s)", proc.exitcode)
+        if task_q is not None:
+            task_q.close()
+        if reader is not None and reader is not threading.current_thread():
+            reader.join(timeout=2)
+        if status_q is not None:
+            status_q.close()
+        with self._write_lock:
+            if self._write_conn is not None:
+                self._write_conn.close()
+                self._write_conn = None
 
 
-def _import_summary(report, *, hotfolder: bool = False) -> dict[str, Any]:
-    """ImportReport → Meldungs-Dict (Gegenstück zu ``ImportReport.summary()``,
-    das fürs CLI deutsch bleibt): nur belegte Zähler als ``parts``-Liste —
-    der Frontend-Renderer joint sie mit « · » (Block M.2, ADR 0054)."""
-    parts = [msg("sumImportNew", n=report.importiert)]
-    if report.repariert:
-        parts.append(msg("sumImportRepaired", n=report.repariert))
-    parts.append(msg("sumImportDupes", n=report.dublette))
-    if report.unbekanntes_format:
-        parts.append(msg("sumImportUnknown", n=report.unbekanntes_format))
-    if report.ausgefiltert:
-        parts.append(msg("sumImportFiltered", n=report.ausgefiltert))
-    if report.gesperrt:
-        parts.append(msg("sumImportBlocked", n=report.gesperrt))
-    if report.fehler:
-        parts.append(msg("sumImportErrors", n=report.fehler))
-    if report.leere_ordner:
-        parts.append(msg("sumImportEmptyDirs", n=report.leere_ordner))
-    return msg("sumHotfolderImport" if hotfolder else "sumImport", parts=parts)
+def _noop_progress(*, report: dict | None = None, current: Any = None) -> None:
+    return None
 
 
-def _moveout_summary(report) -> dict[str, Any]:
-    """MoveoutReport → Meldungs-Dict (wie ``_import_summary``)."""
-    parts = [msg("sumMoveMoved", n=report.verschoben)]
-    if report.fehlt:
-        parts.append(msg("sumMoveMissing", n=report.fehlt))
-    if report.veraendert:
-        parts.append(msg("sumMoveChanged", n=report.veraendert))
-    if report.fehler:
-        parts.append(msg("sumMoveErrors", n=report.fehler))
-    return msg("sumMoveout", parts=parts)
+def _rollback(conn: sqlite3.Connection) -> None:
+    try:
+        if conn.in_transaction:
+            conn.rollback()
+    except Exception:
+        pass
 
 
 class HotfolderWatcher(threading.Thread):

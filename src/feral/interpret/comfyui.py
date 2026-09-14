@@ -34,7 +34,14 @@ from . import loras
 from .types import InterpretedField, Interpretation
 
 NAME = "comfyui"
-VERSION = 10  # v10: Prompt-Enhancer-Ketten (Feral Strawberrys Ernie-Image-/Krea-2-Befund
+VERSION = 11  # v11: Sampling-Einstellungen aus Split-Bauformen und Subgraphen
+# (Issue #29, ADR 0068): BasicScheduler/LTXVScheduler/KSamplerSelect/CFGGuider
+# tragen steps/scheduler/sampler/cfg ohne seed; ManualSigmas → steps aus der
+# Sigma-Liste; Sampler-Knoten ohne sampler_name → Name aus der Klasse;
+# verlinkte Skalare (PrimitiveInt am Subgraph-Rand) werden aufgelöst;
+# Hauptpass zuerst bei mehreren Durchgängen; LLM-Seed ist kein Bild-Seed;
+# workflow-Rückfall liest Sampler-Widgets inkl. promoteter Subgraph-Werte.
+# (v10: Prompt-Enhancer-Ketten (Feral Strawberrys Ernie-Image-/Krea-2-Befund
 # 2026-07-17): Boolean-Switches (on_true/on_false) werden aufgelöst und dem
 # gewählten Zweig gefolgt; TextGenerate-Zweige (Core-LLM-Enhancer) haben am
 # Switch die niedrigste Priorität — ihr prompt-Input ist dort die
@@ -66,6 +73,47 @@ _SAMPLER_INPUTS = {
 # Loader-Inputs, die ein Checkpoint/UNet als Modell tragen (für die
 # Rückfall-Suche, wenn die Modell-Rückverfolgung vom Sampler nichts findet).
 _MODEL_INPUTS = ("ckpt_name", "unet_name")
+
+# Knoten, die Sampling-Einstellungen tragen, ohne selbst Sampler mit Seed zu
+# sein (v11): Split-Bauformen moderner Templates — BasicScheduler/
+# LTXVScheduler (steps, scheduler, denoise), KSamplerSelect (sampler_name),
+# CFGGuider/SamplerCustom (cfg), ManualSigmas (Sigma-Liste). Erkannt am
+# Klassennamen PLUS einem Sampler-Input.
+_SAMPLING_CLASS_HINTS = ("sampler", "scheduler", "sigmas", "guider")
+
+# Wert-Halter hinter verlinkten Skalar-Inputs (PrimitiveInt/Float/Combo,
+# Int-/Number-Knoten): in Subgraphen kommen steps/cfg/seed oft als Link vom
+# Subgraph-Rand herein statt als Literal.
+_SCALAR_KEYS = ("value", "int", "float", "number", "string")
+
+# Reihenfolge der Sampler-Felder je Durchgang (stabil für Anzeige/ordinal).
+_PASS_FIELDS = ("seed", "steps", "cfg_scale", "sampler", "scheduler", "denoise")
+
+# Sampler-Knoten ohne sampler_name (SamplerEulerAncestral, SamplerDPMPP_2M_SDE,
+# SamplerLMS …): der Name steckt im Klassennamen — CamelCase → snake_case.
+# Die Container SamplerCustom(Advanced) sind keine Sampler-Wahl.
+_CAMEL_1 = re.compile(r"([A-Z]+)([A-Z][a-z])")
+_CAMEL_2 = re.compile(r"([a-z])([A-Z])")  # Ziffer→Groß bleibt zusammen (2M, 3M)
+_SAMPLER_CONTAINERS = ("samplercustom", "samplercustomadvanced")
+
+# workflow-Blob (Rückfall ohne prompt): widgets_values sind positionslos —
+# feste Widget-Layouts der Core-Knoten in Frontend-Reihenfolge (None =
+# übersprungen, z. B. control_after_generate/add_noise).
+_WIDGET_LAYOUTS: dict[str, tuple[str | None, ...]] = {
+    "ksampler": ("seed", None, "steps", "cfg", "sampler_name", "scheduler", "denoise"),
+    "ksampleradvanced": (None, "noise_seed", None, "steps", "cfg", "sampler_name", "scheduler"),
+    "basicscheduler": ("scheduler", "steps", "denoise"),
+    "ksamplerselect": ("sampler_name",),
+    "randomnoise": ("noise_seed",),
+    "cfgguider": ("cfg",),
+    "samplercustom": (None, "noise_seed", None, "cfg"),
+    "ltxvscheduler": ("steps",),
+    "manualsigmas": ("sigmas",),
+}
+# Subgraph-Pseudoknoten im workflow-Blob: -10 = Eingänge des Subgraphen.
+_SUBGRAPH_INPUT_NODE = -10
+# Subgraph-Input-Typen, die am Instanzknoten als Widget (Wert) erscheinen.
+_WIDGET_TYPES = ("STRING", "INT", "FLOAT", "BOOLEAN", "COMBO", "NUMBER")
 
 # Klassische LoRA-Inputs mit String-Wert: lora, lora_name, lora_name_1, lora_01 …
 _LORA_STRING_KEY = re.compile(r"lora(?:_name)?(?:_\d+)?$")
@@ -278,21 +326,26 @@ def _fields_from_graph(graph: dict[str, Any]) -> list[InterpretedField]:
     }
 
     resolved_text_nodes: set[str] = set()  # über Positiv/Negativ-Pfade erreicht
-    used_models: list[str] = []  # vom Sampler aus zurückverfolgte Checkpoints
+    # Sampling-Durchgänge und vom Sampler aus zurückverfolgte Checkpoints,
+    # jeweils als (Rang, Reihenfolge, Wert) — Hauptpass zuerst (_pass_rank).
+    passes: list[tuple[int, int, dict[str, Any]]] = []
+    used_models: list[tuple[int, int, str]] = []
 
-    for node in nodes.values():
+    for index, node in enumerate(nodes.values()):
         inputs = node["inputs"]
 
-        # Sampler-/Noise-Knoten: skalare Einstellungen übernehmen und das
-        # tatsächlich benutzte Modell über den model-Link zurückverfolgen.
-        if "sampler_name" in inputs or "seed" in inputs or "noise_seed" in inputs:
-            for input_name, canonical in _SAMPLER_INPUTS.items():
-                value = inputs.get(input_name)
-                if isinstance(value, (int, float, str)):
-                    add(canonical, value)
+        # Sampler-/Noise-/Scheduler-Knoten (v11 auch Split-Bauformen; Subgraph-
+        # IDs „30:3" sind gewöhnliche Schlüssel): skalare Einstellungen je
+        # Durchgang sammeln und das tatsächlich benutzte Modell über den
+        # model-Link zurückverfolgen.
+        if _is_sampling_node(node):
+            settings = _sampling_settings(nodes, node)
+            rank = _pass_rank(settings)
+            if settings:
+                passes.append((rank, index, settings))
             model = _resolve_model(nodes, inputs.get("model"), set())
             if model is not None:
-                used_models.append(model)
+                used_models.append((rank, index, model))
 
         # Positiv/Negativ: von JEDEM Knoten mit solchen Links aus auflösen
         # (Sampler, CFGGuider, Conditioning-Zwischenknoten, …).
@@ -356,6 +409,14 @@ def _fields_from_graph(graph: dict[str, Any]) -> list[InterpretedField]:
                     if text is not None:
                         add(canonical, text)
 
+    # Sampler-Felder in Durchgangs-Reihenfolge: Hauptpass zuerst, dann
+    # Hires-/Upscale-Pässe — alle Werte bleiben als eigene Zeilen erhalten
+    # (ordinal = Index), die Anzeige zeigt den ersten prominent (Issue #29).
+    for _rank, _index, settings in sorted(passes, key=lambda p: p[:2]):
+        for canonical in _PASS_FIELDS:
+            if canonical in settings:
+                add(canonical, settings[canonical])
+
     # Prompt-Enhancer-Flag (v10, Feral Strawberrys Wunsch): war ein LLM-Generator aktiv,
     # ist der geführte Prompt der VOR-Enhancement-Text — sichtbar machen.
     # Aktiv = der Switch-Zweig, der auf ihn zeigt, ist gewählt; oder kein
@@ -383,7 +444,7 @@ def _fields_from_graph(graph: dict[str, Any]) -> list[InterpretedField]:
     # keine Rückverfolgung griff (kein Sampler, unbekannte Loader-Klasse), als
     # Rückfall alle Checkpoint-/UNet-Loader im Graphen führen (besser als nichts).
     if used_models:
-        for model in used_models:
+        for _rank, _index, model in sorted(used_models, key=lambda m: m[:2]):
             add("model", model)
     else:
         for node in nodes.values():
@@ -547,6 +608,131 @@ def _input_image(node: dict[str, Any]) -> str | None:
     return None
 
 
+def _is_sampling_node(node: dict[str, Any]) -> bool:
+    """Ob ein Knoten Sampling-Einstellungen trägt: klassische Sampler-/Noise-/
+    Generator-Knoten (``sampler_name``/``seed``/``noise_seed``) oder — v11 —
+    Split-Bauformen, die der Klassenname verrät (BasicScheduler,
+    KSamplerSelect, CFGGuider, ManualSigmas …). LLM-Generatoren haben einen
+    eigenen ``seed`` — das ist nicht der Bild-Seed."""
+    if _is_llm_generator(node):
+        return False
+    inputs = node["inputs"]
+    if "sampler_name" in inputs or "seed" in inputs or "noise_seed" in inputs:
+        return True
+    class_type = str(node.get("class_type", ""))
+    if _sampler_from_class(class_type) is not None:
+        return True  # Sampler-Wahl per Klasse (SamplerEulerAncestral …)
+    class_key = _class_key(class_type)
+    return any(hint in class_key for hint in _SAMPLING_CLASS_HINTS) and (
+        any(key in inputs for key in _SAMPLER_INPUTS) or "sigmas" in inputs
+    )
+
+
+def _class_key(class_type: str) -> str:
+    return class_type.lower().replace("_", "").replace(" ", "")
+
+
+def _is_scalar(value: Any) -> bool:
+    return isinstance(value, (int, float, str)) and not isinstance(value, bool)
+
+
+def _sampling_settings(nodes: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    """Die skalaren Sampler-Felder eines Knotens (kanonische Namen) — Literale
+    und (v11) Links auf Wert-Halter. Ohne ``steps``: aus der Sigma-Liste
+    ableiten (LTX-2-Templates: ``ManualSigmas`` mit 9 Werten = 8 Schritte);
+    ohne ``sampler_name``: aus dem Klassennamen eines Sampler-Knotens."""
+    inputs = node["inputs"]
+    settings: dict[str, Any] = {}
+    for input_name, canonical in _SAMPLER_INPUTS.items():
+        value = inputs.get(input_name)
+        if isinstance(value, list):
+            value = _resolve_scalar(nodes, value, set())
+        if _is_scalar(value):
+            settings[canonical] = value
+    class_type = str(node.get("class_type", ""))
+    if "steps" not in settings:
+        _apply_sigmas(settings, class_type, inputs.get("sigmas"))
+    if "sampler" not in settings:
+        sampler = _sampler_from_class(class_type)
+        if sampler is not None:
+            settings["sampler"] = sampler
+    return settings
+
+
+def _resolve_scalar(nodes: dict[str, Any], link: Any, visited: set[str]) -> Any:
+    """Folge einem verlinkten Skalar-Input bis zum Wert-Halter (Primitive,
+    Int/Number-Knoten); Rechenknoten ohne Literal → None (nie raten)."""
+    node_id = _link_target(link)
+    if node_id is None or node_id in visited:
+        return None
+    visited.add(node_id)
+    node = nodes.get(node_id)
+    if node is None:
+        return None
+    for key in _SCALAR_KEYS:
+        value = node["inputs"].get(key)
+        if _is_scalar(value):
+            return value
+        if isinstance(value, list):
+            resolved = _resolve_scalar(nodes, value, visited)
+            if resolved is not None:
+                return resolved
+    return None
+
+
+def _parse_sigmas(class_type: str, sigmas: Any) -> list[float] | None:
+    """Die Sigma-Liste eines Sigma-Knotens (``ManualSigmas``: „1., 0.99, …,
+    0.0"); nur bei Sigma-Knoten und String-Literal, mindestens zwei Werte."""
+    if "sigmas" not in class_type.lower() or not isinstance(sigmas, str):
+        return None
+    try:
+        values = [float(part) for part in re.split(r"[,\s]+", sigmas.strip()) if part]
+    except ValueError:
+        return None
+    return values if len(values) >= 2 else None
+
+
+def _apply_sigmas(settings: dict[str, Any], class_type: str, sigmas: Any) -> None:
+    """Steps aus einer Sigma-Liste (n Werte = n−1 Schritte). Beginnt die
+    Liste unter 1,0, ist es ein Verfeinerungspass (LTX-2-Zweitstufe: Schwanz
+    der ersten Liste, 0.909 → 0) — als Teilpass markieren, damit der
+    Hauptpass unabhängig von der Knotenreihenfolge vorn steht."""
+    values = _parse_sigmas(class_type, sigmas)
+    if values is None:
+        return
+    settings["steps"] = len(values) - 1
+    if values[0] < 1.0:
+        settings["_partial"] = True  # interner Marker, wird nie ausgegeben
+
+
+def _sampler_from_class(class_type: str) -> str | None:
+    """Sampler-Name aus dem Klassennamen eines Sampler-Wahl-Knotens:
+    ``SamplerEulerAncestral`` → ``euler_ancestral``, ``SamplerDPMPP_2M_SDE`` →
+    ``dpmpp_2m_sde``. Container (SamplerCustom*) sind keine Wahl."""
+    if not class_type.startswith("Sampler") or _class_key(class_type) in _SAMPLER_CONTAINERS:
+        return None
+    rest = class_type[len("Sampler"):]
+    if not rest:
+        return None
+    name = _CAMEL_2.sub(r"\1_\2", _CAMEL_1.sub(r"\1_\2", rest)).lower()
+    return re.sub(r"_+", "_", name).strip("_") or None
+
+
+def _pass_rank(settings: dict[str, Any]) -> int:
+    """Hauptpass zuerst (Issue #29): Durchgänge mit ``steps`` und vollem
+    Denoise (fehlend oder ≥ 1) vor Teil-Denoise (Hires-Fix/Upscale-Pass) vor
+    Knoten ohne ``steps`` (Noise-/Sampler-Wahl allein)."""
+    if "steps" not in settings:
+        return 2
+    if settings.get("_partial"):
+        return 1
+    denoise = settings.get("denoise")
+    try:
+        return 0 if denoise is None or float(denoise) >= 1.0 else 1
+    except (TypeError, ValueError):
+        return 0
+
+
 def _fields_from_workflow(workflow: Any) -> list[InterpretedField]:
     """Rückfall ohne prompt-Blob: LoRAs, Eingangsbilder + Prompt-Builder-
     Substrat aus dem UI-Graphen.
@@ -558,8 +744,9 @@ def _fields_from_workflow(workflow: Any) -> list[InterpretedField]:
     rgthree-Slot-Dicts. Subgraph-Definitionen (neues Frontend-Format) werden
     mit durchsucht.
     """
-    fields: list[InterpretedField] = []
-    node_lists = _workflow_node_lists(workflow)
+    graphs = _workflow_graphs(workflow)
+    fields: list[InterpretedField] = _sampling_fields_from_workflow(graphs)
+    node_lists = [graph["nodes"] for graph in graphs]
     raw_loras: list[str] = []
     images: list[str] = []
     prompts: list[str] = []
@@ -612,22 +799,142 @@ def _fields_from_workflow(workflow: Any) -> list[InterpretedField]:
     return fields
 
 
-def _workflow_node_lists(workflow: Any) -> list[list[Any]]:
-    """Alle Knoten-Listen eines workflow-Blobs (Hauptgraph + Subgraphen)."""
+def _workflow_graphs(workflow: Any) -> list[dict[str, Any]]:
+    """Alle Graphen eines workflow-Blobs: Hauptgraph + Subgraph-Definitionen.
+    ``definitions.subgraphs`` ist FLACH — ein Subgraph im Subgraph ist dort
+    ein weiterer Eintrag, referenziert über seine UUID als Knotentyp."""
     if not isinstance(workflow, dict):
         return []
-    lists: list[list[Any]] = []
-    nodes = workflow.get("nodes")
-    if isinstance(nodes, list):
-        lists.append(nodes)
+    graphs: list[dict[str, Any]] = []
+    if isinstance(workflow.get("nodes"), list):
+        graphs.append(workflow)
     definitions = workflow.get("definitions")
     if isinstance(definitions, dict):
         subgraphs = definitions.get("subgraphs")
         if isinstance(subgraphs, list):
-            for sub in subgraphs:
-                if isinstance(sub, dict) and isinstance(sub.get("nodes"), list):
-                    lists.append(sub["nodes"])
-    return lists
+            graphs.extend(
+                sub for sub in subgraphs
+                if isinstance(sub, dict) and isinstance(sub.get("nodes"), list)
+            )
+    return graphs
+
+
+def _sampling_fields_from_workflow(graphs: list[dict[str, Any]]) -> list[InterpretedField]:
+    """Sampler-Felder aus dem UI-Graphen (v11): feste Widget-Layouts der
+    Core-Knoten, Subgraphen inklusive, ohne stummgeschaltete/umgangene
+    Knoten. Promotete Widgets (Wert steht am Subgraph-Knoten des
+    Elterngraphen) werden aufgelöst. Rangfolge wie im prompt-Blob."""
+    passes: list[tuple[int, int, dict[str, Any]]] = []
+    index = 0
+    for graph in graphs:
+        for node in graph["nodes"]:
+            index += 1
+            if not isinstance(node, dict) or node.get("mode") in _INACTIVE_MODES:
+                continue
+            node_type = str(node.get("type", ""))
+            settings: dict[str, Any] = {}
+            for position, input_name in enumerate(_WIDGET_LAYOUTS.get(_class_key(node_type), ())):
+                if input_name is None:
+                    continue
+                value = _widget_value(graphs, graph, node, input_name, position, 0)
+                if input_name == "sigmas":
+                    _apply_sigmas(settings, node_type, value)
+                elif _is_scalar(value):
+                    settings[_SAMPLER_INPUTS[input_name]] = value
+            sampler = _sampler_from_class(node_type)
+            if sampler is not None:
+                settings.setdefault("sampler", sampler)
+            if settings:
+                passes.append((_pass_rank(settings), index, settings))
+    fields: list[InterpretedField] = []
+    seen: set[tuple[str, str]] = set()
+    for _rank, _index, settings in sorted(passes, key=lambda p: p[:2]):
+        for canonical in _PASS_FIELDS:
+            text = str(settings.get(canonical, "")).strip()
+            if text and (canonical, text) not in seen:
+                seen.add((canonical, text))
+                fields.append(InterpretedField(canonical, text))
+    return fields
+
+
+def _widget_value(
+    graphs: list[dict[str, Any]], graph: dict[str, Any], node: dict[str, Any],
+    input_name: str, position: int, depth: int,
+) -> Any:
+    """Der wirksame Widget-Wert eines Knotens: ist das Widget verlinkt, der
+    Wert am anderen Ende (Primitive im selben Graphen oder — promotet — der
+    Subgraph-Knoten im Elterngraphen); sonst das Literal in
+    ``widgets_values`` an der Layout-Position."""
+    for entry in node.get("inputs") or []:
+        if not isinstance(entry, dict) or entry.get("link") is None:
+            continue
+        widget = entry.get("widget")
+        name = widget.get("name") if isinstance(widget, dict) else entry.get("name")
+        if name == input_name:
+            resolved = _resolve_workflow_link(graphs, graph, entry["link"], depth)
+            if resolved is not None:
+                return resolved
+            break
+    widgets = node.get("widgets_values")
+    if isinstance(widgets, list) and position < len(widgets):
+        return widgets[position]
+    return None
+
+
+def _resolve_workflow_link(
+    graphs: list[dict[str, Any]], graph: dict[str, Any], link_id: Any, depth: int,
+) -> Any:
+    """Wert hinter einem Link im UI-Graphen: Primitive-Knoten (erstes Widget)
+    oder Subgraph-Eingang (-10) → Instanzknoten im Elterngraphen — dort das
+    Widget in Reihenfolge der Subgraph-Inputs oder ein weiterer Link
+    (verschachtelte Subgraphen; Tiefe begrenzt, zyklenfest)."""
+    if depth > 8:
+        return None
+    origin_id, origin_slot = _workflow_link_origin(graph, link_id)
+    if origin_id is None:
+        return None
+    if origin_id == _SUBGRAPH_INPUT_NODE:
+        sub_inputs = graph.get("inputs") if isinstance(graph.get("inputs"), list) else []
+        if origin_slot >= len(sub_inputs) or not isinstance(sub_inputs[origin_slot], dict):
+            return None
+        input_name = sub_inputs[origin_slot].get("name")
+        widget_index = sum(
+            1 for i in sub_inputs[:origin_slot]
+            if isinstance(i, dict) and str(i.get("type", "")).upper() in _WIDGET_TYPES
+        )
+        for parent in graphs:
+            for instance in parent["nodes"]:
+                if not isinstance(instance, dict) or instance.get("type") != graph.get("id"):
+                    continue
+                for entry in instance.get("inputs") or []:
+                    if (isinstance(entry, dict) and entry.get("name") == input_name
+                            and entry.get("link") is not None):
+                        value = _resolve_workflow_link(graphs, parent, entry["link"], depth + 1)
+                        if value is not None:
+                            return value
+                widgets = instance.get("widgets_values")
+                if isinstance(widgets, list) and widget_index < len(widgets):
+                    return widgets[widget_index]
+        return None
+    origin = next(
+        (n for n in graph["nodes"] if isinstance(n, dict) and n.get("id") == origin_id), None
+    )
+    if origin is None or not str(origin.get("type", "")).lower().startswith("primitive"):
+        return None
+    widgets = origin.get("widgets_values")
+    return widgets[0] if isinstance(widgets, list) and widgets and _is_scalar(widgets[0]) else None
+
+
+def _workflow_link_origin(graph: dict[str, Any], link_id: Any) -> tuple[Any, int]:
+    """Ursprung (Knoten-ID, Slot) eines Links. Hauptgraph: Arrays
+    ``[id, origin_id, origin_slot, target_id, target_slot, type]``;
+    Subgraph-Definitionen: Dicts mit benannten Schlüsseln."""
+    for link in graph.get("links") or []:
+        if isinstance(link, dict) and link.get("id") == link_id:
+            return link.get("origin_id"), int(link.get("origin_slot") or 0)
+        if isinstance(link, list) and len(link) >= 3 and link[0] == link_id:
+            return link[1], int(link[2] or 0)
+    return None, 0
 
 
 def _resolve_model(nodes: dict[str, Any], link: Any, visited: set[str]) -> str | None:

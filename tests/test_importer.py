@@ -254,16 +254,38 @@ def test_truncated_png_is_still_imported(env):
 # -- Datums-Kaskade ------------------------------------------------------------------
 
 
-def test_epoch_mtime_lands_in_unknown_date_bucket(env):
+def test_epoch_mtime_is_filtered_out(env):
+    """Unplausibles Datum = Import-Regel (ADR 0075, #113): nicht kopiert,
+    nicht katalogisiert — sichtbar in _ausgefiltert mit Grund, statt still
+    in _unbekanntes-datum mit leerem Datum (das hielt den Start-Backfill
+    in Dauerschleife)."""
     conn, source, target = env
     _png(source / "uralt.png", mtime=0)   # 1.1.1970 — unplausibel für AI-Medien
 
     report = _run(conn, source, target)
 
-    assert report.importiert == 1
-    assert (target / importer.UNKNOWN_DATE_DIR / "uralt.png").is_file()
-    row = conn.execute("SELECT date_source FROM import_log").fetchone()
-    assert row["date_source"] == "unplausibel"
+    assert report.importiert == 0 and report.ausgefiltert == 1
+    assert (source / "_ausgefiltert" / "uralt.png").is_file()
+    assert not (target / importer.UNKNOWN_DATE_DIR).exists()
+    assert conn.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 0
+    row = conn.execute("SELECT action, detail FROM import_log").fetchone()
+    assert row["action"] == "ausgefiltert"
+    assert "kein plausibles Datum" in row["detail"] and "2015-01-01" in row["detail"]
+
+
+def test_lower_min_date_admits_old_stamp(env):
+    """Wer Altes behalten will, senkt [import] min_date — dann wird ehrlich
+    nach dem Stempel einsortiert (#113)."""
+    conn, source, target = env
+    _png(source / "uralt.png", mtime=0)
+
+    report = importer.import_folder(
+        conn, source, target_root=target,
+        min_date=datetime(1970, 1, 1, tzinfo=timezone.utc))
+
+    assert report.importiert == 1 and report.ausgefiltert == 0
+    assert (target / "1970" / "01" / "01" / "uralt.png").is_file()
+    assert conn.execute("SELECT media_date FROM items").fetchone()[0] == "1970-01-01 00:00:00"
 
 
 def test_embedded_exif_date_beats_filesystem(tmp_path, env):
@@ -440,7 +462,7 @@ def test_import_folder_verschieben_raeumt_leere_ordner(env):
     assert report.leere_ordner == 2                    # a/b und a
     assert not (source / "a").exists()
     assert source.is_dir()
-    assert "leere Ordner entfernt" in report.summary()
+    assert "empty folders removed" in report.summary()
 
 
 def test_remove_empty_wirkt_nicht_im_belassen_modus(env):
@@ -477,6 +499,19 @@ def test_filter_reason_rules():
     # Keine/leere Regeln = kein Filter.
     assert importer.filter_reason(img(1, 1), None) is None
     assert importer.filter_reason(img(1, 1), {"min_kante": 0, "max_kante": 0, "formate": []}) is None
+
+
+def test_rule_min_date_and_reason():
+    """min_date aus den Regeln (ISO-Text aus der Config, datetime aus dem
+    Web-Prozess, fehlend/kaputt → Standard 2015) — ein Helfer für Scan,
+    Backfill-Aufgabe und Import (#113)."""
+    assert importer.rule_min_date(None) == importer.DEFAULT_MIN_DATE
+    assert importer.rule_min_date({"min_date": "kaputt"}) == importer.DEFAULT_MIN_DATE
+    assert importer.rule_min_date({"min_date": "1970-01-01"}) == datetime(
+        1970, 1, 1, tzinfo=timezone.utc)
+    naive = datetime(2018, 6, 1)
+    assert importer.rule_min_date({"min_date": naive}).tzinfo is timezone.utc
+    assert "2018-06-01" in importer.date_reason(importer.rule_min_date({"min_date": naive}))
 
 
 def _mini_png(path, width, height, mtime=MTIME_2024):
@@ -543,3 +578,30 @@ def test_arw_ohne_regeln_importiert_als_arw(env):
     assert report.importiert == 1
     row = conn.execute("SELECT container, media_kind FROM items").fetchone()
     assert row["container"] == "arw" and row["media_kind"] == "image"
+
+
+# -- Nicht abspielbare Codecs beim Import (Issue #71) ------------------------------
+
+def test_import_records_playback_issue_at_destination(env, monkeypatch):
+    from feral.extract.types import ContainerExtraction, RawMetadataItem
+
+    def fact(keyword, text):
+        return RawMetadataItem(source="isobmff:stream0", keyword=keyword, text=text,
+                               data=None, encoding="utf-8")
+
+    def fake_extract(path):
+        return ContainerExtraction(container="isobmff", items=[
+            fact("codec_type", "video"), fact("codec_name", "prores"), fact("pix_fmt", "yuv422p10le")])
+
+    monkeypatch.setattr(importer.container, "extract", fake_extract)
+    conn, source, target = env
+    clip = source / "topaz.mov"
+    clip.write_bytes(b"\x00" * 64)
+    os.utime(clip, (MTIME_2024, MTIME_2024))
+
+    _run(conn, source, target)
+
+    assert _log_actions(conn)[-1] == "importiert"
+    row = conn.execute("SELECT path, kind, message FROM scan_issues").fetchone()
+    assert row["kind"] == "playback" and '"key": "issueUnplayable"' in row["message"]
+    assert row["path"].startswith(str(target)), "Problem am Ziel-Fundort, nicht an der Quelle"

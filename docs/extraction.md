@@ -53,6 +53,9 @@ Es ist immer **genau eines** von `text` oder `data` gesetzt.
 - **`iTXt`** — internationaler/UTF-8-Text (ComfyUI legt hier Workflow/Prompt ab),
   optional komprimiert.
 - **`eXIf`** — eingebettetes EXIF, als rohe Bytes übernommen.
+- **`caBX`** — **C2PA-Manifest** (Content Credentials von Gemini, ChatGPT,
+  Firefly, …), als rohe Bytes übernommen (Quell-Label `png:caBX`). Gedeutet
+  wird es erst in Schicht 2 ([Generator-Erkennung](interpretation.md#generator-erkennung-gemini-chatgpt-firefly--co-c2paxmp)).
 
 ## Was bei JPEG/WEBP/GIF/BMP/TIFF gelesen wird (über Pillow)
 
@@ -62,6 +65,13 @@ eingebettetes **EXIF** und **XMP**, das **ICC-Profil**, **Kommentare**
 `duration`, `dpi`). Quelle-Label ist z. B. `"webp:info"`, das Keyword der
 Pillow-Info-Schlüssel (`"exif"`, `"xmp"`, `"comment"`, …). Binäres bleibt
 byte-exakt, Text bleibt unverändert.
+
+Zusätzlich werden **C2PA-Manifeste** gesichert, die Pillow nicht durchreicht:
+bei **JPEG** die APP11-Segmente mit Kennung `JP` (ein Manifest kann über
+mehrere Segmente gehen; sie werden nach Paketnummer zusammengesetzt, Quell-
+Label `jpeg:APP11`), bei **WebP** der RIFF-Chunk `C2PA` (Quell-Label
+`webp:C2PA`). Auch hier: rohe Bytes, keine Deutung. Für MP4/MOV (Sora) gibt
+es das noch nicht.
 
 ## Was bei PSD/PSB gelesen wird (Eigenbau)
 
@@ -80,6 +90,18 @@ dieser Erweiterung katalogisiert wurden: einmal **Admin → Wartung →
 Alle **Container-Tags** aus dem Format-Kopf und den einzelnen Streams, z. B.
 `ENCODER` oder `COMMENT` bei WEBM. Quell-Label: `"matroska:format.tag"` bzw.
 `"matroska:stream0.tag"` (analog `"isobmff:…"` für MP4/MOV).
+
+Dazu je Stream die **Eckwerte** unter dem Label `"isobmff:stream0"` (bzw.
+`"matroska:stream0"`), Keyword = ffprobe-Feldname, Wert unverändert:
+`codec_type`, `codec_name` (`prores`, `hevc`, `h264`, `vp9`, `av1`, …),
+`codec_tag_string`, `profile`, `pix_fmt`, `width`, `height`, `bit_rate`.
+Daraus macht [Schicht 2](interpretation.md#video-codec-und-abspielbarkeit)
+die Felder `video_codec`, `video_profile` und `pixel_format` — und der Player
+weiß vor dem Laden, ob der Browser den Codec dekodiert. Videos, die vor
+dieser Erweiterung katalogisiert wurden, haben die Eckwerte noch nicht:
+einmal **Admin → Wartung → „Re-Scan aller Fundorte"** ausführen (oder das
+[Diagnose-Kommando](scanning.md#diagnose-video-codecs-im-bestand) für den
+schnellen Überblick ohne Re-Scan).
 
 > **Voraussetzung:** `ffprobe` (Teil von **ffmpeg**) muss installiert sein —
 > macOS `brew install ffmpeg`, Debian/Ubuntu `apt install ffmpeg`, Windows

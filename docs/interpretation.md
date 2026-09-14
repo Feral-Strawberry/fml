@@ -46,7 +46,7 @@ In der [Web-GUI](gui.md) versteht die Suche zwei Formen:
 
 | Feld | Bedeutung |
 |------|-----------|
-| `tool` | Erzeuger-Werkzeug (`a1111`, `comfyui`) |
+| `tool` | Erzeuger-**Plattform**: `comfyui`, `a1111`, `midjourney`, `google`, `openai`, `azure-openai`, `adobe`, `flux`, `topaz`; `c2pa` = Manifest erkannt, nicht zugeordnet. Das Produkt darunter (Gemini, GPT-4o, Topaz Gigapixel, Midjourney V7) steht in `model` (siehe [Generator-Erkennung](#generator-erkennung-gemini-chatgpt-firefly--co-c2paxmp)) |
 | `prompt` / `negative_prompt` | die Prompts |
 | `model` / `model_hash` | Checkpoint-Name / -Hash |
 | `seed`, `sampler`, `scheduler`, `steps`, `cfg_scale`, `denoise`, `size` | Sampling-Parameter |
@@ -59,6 +59,9 @@ In der [Web-GUI](gui.md) versteht die Suche zwei Formen:
 | `job_id` | Job-ID des Erzeugers (z. B. Midjourney) |
 | `feature` | genutztes Zusatzwerkzeug / Workflow-Eigenschaft (`adetailer`, `highres_fix`, `controlnet`, `refiner`, `prompt_builder`, `bbox`) |
 | `input_image` | Dateiname des Eingangsbilds/-videos (vorhanden = img2img/i2v, nicht reines t2i) |
+| `topaz_version`, `topaz_model`, `upscale_factor`, `source_size`, `topaz_settings` | Topaz-Nachbearbeitung (siehe unten); `model` trägt dann `Topaz Photo AI` / `Topaz Gigapixel` / `Topaz Video AI` |
+| `claim_generator`, `software_agent` | exakte Rohstrings aus dem C2PA-Manifest (z. B. `DALL-E/3.0 c2pa-rs/0.28.4`, `GPT-4o`, `Adobe Firefly 1.0`) - damit lassen sich Engines unterscheiden, sobald die Metadaten es hergeben |
+| `video_codec`, `video_profile`, `pixel_format` | Codec, Profil und Pixelformat des ersten Video-Streams, wie ffprobe sie nennt (`prores` / `HQ` / `yuv422p10le`; `hevc` / `Main 10`; `h264` / `High` / `yuv420p`); Kurzform im Suchfeld: `codec: prores` (siehe [unten](#video-codec-und-abspielbarkeit)) |
 
 Ein Feld kann mehrfach vorkommen (z. B. mehrere Prompt-Kandidaten in einem
 ComfyUI-Graphen mit mehreren Text-Knoten).
@@ -116,6 +119,24 @@ Szenenbeschreibung** des Builders als `prompt` und markiert das Medium mit
 Regionen-Definitionen im Spiel sind) — im Panel unter FEATURES sichtbar,
 suchbar per `feature: prompt_builder`.
 
+**Sampling-Einstellungen aus Subgraphen und Split-Knoten** (v11, ADR 0068,
+Issue #29): Steps, Sampler, CFG, Scheduler und Seed werden auch dort
+gefunden, wo kein klassischer `KSampler` steht — in geflatteten Subgraphen
+(Knoten-IDs wie `30:3`, Werte als Link vom Subgraph-Rand), in Split-
+Bauformen moderner Templates (`BasicScheduler`/`LTXVScheduler` für Steps
+und Scheduler, `KSamplerSelect` für den Sampler, `CFGGuider` für CFG) und
+in LTX-2-Workflows mit `ManualSigmas` (neun Sigma-Werte = acht Schritte);
+Sampler-Knoten ohne Namensfeld (`SamplerEulerAncestral`) liefern den Namen
+aus der Klasse. Bei mehreren Durchgängen (Hires-Fix, Upscale-Pass) steht
+der **Hauptpass zuerst** (voller Denoise vor Teil-Denoise; eine Sigma-
+Liste, die unter 1,0 beginnt, ist ein Teilpass), die übrigen
+Werte bleiben als weitere Zeilen erhalten; das Detail-Panel zeigt Steps als
+ersten Chip. Fehlt der `prompt`-Blob, liest der Rückfall die Sampler-
+Widgets aus dem UI-Graphen — Subgraphen und promotete Werte am Subgraph-
+Knoten inklusive. Cloud-API-Knoten (MiniMax Hailuo, LTX 2.5 API) tragen
+keine Steps; dort bleibt das Feld ehrlich leer. Bestand: einmal **Admin →
+Wartung → „Neu interpretieren"**.
+
 ## LoRA-Erkennung und benutztes Modell (ADR 0026/0027)
 
 **LoRAs** werden werkzeugübergreifend als **normalisierter Name** abgelegt
@@ -153,6 +174,130 @@ die neuen LoRA-/Modell-Werte rückwirkend über die Roh-Blobs.
 - **`feature`** (ComfyUI, ADR 0028): `prompt_builder` und `bbox` markieren
   Builder-Workflows, deren angezeigter Prompt nur die Szenenbeschreibung ist
   (siehe oben).
+
+## Topaz: Nachbearbeitung zählt wie ein Modell (ADR 0066)
+
+Mit **Topaz Photo AI, Gigapixel oder Video AI** bearbeitete Dateien
+erkennt der Parser `topaz` an den Spuren, die die Programme hinterlassen:
+
+- **Photo AI:** `Software` (EXIF) bzw. `CreatorTool` (XMP), z. B.
+  `Topaz Photo AI 3.2.2 (Windows)`.
+- **Gigapixel:** die Einstellungszeile in der Bildbeschreibung, z. B.
+  `Upscaled with Gigapixel v1.0.7. 1200x593 => 2400x1186 (2x) Model: High
+  Compression, denoise: 0.26, sharpen: 0.41.` (Gigapixel schreibt sie nur,
+  wenn „Embed image settings" in den Einstellungen an ist - Standard an).
+- **Video AI:** das Container-Tag `videoai`, z. B. `Enhanced using prob-3
+  with recover details at 43 … Changed resolution to 1266x960`.
+
+Sie erscheinen in der Sidebar **unter „Nach Modell"** als `Topaz Photo AI`,
+`Topaz Gigapixel` bzw. `Topaz Video AI` und sind mit `model: Topaz Gigapixel`
+filterbar - so, wie man sie vorher von Hand als manuelles Modell zugeordnet
+hat. Ein manuell gesetztes Modell hat weiter Vorrang. Behält die Datei ihre
+ursprünglichen Generator-Daten (A1111/ComfyUI), steht sie unter beiden
+Modellen: erzeugt mit dem einen, hochskaliert mit Topaz.
+
+Die Einzelheiten stehen daneben im Panel: `topaz_version`, `topaz_model`
+(z. B. `High Compression`, `prob-3`; bei Video-Ketten mehrere),
+`upscale_factor` (`2x`), `source_size` (Größe vor der Bearbeitung, `size` ist
+die Zielgröße) und `topaz_settings` (die komplette Zeile, unverändert).
+Suchbar wie jedes Feld: `topaz_model: prob-3`, `has: upscale_factor`.
+
+Die Erkennung beruht auf Community-Belegen (Topaz dokumentiert seine
+Metadaten nicht). Fehlt ein Fall, hilft eine Meldung mit der Ausgabe von
+`exiftool -a -G1 datei` - der Parser läuft dann rückwirkend über den Bestand
+(`python -m feral.interpret`), ein Neu-Scan ist nicht nötig.
+
+## Video-Codec und Abspielbarkeit
+
+Der Parser `video` liest aus den Stream-Eckwerten des ffprobe-Extraktors
+([extraction.md](extraction.md#was-bei-video-gelesen-wird-über-ffprobe)) den
+**ersten Video-Stream** (nicht zwingend Stream 0 — in manchen MOV-Dateien
+liegt der Ton vorn) und legt `video_codec`, `video_profile` und
+`pixel_format` ab. Damit:
+
+- **Suche:** `codec: prores` (Alias für `video_codec: prores`), `codec: hevc`,
+  `pixel_format: yuv420p10le` — alle Betroffenen auf einen Schlag, zum
+  Beispiel als Smart Folder.
+- **Ehrlicher Player:** Lupe, Einzelbildansicht, Panel und Ranking fragen den
+  Browser VOR dem Laden (`canPlayType`), ob er den Codec dekodiert. Wenn
+  nicht, erscheint der Poster-Frame mit dem Hinweis „Dieser Browser kann
+  ProRes (HQ, 10-bit) nicht abspielen …" statt eines schwarzen Players, der
+  nur Ton bringt — und es wird gar kein Stream angefordert. Scheitert ein
+  Video trotz Zusage erst beim Abspielen, nennt der Hinweis Codec und
+  Fehlercode.
+- **Scan-Problem beim Aufnehmen:** Beim Katalogisieren, Import und im
+  Watchordner bekommen Videos mit Codecs, die kein gängiger Browser spielt
+  (ProRes, DNxHD, Motion JPEG, 10-bit- oder 4:2:2-H.264), ein Problem der
+  Art `playback` unter Admin → Probleme; HEVC (H.265) wird als „nur in
+  manchen Browsern" gemeldet (Chrome/Safari mit Hardware-Decoder, Firefox je
+  nach System). Das Problem quittiert sich selbst, sobald ein Re-Scan die
+  Datei in einem abspielbaren Codec vorfindet.
+
+Kein Browser außer Safari dekodiert ProRes; die Tonspur (AAC/PCM) läuft
+trotzdem — deshalb „nur Ton ohne Bild". Bestand vor dieser Erweiterung:
+einmal Re-Scan (Admin → Wartung), dann `python -m feral.interpret`; Überblick
+vorab liefert das [Diagnose-Kommando](scanning.md#diagnose-video-codecs-im-bestand).
+
+## Generator-Erkennung: Gemini, ChatGPT, Firefly & Co. (C2PA/XMP)
+
+Die Sidebar-Gruppe **„Generator"** zeigt die **Plattform**, auf der eine Datei
+entstanden ist: ComfyUI, A1111 / Forge, Midjourney, Google, OpenAI, Adobe,
+Topaz. Darunter, in **„Nach Modell"**, steht das jeweilige Produkt oder
+Modell: `flux1-dev` genauso wie `Midjourney V7`, `GPT-4o` oder
+`Topaz Gigapixel`. Beides sind Feld-Werte aus Schicht 2 (`tool` und `model`).
+Ein Klick auf eine Plattform lässt die Modell-Liste im Kontext zählen, die
+passenden Modelle stehen dann oben.
+
+Bilder aus **Gemini, ChatGPT, Firefly, Photoshop (Generative Fill), Azure
+OpenAI oder Sora** tragen keinen Prompt, aber meist **Content Credentials**
+(C2PA-Manifest, seit dem Scan als roher Baustein gesichert - siehe
+[Extraktion](extraction.md)). Der Parser `provenance` liest daraus Plattform
+und, wo das Manifest es hergibt, das Modell:
+
+| Plattform (`tool`) | Woran erkannt | Modell (`model`), wenn belegt |
+|---|---|---|
+| `google` | Googles Generator-Bibliothek im Manifest (`Google C2PA Core Generator Library`), Aussteller `Google LLC` zusammen mit dem KI-Kennzeichen, oder XMP-Credit `Made with Google AI` / `Made by Google AI` | keins - Google nennt das Modell nicht (Imagen, Nano Banana, … bleiben manuell); XMP-Credit `Edited with Google AI` → `Google Fotos` |
+| `openai` | `ChatGPT`, `OpenAI API`, `DALL-E`, `Sora` im Manifest | `GPT-4o` (GPT Image 1), `DALL-E 3`, `Sora` |
+| `azure-openai` | `Azure OpenAI DALL-E` / `Azure OpenAI ImageGen` | keins |
+| `adobe` | `Adobe_Firefly`, `Adobe Photoshop/…`, `Adobe Firefly` im Manifest | `Adobe Firefly` (auch bei Generative Fill in Photoshop) |
+| `flux` | `Black Forest Labs`, `Flux.1` im Manifest (z. B. LMArena-Downloads) | der Produkt-Rohstring, z. B. `Flux.1`, `FLUX.1 Kontext [pro]` |
+| `c2pa` | Manifest vorhanden, aber kein bekannter Erzeuger | keins - die Rohstrings stehen daneben |
+
+Dazu aus anderen Parsern: `midjourney` (Parser `xmp`, Web-Downloads; das Modell
+kommt aus den Prompt-Parametern `--v 7` → `Midjourney V7`, `--niji 6` →
+`Niji 6`; fehlt der Parameter, bleibt das Modell manuell) und `topaz`
+(Parser `topaz`; Modelle `Topaz Photo AI`, `Topaz Gigapixel`,
+`Topaz Video AI`).
+
+**Der Workflow hat Vorrang.** Nennt eine Datei ihren Erzeuger selbst (A1111-
+Parameter, ComfyUI-Workflow), dann ist ein zusätzliches Content-Credentials-
+Manifest eine Nachbearbeitung - Windows Fotos, Paint, Photoshop und andere
+schreiben es beim Speichern. Solche Dateien bleiben unter ComfyUI bzw. A1111;
+das Manifest liefert nur die Rohstrings. Ein in ComfyUI erzeugtes Flux-Bild
+wird also nicht zur Microsoft- oder Adobe-Datei, nur weil es dort einmal
+geöffnet war.
+
+Per Suche geht `tool: google` oder gleichbedeutend `generator: google`,
+für Modelle wie immer `model: "GPT-4o"`. Im Panel stehen zusätzlich die
+Rohstrings `claim_generator` und `software_agent` (exakt, mit Version) sowie
+`ai_source_type` (`trainedAlgorithmicMedia` = erzeugt,
+`compositeWithTrainedAlgorithmicMedia` = KI-bearbeitet).
+
+**Ehrlichkeit:** Content Credentials überleben Upload und Weitergabe oft
+nicht - Messenger, viele Webseiten und Bildbearbeitungen entfernen sie. Ohne
+Manifest kann fml die Herkunft nicht erkennen; das Bild landet dann unter
+„(unbekanntes Modell)" ohne Generator. Für Stability,
+Grok, Ideogram und Leonardo gibt es keine belegten Kennzeichen - fml rät
+nicht. Die Regeln beruhen auf Recherche, nicht auf Samples aus dem eigenen
+Bestand: falsche oder fehlende Zuordnungen bitte melden (mit der Ausgabe von
+`exiftool -a -G1 datei` oder `c2patool datei`), sie werden rückwirkend
+korrigiert (`python -m feral.interpret`).
+
+**Bestand nachziehen:** Dateien, die vor dieser Version gescannt wurden,
+haben ihr Manifest noch nicht als Roh-Baustein - einmal **Admin → Re-Scan
+aller Fundorte**, danach läuft die Interpretation automatisch mit. Midjourney-
+und Topaz-Modelle brauchen keinen Re-Scan, dort reicht
+`python -m feral.interpret`.
 
 ## Abdeckung prüfen: LoRA- und Prompt-Report
 

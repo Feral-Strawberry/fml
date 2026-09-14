@@ -12,12 +12,13 @@ Trennt klar von der Extraktion: Extraktoren liefern reine Datenobjekte
 
 from __future__ import annotations
 
-from .database import apply_migrations, connect, schema_version
+from .database import apply_migrations, connect, optimize, schema_version
 from . import folders, manual
 from .store import media_kind_for, store_extraction, store_interpretations
 
 __all__ = [
     "connect",
+    "optimize",
     "apply_migrations",
     "schema_version",
     "store_extraction",

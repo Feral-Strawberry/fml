@@ -53,6 +53,9 @@ Exactly **one** of `text` or `data` is always set.
 - **`iTXt`** — international/UTF-8 text (ComfyUI stores workflow/prompt
   here), optionally compressed.
 - **`eXIf`** — embedded EXIF, taken over as raw bytes.
+- **`caBX`** — **C2PA manifest** (Content Credentials from Gemini, ChatGPT,
+  Firefly, …), taken over as raw bytes (source label `png:caBX`). It is
+  only interpreted in layer 2 ([generator detection](interpretation.md#generator-detection-gemini-chatgpt-firefly--co-c2paxmp)).
 
 ## What is read from JPEG/WEBP/GIF/BMP/TIFF (via Pillow)
 
@@ -62,6 +65,13 @@ GIF comment) and technical container values (animation `loop`, `duration`,
 `dpi`). The source label is e.g. `"webp:info"`, the keyword is the Pillow
 info key (`"exif"`, `"xmp"`, `"comment"`, …). Binary data stays
 byte-exact, text stays unchanged.
+
+In addition, **C2PA manifests** that Pillow does not pass through are
+preserved: for **JPEG** the APP11 segments with the `JP` marker (a manifest
+may span several segments; they are reassembled by packet number, source
+label `jpeg:APP11`), for **WebP** the RIFF chunk `C2PA` (source label
+`webp:C2PA`). Again: raw bytes, no interpretation. MP4/MOV (Sora) is not
+covered yet.
 
 ## What is read from PSD/PSB (own reader)
 
@@ -81,6 +91,18 @@ All **container tags** from the format header and the individual streams,
 e.g. `ENCODER` or `COMMENT` for WEBM. Source labels:
 `"matroska:format.tag"` and `"matroska:stream0.tag"` (analogously
 `"isobmff:…"` for MP4/MOV).
+
+In addition, per stream the **key facts** under the label `"isobmff:stream0"`
+(or `"matroska:stream0"`), keyword = ffprobe field name, value verbatim:
+`codec_type`, `codec_name` (`prores`, `hevc`, `h264`, `vp9`, `av1`, …),
+`codec_tag_string`, `profile`, `pix_fmt`, `width`, `height`, `bit_rate`.
+[Layer 2](interpretation.md#video-codec-and-playability) turns these into
+the fields `video_codec`, `video_profile` and `pixel_format` — and the
+player knows before loading whether the browser decodes the codec. Videos
+cataloged before this extension do not have the facts yet: run **Admin →
+Maintenance → "Re-scan all locations"** once (or the
+[diagnostic command](scanning.md#diagnostics-video-codecs-in-the-catalog)
+for a quick overview without a re-scan).
 
 > **Prerequisite:** `ffprobe` (part of **ffmpeg**) must be installed —
 > macOS `brew install ffmpeg`, Debian/Ubuntu `apt install ffmpeg`, Windows

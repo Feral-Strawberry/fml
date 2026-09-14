@@ -1,13 +1,13 @@
 // detail.js — permanentes Metadaten-Panel rechts (Leitbild: Panel + Loupe).
 //
 // Reagiert auf 'selection-changed', lädt /api/item/{hash} und zeigt alle
-// Schichten getrennt (Vorrangregel in docs/DESIGN.md): interpretierte Felder
+// Schichten getrennt (Vorrangregel des Design-Leitbilds): interpretierte Felder
 // (Schicht 2, mit Parser-Herkunft) klar getrennt von Roh-Metadaten (Schicht 1,
 // byte-treu mit Quell-Label) und Fundorten. Klick auf die Vorschau öffnet die
 // Loupe. Rating/Tags bekommen ihren Platz im Kopf erst mit Block 3.1.
 
 import { STRINGS } from "./strings.js";
-import { displayUrl, getItem, getTags, getModels, mediaUrl, wireImageFallback, workflowUrl } from "./api.js";
+import { displayUrl, getItem, getTags, getModels, mediaUrl, openLocation, releaseVideos, wireMediaFallback, workflowUrl, thumbUrl, canPlayVideo, unplayableHtml, wireUnplayable, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
 import { applyModel, applyRating, applyTag, note, tagRemove } from "./curate.js";
 import { emit, on } from "./main.js";
 
@@ -17,7 +17,7 @@ const esc = (s) =>
 
 // Kanonische Felder (interpret/types.py) → Darstellung im GENERATION-Block.
 const BLOCK_FIELDS = ["prompt", "negative_prompt", "description"]; // mehrzeilig
-const CHIP_FIELDS = ["sampler", "steps", "cfg_scale", "scheduler", "size", "denoise", "model_hash"];
+const CHIP_FIELDS = ["steps", "sampler", "cfg_scale", "scheduler", "size", "denoise", "model_hash"]; // Steps zuerst (Issue #29)
 const FIELD_LABELS = {
   prompt: "PROMPT", negative_prompt: "NEGATIVE", description: "BESCHREIBUNG",
   sampler: "SAMPLER", steps: "STEPS", cfg_scale: "CFG SCALE", scheduler: "SCHEDULER",
@@ -26,6 +26,10 @@ const FIELD_LABELS = {
   credit: "CREDIT", ai_source_type: "AI-KENNZEICHNUNG", creator_tool: "CREATOR TOOL",
   rating: "RATING (EINGEBETTET)", job_id: "JOB-ID",
   feature: "FEATURES", input_image: "EINGANGSBILD",
+  topaz_version: "TOPAZ VERSION", topaz_model: "TOPAZ MODEL", upscale_factor: "UPSCALE",
+  source_size: "SOURCE SIZE", topaz_settings: "TOPAZ SETTINGS",
+  claim_generator: "CLAIM GENERATOR", software_agent: "SOFTWARE AGENT",
+  video_codec: "VIDEO CODEC", video_profile: "CODEC PROFILE", pixel_format: "PIXEL FORMAT",
 };
 const label = (f) => FIELD_LABELS[f] || f.toUpperCase();
 
@@ -137,6 +141,36 @@ function generationHtml(d) {
   return `<div class="section">${sechead(STRINGS.sectionGeneration, toolBadge + " " + parserBadge)}${html}</div>`;
 }
 
+/** Fundort als Breadcrumb (ADR-0041-Nachtrag, Issue #37): jedes Ordner-
+ *  Segment öffnet GENAU diesen Ordner (ohne Markierung — anders als der
+ *  📂-Knopf), der Dateiname die Datei im zugeordneten Programm. Optisch
+ *  bleibt es eine Pfadzeile: Trenner wie gespeichert, Unterstrich nur beim
+ *  Überfahren. Laufwerkswurzel „D:" wird zu „D:\" (sonst öffnet Explorer das
+ *  aktuelle Verzeichnis des Laufwerks); UNC-Leerpräfixe (\\nas\share) bleiben
+ *  im Pfad, werden aber nicht als Segment gezeigt. Datei nur klickbar, wenn
+ *  sie brauchbar ist (existiert, Größe stimmt). */
+export function breadcrumbHtml(loc) {
+  const sep = loc.path.includes("\\") ? "\\" : "/";
+  const parts = loc.path.split(sep);
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    const seg = parts[i];
+    const last = i === parts.length - 1;
+    if (!seg) { out.push(i === 0 && !last ? "" : sep); continue; }   // "" vor "/" bzw. "\\"
+    if (i > 0) out.push(sep);
+    let prefix = parts.slice(0, i + 1).join(sep);
+    if (!last && i === 0 && /^[A-Za-z]:$/.test(seg)) prefix += sep;
+    if (last) {
+      out.push(loc.exists && loc.usable !== false
+        ? `<a href="#" class="seg file" data-what="file" data-path="${esc(loc.path)}" title="${STRINGS.locOpenFileTitle}">${esc(seg)}</a>`
+        : `<span class="seg file">${esc(seg)}</span>`);
+    } else {
+      out.push(`<a href="#" class="seg" data-what="folder" data-path="${esc(prefix)}" title="${STRINGS.locOpenFolderTitle}">${esc(seg)}</a>`);
+    }
+  }
+  return `<span class="locpath">${out.join("")}</span>`;
+}
+
 export function initDetail() {
   const panel = document.getElementById("panel");
   let seq = 0;
@@ -181,6 +215,7 @@ export function initDetail() {
   }
 
   function showEmpty() {
+    releaseVideos(panel);   // sonst lädt die Vorschau als Leiche weiter (#89-Lehre)
     panel.innerHTML = `<div class="panelempty">
       <img class="pe-icon" src="/static/img/feral-strawberry.png" alt="">
       <div class="pe-title">${STRINGS.emptySelection}</div>
@@ -194,12 +229,27 @@ export function initDetail() {
     catch (err) { console.warn(err); return; }
     if (mySeq !== seq) return;   // inzwischen weitergeklickt
 
+    // Der Server liefert die Fundorte in Reveal-Reihenfolge (ADR-0062-
+    // Nachtrag): der erste ist der bevorzugte, also auch der Anzeigename.
     const name = d.locations.length
       ? d.locations[0].path.split("/").pop().split("\\").pop()
       : d.file_hash.slice(0, 16) + "…";
+    // Video-Vorschau: in der Galerie läuft sie stumm mit. Solange die
+    // Einzelansicht offen ist (sie übernimmt das Panel), nur das Thumbnail
+    // als Poster — sonst streamt dasselbe Video zweimal (#89, Firefox
+    // schaffte bei 4-GB-Dateien das zweite Item nicht mehr). singleview
+    // baut daraus beim Schließen wieder das Video (data-video).
+    const singleOpen = !document.getElementById("single")?.hidden;
+    // Codec, den dieser Browser nicht dekodiert (#71): Poster + Hinweis, kein
+    // Player, kein Stream — auch nicht später beim Rückbau aus der Einzelansicht.
     const media = d.media_kind === "video"
-      ? `<video src="${mediaUrl(d.file_hash)}" muted loop autoplay playsinline></video>`
+      ? (!canPlayVideo(d)
+        ? unplayableHtml(d)
+        : singleOpen
+          ? `<img class="pposter" src="${thumbUrl(d.file_hash)}" data-video="${mediaUrl(d.file_hash)}" alt="">`
+          : `<video src="${mediaUrl(d.file_hash)}" muted loop autoplay playsinline></video>`)
       : `<img src="${displayUrl(d)}" alt="">`;
+    const codec = d.media_kind === "video" ? codecLabel(videoCodecFacts(d)) : "";
     const wfEmbedded = d.raw.some((r) => (r.keyword || "").toLowerCase() === "workflow" && r.text !== null);
     // A1111-Items bekommen den Graphen serverseitig aus dem Infotext erzeugt
     // (Block N, ADR 0044) — gleiche Ansicht, gleicher Download-Endpunkt.
@@ -209,16 +259,31 @@ export function initDetail() {
     const rawRows = d.raw.map((r) => `
       <tr><td class="k">${esc(r.source)}${r.keyword ? " · " + esc(r.keyword) : ""}</td>
         <td class="v"><div class="vscroll">${r.text !== null ? esc(r.text) : `<span class="vdim">${STRINGS.rawBinary.replace("{n}", r.binary_bytes)}</span>`}</div></td></tr>`).join("");
-    const locRows = d.locations.map((l) => `
-      <div class="locrowv${l.exists ? "" : " warn"}">${esc(l.path)}${l.exists ? "" : " " + STRINGS.panelLocationMissing}</div>`).join("");
+    const kindLabel = { library: STRINGS.locKindLibrary, watch: STRINGS.locKindWatch, extern: STRINGS.locKindExtern };
+    // Je Fundort: Herkunfts-Badge (Library/Quelle/extern), 📂 am Fundort, den
+    // „Im Dateimanager anzeigen" öffnet; fehlende Datei bzw. fremder Inhalt
+    // (Größe passt nicht, ADR 0049) werden ehrlich benannt.
+    const locRows = d.locations.map((l) => {
+      const state = !l.exists ? STRINGS.panelLocationMissing
+        : (l.usable === false ? STRINGS.panelLocationForeign : "");
+      return `
+      <div class="locrowv${l.exists && l.usable !== false ? "" : " warn"}${l.preferred ? " preferred" : ""}"${l.preferred ? ` title="${STRINGS.panelLocationPreferredTitle}"` : ""}>` +
+        `<span class="lockind">${l.preferred ? "📂 " : ""}${esc(kindLabel[l.kind] || "")}</span>${breadcrumbHtml(l)}${state ? ` <span class="locstate">${state}</span>` : ""}</div>`;
+    }).join("");
 
+    // Das vorige Panel-Video AUSDRÜCKLICH freigeben, bevor innerHTML es
+    // ersetzt: ein so entferntes <video> lädt als Leiche weiter, bis der
+    // Garbage Collector es einsammelt — mit autoplay+loop die ganze Datei.
+    // Jeder Klick auf ein anderes Item war ein weiterer Zombie-Stream, nach
+    // sechs davon hatte der Browser keine Verbindung mehr frei (#23, #89).
+    releaseVideos(panel);
     panel.innerHTML = `
       <div class="ppreview" title="${STRINGS.panelOpenLoupe}">${media}</div>
       <div class="phead">
         <div class="pname">${esc(name)}</div>
         <div class="pmeta">
           <span class="badgechip origin-interpretiert">${d.media_kind === "video" ? "VIDEO" : "IMAGE"}</span>
-          <span class="vmono">${d.width ? `${d.width}×${d.height} · ` : ""}${d.fps ? `${d.fps} fps · ` : ""}${esc(d.container.toUpperCase())} · ${fmtBytes(d.file_size)}</span>
+          <span class="vmono">${d.width ? `${d.width}×${d.height} · ` : ""}${d.fps ? `${d.fps} fps · ` : ""}${esc(d.container.toUpperCase())}${codec ? ` · ${esc(codec)}` : ""} · ${fmtBytes(d.file_size)}</span>
           <span class="ratedots" id="pRate" title="${STRINGS.curateRateTitle}">${dotsHtml(d.manual.rating)}</span>
         </div>
       </div>
@@ -258,7 +323,8 @@ export function initDetail() {
     curHash = d.file_hash;
     renderManual(d.manual);
     fillVocabulary();
-    wireImageFallback(panel.querySelector(".ppreview"), STRINGS.noPreview);
+    wireMediaFallback(panel.querySelector(".ppreview"), mediaFallbackLabel(d), d);
+    wireUnplayable(panel.querySelector(".ppreview"), d);   // 📂 im Codec-Hinweis (#71)
     emit("annotation-loaded", { hash: d.file_hash, rating: d.manual.rating });
 
     // Rating/Tag/Modell wirken auf die AUSWAHL (Einzel oder Multiselect) —
@@ -294,6 +360,23 @@ export function initDetail() {
       if (notesEl.value !== (d.manual.notes || "")) note(d.file_hash, notesEl.value);
     });
 
+    panel.querySelector(".locs").addEventListener("click", async (e) => {
+      const a = e.target.closest("a.seg");
+      if (!a) return;
+      e.preventDefault();
+      const row = a.closest(".locrowv");
+      try {
+        await openLocation(d.file_hash, a.dataset.path, a.dataset.what);
+      } catch (err) {
+        console.warn(err);
+        // Fehler an der Zeile selbst (⚠ + Meldung), klingt nach 4 s ab.
+        let st = row.querySelector(".locstate");
+        if (!st) { st = document.createElement("span"); st.className = "locstate"; row.appendChild(st); }
+        const before = st.textContent;
+        st.textContent = " ⚠ " + err.message;
+        setTimeout(() => { st.textContent = before; if (!before) st.remove(); }, 4000);
+      }
+    });
     panel.querySelector(".ppreview").addEventListener("click", () =>
       emit("loupe-open", { hash: d.file_hash }));
     panel.querySelector("#pWfOpen")?.addEventListener("click", () =>

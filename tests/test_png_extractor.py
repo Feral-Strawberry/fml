@@ -225,3 +225,21 @@ def test_bomb_does_not_stop_later_chunks():
         build_png(_ztxt_bomb(), text_chunk("parameters", A1111_PARAMS))
     )
     assert any(i.text == A1111_PARAMS for i in result.items)
+
+
+# -- C2PA-Manifest (caBX, ADR 0066) ------------------------------------------------
+
+def test_cabx_chunk_kept_as_binary_c2pa_blob(tmp_path):
+    manifest = b"\x00\x00\x00\x40jumb\x00\x00\x00\x1fjumdc2pa\x00\x11\x00\x10\x80\x00\x00\xaa\x00\x38\x9b\x71\x03c2pa\x00"
+    path = tmp_path / "cc.png"
+    path.write_bytes(build_png(text_chunk("Comment", "x"), chunk(b"caBX", manifest)))
+
+    result = png.extract(path)
+
+    assert result.warnings == []
+    c2pa = [i for i in result.items if i.source == "png:caBX"]
+    assert len(c2pa) == 1
+    assert c2pa[0].data == manifest          # byte-treu, nicht gedeutet
+    assert c2pa[0].encoding == "binary" and c2pa[0].keyword is None and c2pa[0].text is None
+    # Die Text-Chunks bleiben unberührt daneben.
+    assert [i.keyword for i in result.items if i.source == "png:tEXt"] == ["Comment"]

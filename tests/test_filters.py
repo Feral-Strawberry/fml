@@ -307,13 +307,34 @@ def test_backfill_media_dates(db, tmp_path):
 
     result = importer.backfill_media_dates(db)
 
-    assert result == {"total": 3, "dated": 2}
+    assert result == {"total": 3, "dated": 2, "undatable": 1}
     dates = dict(db.execute("SELECT file_hash, media_date FROM items"))
     assert dates["a1" * 32] == "2021-06-15 10:00:00"
     assert dates["b2" * 32] == "2022-05-01 12:00:00"
     assert dates["c3" * 32] is None
-    # Zweiter Lauf: nichts mehr zu tun.
-    assert importer.backfill_media_dates(db) == {"total": 1, "dated": 0}
+    # Zweiter Lauf: nichts mehr zu tun — der Rest ist ehrlich undatierbar.
+    assert importer.backfill_media_dates(db) == {"total": 1, "dated": 0, "undatable": 1}
+
+
+def test_backfill_honours_min_date(db, tmp_path):
+    """#113: min_date aus der Config wirkt im Backfill — mit dem Standard
+    (2015) bleibt ein 2010er-Stempel undatierbar, mit gesenkter Grenze
+    wird er datiert."""
+    import os
+    from datetime import datetime, timezone
+
+    from feral import importer
+
+    old = tmp_path / "alt.png"
+    old.write_bytes(build_png(text_chunk("parameters", "x")))
+    os.utime(old, (1262347200, 1262347200))   # 2010-01-01 12:00 UTC
+    _store(db, "d4" * 32, str(old), text_chunk("parameters", "x"))
+
+    assert importer.backfill_media_dates(db) == {"total": 1, "dated": 0, "undatable": 1}
+    result = importer.backfill_media_dates(
+        db, min_date=datetime(2000, 1, 1, tzinfo=timezone.utc))
+    assert result == {"total": 1, "dated": 1, "undatable": 0}
+    assert db.execute("SELECT media_date FROM items").fetchone()[0] == "2010-01-01 12:00:00"
 
 
 def test_backfill_refreshes_date_only_values(db, tmp_path):
@@ -346,7 +367,7 @@ def test_backfill_refreshes_date_only_values(db, tmp_path):
 
     result = importer.backfill_media_dates(db)
 
-    assert result == {"total": 3, "dated": 2}
+    assert result == {"total": 3, "dated": 2, "undatable": 0}
     dates = dict(db.execute("SELECT file_hash, media_date FROM items"))
     assert dates["a1" * 32] == "2021-06-15 10:00:00"
     assert dates["b2" * 32] == "2022-05-01 12:00:00"
@@ -401,9 +422,12 @@ def test_chip_json_bridge_round_trip():
     preds = [filters.predicate_from_dict(x) for x in d["predicates"]]
     assert filters.serialize(preds) == expr
 
-    # Werte mit Leerraum sind nur exakt darstellbar → automatisch hochgestuft.
+    # Werte mit Leerraum bleiben, was der Client sagt (#132): nicht exakt →
+    # serialize() schreibt sie als '…'-Phrase, keine stille Hochstufung mehr.
     p = filters.predicate_from_dict({"kind": "tag", "values": [{"value": "zwei worte"}]})
-    assert p.values == (("zwei worte", True),)
+    assert p.values == (("zwei worte", False),)
+    assert filters.serialize([p]) == "tag: 'zwei worte'"
+    assert filters.parse(filters.serialize([p])) == [p]
     # Eingebettete Quote im Ein-Wort-Wert: als \S+-Token darstellbar,
     # bleibt Teilstring; Round-Trip hält (ADR-0035-Nachtrag).
     p = filters.predicate_from_dict({"kind": "tag", "values": [{"value": 'a"b'}]})
@@ -424,13 +448,15 @@ def test_quote_escaping_in_exact_values(db):
     assert filters.parse(filters.serialize(preds)) == preds
 
     # Chip-Dict-Brücke (Seed-Varianten-Weg): Quote-Wert wird getragen statt
-    # abgelehnt; Werte, die mit " beginnen, werden exakt hochgestuft.
+    # abgelehnt; ein Teilstring-Wert mit führendem " reist seit #132 als
+    # '…'-Phrase statt exakt hochgestuft zu werden.
     p = filters.predicate_from_dict(
         {"kind": "field", "field": "prompt",
          "values": [{"value": 'sag "hallo" bitte', "exact": True}]})
     assert filters.parse(filters.serialize([p])) == [p]
     p = filters.predicate_from_dict({"kind": "tag", "values": [{"value": '"zitat'}]})
-    assert p.values == (('"zitat', True),)
+    assert p.values == (('"zitat', False),)
+    assert filters.serialize([p]) == "tag: '\"zitat'"
     assert filters.parse(filters.serialize([p])) == [p]
 
     # Nur-Quote-Wert, ODER-Liste, offene Phrase.
@@ -445,6 +471,63 @@ def test_quote_escaping_in_exact_values(db):
                       'a sign that says "OPEN" at night\nSteps: 20, Model: flux1-dev'))
     assert _hashes(db, 'prompt: "a sign that says ""OPEN"" at night"') == {"f6" * 32}
     assert _hashes(db, 'prompt: "a sign that says ""ZU"" at night"') == set()
+
+
+# -- #132 (ADR-0035-Nachtrag): '…' = mehrteiliger Teilstring in Feld-Prädikaten -------
+
+
+def test_phrase_contains_parse_and_serialize():
+    """'…' ist die dritte Wert-Schreibweise: Leerraum erlaubt, aber
+    Teilstring (LIKE) statt exakt. Apostrophe werden wie " verdoppelt; ein
+    nacktes Token darf Apostrophe enthalten, nur ein FÜHRENDES öffnet."""
+    preds = filters.parse("prompt: 'new york' | \"sd 1.5\" | york")
+    assert preds[0].values == (("new york", False), ("sd 1.5", True), ("york", False))
+    assert filters.serialize(preds) == "prompt: 'new york' | \"sd 1.5\" | york"
+
+    # Verdopplung im Wert, Apostrophe in nackten Tokens bleiben Teilstring.
+    assert filters.parse("prompt: 'don''t stop'")[0].values == (("don't stop", False),)
+    assert filters.parse("prompt: don't | cats' | rock'n'roll")[0].values == (
+        ("don't", False), ("cats'", False), ("rock'n'roll", False))
+    # Der Preis der Erweiterung: ein nacktes Token MIT führendem ' ist jetzt
+    # eine offene Phrase (vorher Teilstring mit Apostroph).
+    with pytest.raises(ValueError, match="filterUnclosedQuote"):
+        filters.parse("prompt: 'tis")
+    with pytest.raises(ValueError, match="filterNeedsValue"):
+        filters.parse("prompt: ''")
+
+    # serialize() spiegelt: Teilstring nackt, wo möglich; '…' bei Leerraum,
+    # führendem Anführungszeichen oder dem ODER-Zeichen selbst; "…" exakt.
+    p = filters.Predicate(kind="field", negated=False, field="prompt", values=(
+        ("york", False), ("new york", False), ("'tis", False), ('"zitat', False),
+        ("|", False), ("don't", False), ("new york", True)))
+    assert filters.serialize([p]) == (
+        "prompt: york | 'new york' | '''tis' | '\"zitat' | '|' | don't | \"new york\"")
+    assert filters.parse(filters.serialize([p])) == [p]
+    # Der kanonische Text eines Chip-Werts bleibt stabil (parse_for_api).
+    d = filters.parse_for_api("prompt: 'new york'")
+    assert d["expression"] == "prompt: 'new york'"
+    assert d["predicates"][0]["values"] == [{"value": "new york", "exact": False}]
+
+
+def test_phrase_contains_execution(db):
+    """'new york' trifft als Teilstring (LIKE %…%, schreibungsunabhängig),
+    "new york" nur den ganzen Wert; datei: und text:/raw: verstehen die
+    Schreibweise ebenfalls (im FTS = Phrase, wie "…")."""
+    _store(db, "f7" * 32, "/pics/new york skyline.png",
+           text_chunk("parameters", "a view of New York at night\nSteps: 20, Model: flux1-dev"))
+    _store(db, "f8" * 32, "/pics/york.png",
+           text_chunk("parameters", "york minster\nSteps: 20, Model: flux1-dev"))
+    assert _hashes(db, "prompt: 'new york'") == {"f7" * 32}
+    assert _hashes(db, 'prompt: "new york"') == set()
+    assert _hashes(db, "prompt: 'York'") == {"f7" * 32, "f8" * 32}
+    assert _hashes(db, "-prompt: 'new york'") == {"f8" * 32}
+    assert _hashes(db, "prompt: 'new york' | minster") == {"f7" * 32, "f8" * 32}
+    # LIKE-Platzhalter im Phrasenwert bleiben wörtlich.
+    assert _hashes(db, "prompt: 'new_york'") == set()
+    assert _hashes(db, "datei: 'york sky'") == {"f7" * 32}
+    assert _hashes(db, "text: 'new york'") == {"f7" * 32}
+    assert _hashes(db, 'text: "new york"') == {"f7" * 32}
+    assert _hashes(db, "raw: 'york minster'") == {"f8" * 32}
 
 
 def test_field_like_escapes_wildcards(db):
@@ -586,6 +669,12 @@ def test_english_aliases_parse_to_canonical():
     assert filters.parse("file: mj_") == filters.parse("datei: mj_")
     assert filters.parse("-location: extern") == filters.parse("-fundort: extern")
     assert filters.parse("location: external") == filters.parse("fundort: extern")
+    # generator: ist der Alias der Facette „Generator" auf das Feld tool (ADR 0066).
+    assert filters.parse("generator: gemini") == filters.parse("tool: gemini")
+    assert filters.serialize(filters.parse("generator: gemini")) == "tool: gemini"
+    # codec: ist der kurze Alias auf video_codec (Issue #71).
+    assert filters.parse("codec: prores") == filters.parse("video_codec: prores")
+    assert filters.serialize(filters.parse("codec: prores")) == "video_codec: prores"
     assert filters.parse("year: unknown | 2022") == \
         filters.parse("year: unbekannt | 2022")
     assert filters.parse("format: portrait | square | landscape") == \
@@ -642,6 +731,7 @@ def test_sort_directions_order_items(db):
     "has: input_image",                      # Design-Testfall 6
     "model: flux | krea rating>=4 sort: created",
     "-fundort: extern",                      # Library vs. Extern (ADR 0041, I2)
+    "prompt: 'new york' | york",             # enthält als Phrase (#132)
 ])
 def test_serialize_round_trip(expr):
     """Chips ↔ Text verlustfrei (ADR 0035): kanonischer Text bleibt identisch,
@@ -774,3 +864,43 @@ def test_datei_escapes_like_wildcards(db):
     _store(db, "a1" * 32, "/x/a_b.png", text_chunk("parameters", "eins"))
     _store(db, "b2" * 32, "/x/aXb.png", text_chunk("parameters", "zwei"))
     assert _hashes(db, "datei: a_b") == {"a1" * 32}
+
+
+# -- Memo-Haken für teure Subselects (#99, ADR 0073) --------------------------------
+
+
+def test_build_where_memo_replaces_expensive_subselects_only():
+    from feral.web import filters
+
+    seen: list[tuple[str, list]] = []
+
+    def memo(sql, params):
+        seen.append((sql, params))
+        return f"SELECT file_hash FROM memo_{len(seen) - 1}"
+
+    preds = filters.parse('text: wald -text: hund datei: bild rating>=4 model: "sdxl"')
+    plain_sql, plain_params = filters.build_where(preds)
+    sql, params = filters.build_where(preds, memo=memo)
+    # Volltext (auch negiert — die Negation bleibt außen) und der datei:-Scan
+    # gehen an den Haken; rating/model laufen inline und behalten ihre Parameter.
+    assert [s for s, _ in seen] == [
+        "SELECT file_hash FROM search_index WHERE search_index MATCH ?",
+        "SELECT file_hash FROM search_index WHERE search_index MATCH ?",
+        "SELECT file_hash FROM file_locations WHERE (" + filters.BASENAME + " LIKE ? ESCAPE '\\')",
+    ]
+    assert seen[0][1] == [plain_params[0]] and seen[1][1] == [plain_params[1]]
+    assert seen[2][1] == ["%bild%"]
+    assert "NOT (i.file_hash IN (SELECT file_hash FROM memo_1))" in sql
+    assert "search_index" not in sql and "file_locations" not in sql
+    assert params == plain_params[3:] == [4, "sdxl", "sdxl"]   # model: = 2 Subselects
+
+
+def test_build_where_memo_fundort_shares_one_set(monkeypatch):
+    from feral.web import filters
+
+    monkeypatch.setattr(filters, "library_root_provider", lambda: "/bestand")
+    seen = []
+    memo = lambda sql, params: (seen.append((sql, params)), "SELECT file_hash FROM m")[1]
+    sql, params = filters.build_where(filters.parse("fundort: library | extern"), memo=memo)
+    assert len(seen) == 2 and seen[0] == seen[1]      # gleicher Subselect → _FacetHits teilt die Tabelle
+    assert params == [] and sql.count("SELECT file_hash FROM m") == 2

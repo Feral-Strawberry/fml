@@ -6,12 +6,35 @@
 // damit Nutzereingaben (Pfade, Suchtext) korrekt kodiert sind.
 
 import { serverMsg } from "./servermsg.js";
+import { STRINGS } from "./strings.js";
 
 /** Basis-Helfer: fetch + Fehler aus FastAPI-`detail` durchreichen.
  *  `detail` ist seit Block M.2 (ADR 0054) ein Meldungs-Dict {key, params} —
  *  HIER wird übersetzt, alle Anzeigestellen lesen weiter `err.message`. */
-async function api(path, opts) {
-  const r = await fetch(path, opts);
+//
+// Zeitlimits (ADR 0069): LESENDE Anfragen (GET) brechen nach READ_TIMEOUT_MS
+// ab — eine nie beantwortete Anfrage blockierte sonst bis zum Reload
+// (Galerie-Seite blieb „angefragt", Sperren gingen nie zurück). SCHREIBENDE
+// Anfragen bekommen KEIN Zeitlimit: ein abgebrochener POST hinterließe
+// unbekannten Serverzustand, und Wartungsläufe dürfen dauern. `opts.timeout`
+// überschreibt (0 = keins), `opts.signal` (Abbruch-Bereich, s. u.) kommt
+// dazu. Ein Zeitablauf ist ein normaler Fehler mit übersetzter Meldung.
+const READ_TIMEOUT_MS = 60_000;
+
+async function api(path, opts = {}) {
+  const method = (opts.method || "GET").toUpperCase();
+  const signals = [];
+  if (opts.signal) signals.push(opts.signal);
+  const timeout = opts.timeout ?? (method === "GET" ? READ_TIMEOUT_MS : 0);
+  if (timeout > 0) signals.push(AbortSignal.timeout(timeout));
+  const signal = signals.length ? AbortSignal.any(signals) : undefined;
+  let r;
+  try {
+    r = await fetch(path, { ...opts, signal });
+  } catch (err) {
+    if (err?.name === "TimeoutError") throw new Error(STRINGS.requestTimeout);
+    throw err;   // AbortError (Ansicht geschlossen) und Netzfehler unverändert
+  }
   if (!r.ok) {
     const e = await r.json().catch(() => ({ detail: r.statusText }));
     throw new Error(serverMsg(e.detail) || r.statusText);
@@ -27,6 +50,30 @@ function postJSON(path, body) {
     body: JSON.stringify(body),
   });
 }
+
+// -- Abbruch-Bereiche (ADR 0069) ----------------------------------------------
+//
+// Eine Ansicht (Lupe, Einzelbild, Vergleich, Arena) holt ihre Daten mit dem
+// Signal ihres Bereichs und bricht beim Schließen ALLE laufenden Anfragen
+// auf einmal ab: `getItem(hash, { signal: scopeSignal("single") })` …
+// `abortScope("single")`. Nach dem Abbruch ist der Bereich frisch.
+const _scopes = new Map();
+
+export function scopeSignal(name) {
+  let c = _scopes.get(name);
+  if (!c) { c = new AbortController(); _scopes.set(name, c); }
+  return c.signal;
+}
+
+export function abortScope(name) {
+  const c = _scopes.get(name);
+  if (!c) return;
+  _scopes.delete(name);
+  c.abort();
+}
+
+/** Abbruch durch uns selbst (Ansicht geschlossen) — nicht melden. */
+export const isAbort = (err) => err?.name === "AbortError";
 
 /** Hängt nur die definierten Parameter als Query-String an. */
 function withQuery(path, params) {
@@ -55,8 +102,12 @@ export const getItemPosition = ({ hash, sort, model, rating, filter, dupes } = {
 
 // -- Smart Folders (Stufe 3.3, ADR 0018) ----------------------------------------
 
-/** Alle Smart Folders mit Live-Zählern: {folders}. */
-export const getFolders = () => api("/api/folders");
+/** Alle Smart Folders: {folders: [{id, name, expression, count, error}]}.
+ *  counts=false liefert nur die Liste ohne Zähler („Liste vor Zahlen",
+ *  Issue #69) — der Zähler fehlt dann im Eintrag (undefined), null = Ausdruck
+ *  ungültig. Mit Zählern kommt die Zahl aus dem Epochen-Cache (ADR 0071). */
+export const getFolders = ({ counts = true } = {}) =>
+  api(withQuery("/api/folders", { counts: counts ? undefined : 0 }));
 
 /** Smart Folder anlegen (validiert die Grammatik): {id}. */
 export const createFolder = (name, expression) =>
@@ -73,51 +124,68 @@ export const updateFolder = (id, name, expression) =>
 /** Smart Folder löschen. */
 export const deleteFolder = (id) => api(`/api/folders/${id}`, { method: "DELETE" });
 
-/** Verteilung der manuellen Bewertungen: {ratings: [{rating, count}]}.
-    Mit filter (Block S4) zählt der Kontext des Suchzustands (eigene
-    rating-Chips klammert der Server aus). */
-export const getRatings = (filter) => api(withQuery("/api/ratings", { filter }));
+/** Alle Sidebar-Zähler eines Suchzustands in EINEM Request (#99, ADR 0073):
+    {models, facets, ratings} — dieselben Nutzlasten wie /api/models,
+    /api/facets und /api/ratings, aber aus einem Filterlauf und je Ausdruck
+    serverseitig gemerkt (eigene Chips klammert der Server je Gruppe aus). */
+export const getSidebar = (filter) => api(withQuery("/api/sidebar", { filter }));
 
 /** Detail zu einem Item (404 → Error "Unbekanntes Item."). */
-export const getItem = (hash) => api(`/api/item/${hash}`);
+export const getItem = (hash, opts) => api(`/api/item/${hash}`, opts);
 
 /** „Im Dateimanager anzeigen" (I6, ADR 0041): der Server öffnet Explorer/
  *  Finder mit markierter Datei — im localhost-Betrieb der eigene Rechner.
  *  Antwort: {revealed: pfad}; 404 wenn kein Fundort mehr existiert. */
 export const revealItem = (hash) => postJSON(`/api/item/${hash}/reveal`, {});
 
+/** Fundort-Breadcrumb (ADR-0041-Nachtrag): `what` = "folder" öffnet den Ordner
+ *  im Dateimanager ohne Markierung, "file" die Datei im zugeordneten Programm.
+ *  `path` muss ein Fundort dieses Items bzw. ein Verzeichnis-Präfix davon sein. */
+export const openLocation = (hash, path, what) =>
+  postJSON(`/api/item/${hash}/open`, { path, what });
+
 /** Reveal-Knopf verdrahten (Lupe + Einzelbildansicht, EINE Implementierung):
  *  Klick öffnet den Dateimanager; Fehler melden sich am Knopf selbst
  *  (⚠ + Meldung als Tooltip, klingt nach 4 s ab) — die Overlays brauchen
- *  dafür keinen eigenen Dialog. */
+ *  dafür keinen eigenen Dialog. Solange der Server prüft (Hash bis 64 MB,
+ *  ADR-0062-Nachtrag), zeigt der Knopf ⏳; konnte nur der Ordner geöffnet
+ *  werden (Windows-Langpfad), sagt er das ehrlich (📁 + Hinweis). */
 export function wireReveal(btn, currentHash) {
   const idle = { text: btn.textContent, title: btn.title };
   let timer = null;
+  let pending = false;
+  const flash = (text, title) => {
+    btn.textContent = text;
+    btn.title = title;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      btn.textContent = idle.text;
+      btn.title = idle.title;
+    }, 4000);
+  };
   btn.addEventListener("click", async () => {
     const hash = currentHash();
-    if (!hash) return;
+    if (!hash || pending) return;
+    pending = true;
+    clearTimeout(timer);
+    btn.textContent = "⏳";
+    btn.title = STRINGS.revealPending;
     try {
-      await revealItem(hash);
+      const res = await revealItem(hash);
+      if (res && res.selected === false) flash("📁", STRINGS.revealFolderOnly);
+      else { btn.textContent = idle.text; btn.title = idle.title; }
     } catch (err) {
       console.warn(err);
-      btn.textContent = "⚠";
-      btn.title = err.message;
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        btn.textContent = idle.text;
-        btn.title = idle.title;
-      }, 4000);
+      flash("⚠", err.message);
+    } finally {
+      pending = false;
     }
   });
 }
 
-/** Modell-Zähler für die Sidebar-Gruppe „Nach Modell"; filter wie bei
-    getRatings (mitfilternde Facetten, Block S4). */
+/** Modell-Liste (Detail-Panel, Sammel-Dialog): {models, unknown, …}. Die
+    Sidebar holt ihre Zähler über getSidebar. */
 export const getModels = (filter) => api(withQuery("/api/models", { filter }));
-
-/** Sidebar-Facetten: containers/formats/megapixels/years/undated + (S4)
-    loras und input_image — je Gruppe im Kontext der ANDEREN Chips. */
-export const getFacets = (filter) => api(withQuery("/api/facets", { filter }));
 
 // -- Chip-Suche (Block S3, ADR 0035) --------------------------------------------
 // Chips ↔ Grammatik laufen IMMER über den Server (ein Parser, ein
@@ -176,7 +244,9 @@ export const bulkApply = (scope, fields) => postJSON("/api/batch/apply", { ...sc
 export const rejectItems = (hashes) => postJSON("/api/batch/apply", { hashes, reject: true });
 
 /** Sperrliste (ADR 0023/0041): {blocked: [{file_hash, reason, blocked_at, last_paths}]}. */
-export const getBlocked = () => api("/api/admin/blocked");
+/** Sperrliste seitenweise mit Suche (#66): {blocked, total, total_all, offset, limit}. */
+export const getBlocked = ({ q = "", offset = 0, limit = 100 } = {}) =>
+  api(withQuery("/api/admin/blocked", { q: q || undefined, offset: offset || undefined, limit }));
 
 /** Sperr-Eintrag entfernen (null = alle) — danach ist Re-Import möglich. */
 export const unblockHash = (hash) =>
@@ -200,8 +270,10 @@ export const getTags = () => api("/api/tags");
 // /api/stats `rankings: true` meldet.
 
 /** Alle Arenen mit Live-Populationszähler: {rankings: [{id, name, expression,
- *  duels, population, error}]}. */
-export const getRankings = () => api("/api/rankings");
+ *  duels, population, error}]}. counts=false: nur die Liste, population fehlt
+ *  (Liste vor Zahlen wie getFolders, Issue #69). */
+export const getRankings = ({ counts = true } = {}) =>
+  api(withQuery("/api/rankings", { counts: counts ? undefined : 0 }));
 
 /** Arena anlegen (validiert die Grammatik): {id}. */
 export const createRanking = (name, expression) =>
@@ -219,22 +291,37 @@ export const updateRanking = (id, name, expression) =>
  *  Bestätigung macht die UI). */
 export const deleteRanking = (id) => api(`/api/rankings/${id}`, { method: "DELETE" });
 
-/** Nächstes Duell-Paar: {population, pair: [{file_hash, media_kind, score,
- *  duels}, …]}. 409 = Population < 2. */
-export const getRankingPair = (id) => api(`/api/rankings/${id}/pair`);
+/** Nächstes Duell-Paar: {population, eliminated, pair: [{file_hash,
+ *  media_kind, score, duels}, …]}. 409 = Population < 2; pair === null =
+ *  Pool erschöpft (weniger als zwei Aktive, #87). */
+/** Nächstes Paar; ``prefetch`` markiert das Vorholen im Hintergrund (der
+ *  Server loggt eine langsame Paarung dann als INFO, ADR-0072-Nachtrag). */
+export const getRankingPair = (id, { prefetch = false } = {}) =>
+  api(`/api/rankings/${id}/pair${prefetch ? "?prefetch=1" : ""}`);
 
 /** Duell werten (Überspringen ruft NICHT auf, ADR 0045):
  *  {scores: {hash: neuerScore, …}}. */
 export const recordDuel = (id, winner, loser) =>
   postJSON(`/api/rankings/${id}/duel`, { winner, loser });
 
-/** „Beide verlieren" (ADR-0045-Ergänzung): beide Items bekommen ein Duell
- *  und verlieren gegen den virtuellen Durchschnittsgegner — Reihenfolge egal. */
+/** „Beide raus" (#87, ADR-0045-Nachtrag): beide Items bekommen ein Duell,
+ *  verlieren gegen den virtuellen Durchschnittsgegner UND scheiden aus
+ *  dieser Arena aus — Reihenfolge egal. */
 export const recordBothLost = (id, a, b) =>
   postJSON(`/api/rankings/${id}/duel`, { winner: a, loser: b, outcome: "beide_verloren" });
 
-/** Bestenliste: {population, total, entries: [{rank, file_hash, media_kind,
- *  score, duels}]}. */
+/** „Wieder rein" (#87): ausgeschiedenes Item zurück in den Pool der Arena
+ *  (append-only Log-Zeile, Score bleibt): {reinstated: hash}. */
+export const reinstateRanking = (id, hash) =>
+  postJSON(`/api/rankings/${id}/reinstate`, { hash });
+
+/** „raus" an der Duellkarte (#87-Nachtrag, Variante 2): der Partner gewinnt
+ *  das Duell, das andere Bild verliert und scheidet aus: {scores}. */
+export const recordOut = (id, winner, loser) =>
+  postJSON(`/api/rankings/${id}/duel`, { winner, loser, outcome: "raus" });
+
+/** Bestenliste: {population, total, eliminated, entries: [{rank, file_hash,
+ *  media_kind, score, duels, eliminated}]} — Ausgeschiedene am Ende. */
 export const getLeaderboard = (id, limit, offset) =>
   api(withQuery(`/api/rankings/${id}/leaderboard`, { limit, offset }));
 
@@ -269,6 +356,12 @@ export const getStatus = () => api("/api/status");
 
 /** DB-/Cache-/Werkzeug-Infos für die Status-Sektion. */
 export const getAdminInfo = () => api("/api/admin/info");
+/** Serverlog-Schwanz: beide Dateien, oder file: "web"|"worker"; level:
+ *  "warning" = nur WARNING und höher (serverseitig gefiltert, ADR 0074). */
+export const getAdminLog = (lines = 100, { level = null, file = null } = {}) =>
+  api(withQuery("/api/admin/log", { lines, level: level || undefined, file: file || undefined }));
+/** Zahlen für die Diagramme der Admin-Übersicht (ADR 0074 Nachtrag). */
+export const getAdminOverview = () => api("/api/admin/overview");
 
 /** Offene Scan-Probleme, gruppiert nach Fehlerart (Block N):
  *  {total, kinds: [{kind, count, issues}]} — issues sind je Art gedeckelt. */
@@ -280,7 +373,9 @@ export const resolveIssues = (issueId = null, kind = null) =>
   postJSON(withQuery("/api/admin/issues/resolve", { issue_id: issueId, kind }), {});
 
 /** Fundorte, deren Datei verschwunden ist: {orphans}. */
-export const getOrphans = () => api("/api/admin/orphans");
+/** Verwaiste Fundorte zählen (teuer: stat je Fundort): {total, sample, under}. */
+export const getOrphans = (under = null) =>
+  api(withQuery("/api/admin/orphans", { under: under || undefined }));
 
 /** Verwaiste Fundorte löschen: {pruned}. under (ADR 0033) beschränkt auf
  *  Pfade unterhalb eines Ordners — schützt Fundorte auf Offline-Speichern. */
@@ -302,6 +397,12 @@ export const startRescan = () => postJSON("/api/admin/rescan", {});
 /** Import-Regeln (ADR 0046): Vorschau, wie viele Bestand-Items träfen. */
 export const getImportRulesPreview = () => api("/api/admin/import-rules");
 
+/** Wartungskarten (A3): {parsers:[{parser,version,items}], undated, open_issues, blocked_count}. */
+export const getMaintenanceStats = () => api("/api/admin/maintenance");
+
+/** DB-Aufteilung per dbstat (nur auf Knopfdruck): {available, free_bytes, index_bytes, groups}. */
+export const getDbBreakdown = () => api("/api/admin/dbstat");
+
 /** Import-Regeln rückwirkend anwenden (lehnt Treffer ab; Warteschlange). */
 export const applyImportRules = () => postJSON("/api/admin/import-rules/apply", {});
 
@@ -316,6 +417,8 @@ export const startThumbWarm = () => postJSON("/api/admin/thumbwarm", {});
 
 /** Thumbnail-Platten-Cache leeren: {deleted}. */
 export const clearThumbCache = () => postJSON("/api/admin/thumbcache/clear", {});
+// „Cache zählen" (#118): Verzeichnislauf nur auf Klick, Ergebnis = gemerkter Stand.
+export const getThumbCache = () => api("/api/admin/thumbcache");
 
 /** Config lesen: {editable, path, exists, locations, thumbnail_size, raw}. */
 export const getConfig = () => api("/api/admin/config");
@@ -343,6 +446,10 @@ export const thumbUrl = (hash) => `/api/thumb/${hash}`;
  * 404 = endgültig keins → <img> weg, der Platzhalter dahinter bleibt.
  */
 const THUMB_MAX_PARALLEL = 4;
+// Zeitlimit je Thumbnail-Anfrage (ADR 0069, #27): vier hängende Verbindungen
+// hielten die Pumpe bis zum Reload an — volle Bilder luden weiter, nur
+// Kacheln blieben leer. Nach Ablauf gilt „Server kurz weg" → Backoff, erneut.
+const THUMB_TIMEOUT_MS = 20_000;
 const _thumbQueue = [];
 let _thumbActive = 0;
 
@@ -358,7 +465,7 @@ function _pumpThumbs() {
 async function _fetchThumb(task) {
   let res;
   try {
-    res = await fetch(thumbUrl(task.hash));
+    res = await fetch(thumbUrl(task.hash), { signal: AbortSignal.timeout(THUMB_TIMEOUT_MS) });
   } catch {
     res = null;                              // Server kurz weg → wie 202
   }
@@ -403,17 +510,178 @@ export const displayUrl = (item) =>
     ? `/api/preview/${item.file_hash}`
     : mediaUrl(item.file_hash);
 
-/** Bild-Ladefehler dezent auffangen (fehlender Fundort, PSD ohne Composite …):
- *  statt des kaputten Browser-Bild-Icons einen Hinweis im Container zeigen
- *  (ADR 0052). `scope` ist das umschließende Element, `label` der Hinweistext. */
-export function wireImageFallback(scope, label) {
-  const img = scope.querySelector("img");
-  if (!img) return;   // Video o. Ä. — nichts aufzufangen
-  img.addEventListener(
-    "error",
-    () => { scope.innerHTML = `<div class="nopreview">${label}</div>`; },
-    { once: true },
-  );
+/** Video-Element AUSDRÜCKLICH freigeben (#87/#89): ein verworfenes <video>
+ *  hält seine Range-Verbindung offen, bis der Garbage Collector es einsammelt;
+ *  Browser erlauben nur wenige Verbindungen je Host, Firefox hat zudem ein
+ *  Media-Cache-Budget — ein paar solcher Leichen (4-GB-Videos!) und neue
+ *  Medien laden minutenlang nicht. pause + src/poster weg + load() gibt die
+ *  Verbindung sofort zurück (Standardweg laut HTML-Spec). ÜBERALL rufen, wo
+ *  ein <video> ersetzt oder entfernt wird — innerHTML="" reicht NICHT. */
+export function releaseVideo(v) {
+  try { v.pause?.(); } catch { /* egal */ }
+  v.removeAttribute("src");
+  v.removeAttribute("poster");
+  try { v.load?.(); } catch { /* egal */ }
+}
+
+/** Alle <video> unterhalb von `scope` freigeben (vor jedem innerHTML-Ersatz). */
+export function releaseVideos(scope) {
+  if (!scope) return;
+  for (const v of scope.querySelectorAll("video")) releaseVideo(v);
+}
+
+/** Medien-Ladefehler dezent auffangen (fehlender Fundort, PSD ohne Composite,
+ *  Video, das der Browser nicht öffnet …): statt des kaputten Browser-Icons
+ *  oder einer schwarzen Bühne einen Hinweis im Container zeigen (ADR 0052,
+ *  Video seit ADR 0069/#25). `scope` ist das umschließende Element, `label`
+ *  der Hinweistext. Ein Video gibt dabei seine Verbindung frei. */
+export function wireMediaFallback(scope, label, d = null) {
+  const media = scope.querySelector("img, video");
+  if (!media) return;
+  const fail = () => {
+    if (!media.isConnected) return;   // längst ersetzt (Blättern) — nichts überschreiben
+    if (media.tagName === "VIDEO") releaseVideo(media);
+    // `label` darf eine Funktion sein (#71): erst im Fehlerfall steht fest,
+    // ob ein MediaError-Code vorliegt, den die Codec-Meldung nennt.
+    const text = typeof label === "function" ? label(media) : label;
+    // Mit Item-Wissen (Video): Poster + Hinweis + 📂-Knopf, wie beim Vorabtest.
+    if (d && media.tagName === "VIDEO") mountUnplayable(scope, d, text);
+    else scope.innerHTML = `<div class="nopreview">${escHtml(text)}</div>`;
+  };
+  media.addEventListener("error", fail, { once: true });
+  if (media.tagName === "VIDEO") {
+    // Zweites Netz (#71, Feral Strawberrys Firefox-Befund): Ein Browser, der die
+    // Bildspur nicht dekodiert, wirft nicht immer einen Fehler — Firefox
+    // spielt bei ProRes im MOV einfach nur die Tonspur. Dann hat das Video
+    // nach den Metadaten KEINE Bildmaße: videoWidth 0 heißt „kein Bild",
+    // egal was canPlayType vorher versprochen hat.
+    media.addEventListener("loadedmetadata", () => {
+      if (media.isConnected && !media.videoWidth) fail();
+    }, { once: true });
+  }
+}
+
+const escHtml = (s) =>
+  String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// -- Ehrlicher Player (#71, ADR 0070) -----------------------------------------
+// Schicht 2 (Parser »video«) nennt Codec, Profil und Pixelformat; der Browser
+// selbst sagt per canPlayType, ob er das dekodiert. Nicht Abspielbares
+// bekommt Poster-Frame + Hinweis statt eines Players, der nur Ton bringt oder
+// schwarz bleibt — und es wird gar kein Stream angefordert (4-GB-Dateien!).
+
+/** Codec-Wissen eines Items aus den interpretierten Feldern, oder null. */
+export function videoCodecFacts(d) {
+  const pick = (f) => (d?.interpreted || []).find((x) => x.field === f)?.value || "";
+  const codec = pick("video_codec").toLowerCase();
+  if (!codec) return null;
+  return { codec, profile: pick("video_profile"), pixFmt: pick("pixel_format").toLowerCase() };
+}
+
+// Anzeigenamen sind Eigennamen, nicht übersetzt.
+const CODEC_NAMES = {
+  prores: "ProRes", hevc: "HEVC (H.265)", h264: "H.264", av1: "AV1", vp9: "VP9",
+  vp8: "VP8", dnxhd: "DNxHD", mjpeg: "Motion JPEG", cineform: "CineForm", ffv1: "FFV1",
+};
+
+/** „ProRes (HQ, 10-bit)" — Codec-Name plus Profil und Bittiefe aus dem Pixelformat. */
+export function codecLabel(facts) {
+  if (!facts) return "";
+  const base = CODEC_NAMES[facts.codec] || facts.codec.toUpperCase();
+  const bits = /p(\d{2})(?:le|be)?$/.exec(facts.pixFmt)?.[1];
+  const extra = [facts.profile, bits ? `${bits}-bit` : ""].filter(Boolean).join(", ");
+  return extra ? `${base} (${extra})` : base;
+}
+
+// H.264 spielen Browser nur als 8-bit 4:2:0; canPlayType bejaht High 10
+// trotzdem (Chrome parst nur die Profil-Nummer) — deshalb harte Regel.
+const H264_WEB_PIXEL_FORMATS = new Set(["", "yuv420p", "yuvj420p", "nv12"]);
+
+/** MIME-Kandidaten für canPlayType je Codec; leere Liste = „unbekannt, probieren". */
+function codecTypeCandidates(facts, mime) {
+  switch (facts.codec) {
+    case "prores":
+      // Nur Safari (AVFoundation kennt die ProRes-FourCCs). Bewusst IMMER
+      // mit codecs-Angabe: nacktes "video/quicktime" beantwortet Firefox
+      // mit „maybe" (behandelt es als MP4-Container) und baute den Player,
+      // der dann nur Ton brachte (Feral Strawberrys Befund, 2026-09-11).
+      return ['video/quicktime; codecs="apch"', `${mime}; codecs="apch"`];
+    case "hevc":
+      return [`${mime}; codecs="hvc1.1.6.L93.B0"`, `${mime}; codecs="hev1.1.6.L93.B0"`];
+    case "h264":
+      return [`${mime}; codecs="avc1.64001F"`];
+    case "vp9":
+      return [`${mime}; codecs="vp09.00.10.08"`, `${mime}; codecs="vp9"`];
+    case "vp8":
+      return [`${mime}; codecs="vp8"`];
+    case "av1":
+      return [`${mime}; codecs="av01.0.08M.08"`];
+    default:
+      return [];
+  }
+}
+
+/** Kann DIESER Browser das Video dekodieren? Ohne Codec-Wissen: ja (probieren). */
+export function canPlayVideo(d) {
+  const facts = videoCodecFacts(d);
+  if (!facts) return true;
+  if (facts.codec === "h264" && !H264_WEB_PIXEL_FORMATS.has(facts.pixFmt)) return false;
+  const probe = document.createElement("video");
+  if (typeof probe.canPlayType !== "function") return true;
+  const mime = d.container === "matroska" ? "video/webm" : "video/mp4";
+  const candidates = codecTypeCandidates(facts, mime);
+  if (!candidates.length) return true;
+  return candidates.some((type) => probe.canPlayType(type) !== "");
+}
+
+/** Poster-Frame + Hinweis + 📂-Knopf anstelle des Players (Panel, Lupe,
+ *  Einzelbild, Arena). Der Knopf ist ein ECHTER Reveal-Knopf (Feral Strawberrys Befund:
+ *  ein bloß erwähntes 📂 wirkt kaputt, weil man es nicht anklicken kann und
+ *  das Panel sonst keins hat) — nach dem Einhängen `wireUnplayable(scope, d)`
+ *  rufen, oder gleich `mountUnplayable()`. */
+export function unplayableHtml(d, text = null) {
+  const note = text ?? STRINGS.videoUnplayable.replace("{codec}", codecLabel(videoCodecFacts(d)));
+  return `<div class="nopreview codecnote"><img src="${thumbUrl(d.file_hash)}" alt="">`
+    + `<span>${escHtml(note)}</span>`
+    + `<button type="button" class="codecreveal" title="${escHtml(STRINGS.revealTitle)}">${escHtml(STRINGS.videoOpenElsewhere)}</button></div>`;
+}
+
+/** Den 📂-Knopf eines eingehängten Hinweises verdrahten (idempotent). */
+export function wireUnplayable(scope, d) {
+  const btn = scope?.querySelector(".codecreveal:not([data-wired])");
+  if (!btn) return;
+  btn.dataset.wired = "1";
+  wireReveal(btn, () => d.file_hash);
+}
+
+/** Hinweis einhängen UND verdrahten — für Stellen, die den Container selbst füllen. */
+export function mountUnplayable(scope, d, text = null) {
+  scope.innerHTML = unplayableHtml(d, text);
+  wireUnplayable(scope, d);
+}
+
+/** Hinweistext für wireMediaFallback: mit Codec-Wissen die Codec-Meldung
+ *  samt Fehlercode, sonst das allgemeine „Keine Vorschau verfügbar". */
+export function mediaFallbackLabel(d) {
+  const facts = d?.media_kind === "video" ? videoCodecFacts(d) : null;
+  if (!facts) return STRINGS.noPreview;
+  return (media) => (media?.error
+    ? STRINGS.videoPlayFailed
+      .replace("{codec}", codecLabel(facts))
+      .replace("{code}", String(media.error.code ?? "?"))
+    : STRINGS.videoUnplayable.replace("{codec}", codecLabel(facts)));   // kein Bild, kein Fehler
+}
+
+/** Nachträglich (Item-Details kamen asynchron, z. B. Arena): läuft in `scope`
+ *  ein Video, das dieser Browser nicht dekodiert, wird es freigegeben und
+ *  durch Poster + Hinweis ersetzt. Liefert true, wenn getauscht wurde. */
+export function swapUnplayable(scope, d) {
+  if (!scope || d?.media_kind !== "video" || canPlayVideo(d)) return false;
+  if (!scope.querySelector("video")) return false;
+  releaseVideos(scope);
+  mountUnplayable(scope, d);
+  return true;
 }
 
 /** Eingebetteter Workflow als Roh-JSON (auch als Download für ComfyUI). */

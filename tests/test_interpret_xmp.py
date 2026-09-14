@@ -149,3 +149,32 @@ def test_normal_packet_still_parses_after_hardening():
         ' photoshop:Credit="Made with Google AI"/>'
     )
     assert _fields(xmp.parse([xmp_item(payload)]))["credit"] == ["Made with Google AI"]
+
+
+# -- Midjourney-Modellversion aus den Prompt-Parametern (xmp v2, Konzeptrunde 2026-09-08) --
+
+def _mj(desc: str):
+    from feral.extract.types import RawMetadataItem
+    packet = ('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+              '<rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/">'
+              f'<dc:description><rdf:Alt><rdf:li xml:lang="x-default">{desc}</rdf:li></rdf:Alt></dc:description>'
+              '</rdf:Description></rdf:RDF></x:xmpmeta>')
+    item = RawMetadataItem(source="png:iTXt", keyword="XML:com.adobe.xmp", text=packet, data=None, encoding="utf-8")
+    result = xmp.parse([item])
+    return {f.field: f.value for f in result.fields}
+
+
+def test_midjourney_version_parameter_becomes_model():
+    f = _mj("a red fox in snow --ar 16:9 --v 7 --stylize 200 Job ID: 1934f302-2790-4564-bdb0-26b9e6040fcb")
+    assert f["tool"] == "midjourney"
+    assert f["model"] == "Midjourney V7"
+    assert "--v 7" in f["prompt"], "Parameter bleiben im Prompt erhalten"
+    assert _mj("cat --version 6.1 Job ID: abcdef12-0000")["model"] == "Midjourney V6.1"
+
+
+def test_midjourney_niji_beats_version_and_missing_parameter_means_no_model():
+    assert _mj("anime girl --niji 6 --v 6 Job ID: abcdef12-0000")["model"] == "Niji 6"
+    assert _mj("anime girl --niji Job ID: abcdef12-0000")["model"] == "Niji"
+    f = _mj("plain prompt without version Job ID: abcdef12-0000")
+    assert "model" not in f
+    assert _mj("--vivid colors --v 7 Job ID: abcdef12-0000")["model"] == "Midjourney V7"

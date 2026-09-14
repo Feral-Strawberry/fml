@@ -16,7 +16,7 @@ from feral.db import connect, store_extraction, store_interpretations
 from feral.extract import png
 from feral.interpret import interpret_items
 from feral.web import library
-from feral.web.cache import EpochCache
+from feral.web.cache import COLD_KEY, EpochCache
 
 from .pngbuild import build_png, text_chunk
 
@@ -191,3 +191,94 @@ def test_models_facet_context_counts_stay_uncached(filled, cache):
     cached = library.models_facet(filled, filter_expr="container: jpeg", cache=cache)
     assert cached == plain
     assert cached["models"][0]["count"] == 0  # kein jpeg im Bestand
+
+
+def test_model_base_caches_unknown_count_until_write(filled, cache):
+    # #99: der „(unbekanntes Modell)"-Zähler (~90 ms bei 250k) lag als
+    # einziger Teil der Modell-Gruppe außerhalb des Caches.
+    base, unknown = library.model_base(filled, cache=cache)
+    assert (base, unknown) == library.model_base(filled)
+    assert unknown == 6 and {"model_counts", "model_unknown"} <= {k[0] for k in cache._entries}
+    filled.execute(
+        "INSERT INTO interpreted_metadata (file_hash, parser, parser_version,"
+        " ordinal, field, value_text, interpreted_at)"
+        " VALUES ('h0', 't', 1, 9, 'model', 'Modell X', '2026-01-01T00:00:00Z')"
+    )
+    filled.commit()
+    assert library.model_base(filled, cache=cache)[1] == 5   # Schreibvorgang → neu gerechnet
+
+
+# --- Kalt-Markierung im Request-Scope (Issue #95, ADR 0071) ---------------------
+
+
+def test_cold_reasons_start_write_new(db_path, db, cache):
+    # Erster Treffer nach Prozessstart: "start" (Cache war leer).
+    scope: dict = {}
+    cache.get("a", lambda: 1, scope=scope)
+    assert scope[COLD_KEY] == "start"
+    # Warm: keine Markierung.
+    scope = {}
+    cache.get("a", lambda: 1, scope=scope)
+    assert COLD_KEY not in scope
+    # Anderer, nie gerechneter Schlüssel: ebenfalls "start" (je Schlüssel).
+    scope = {}
+    cache.get("b", lambda: 2, scope=scope)
+    assert scope[COLD_KEY] == "start"
+    # Schreibvorgang → Eintrag da, Epoche veraltet: "write".
+    other = connect(db_path)
+    with other:
+        other.execute("INSERT INTO tags (name, created_at) VALUES ('kalt', '2026-01-01')")
+    other.close()
+    scope = {}
+    cache.get("a", lambda: 1, scope=scope)
+    assert scope[COLD_KEY] == "write"
+
+
+def test_cold_reason_new_after_lru_eviction(db_path, db):
+    cache = EpochCache(db_path, maxsize=1)
+    try:
+        cache.get("a", lambda: 1)
+        cache.get("b", lambda: 2)          # verdrängt a
+        scope: dict = {}
+        cache.get("a", lambda: 1, scope=scope)
+        assert scope[COLD_KEY] == "new"
+    finally:
+        cache.close()
+
+
+def test_cold_mark_keeps_first_reason(db, cache):
+    # /api/folders rechnet mehrere Schlüssel in EINER Anfrage: der erste
+    # Grund bleibt stehen (setdefault), ein Warm-Treffer löscht ihn nicht.
+    scope: dict = {}
+    cache.get("a", lambda: 1, scope=scope)
+    cache.get("b", lambda: 2, scope=scope)
+    cache.get("a", lambda: 1, scope=scope)
+    assert scope[COLD_KEY] == "start"
+
+
+# --- Smart-Folder-/Arena-Zähler: count_items (Issue #69) -------------------------
+
+
+def test_count_items_cached_equals_uncached_and_invalidates(db_path, filled, cache):
+    assert library.count_items(filled, EXPR) == 6
+    assert library.count_items(filled, EXPR, cache=cache) == 6
+    assert library.count_items(filled, None, cache=cache) == 6       # leer = alles
+    assert library.count_items(filled, "", cache=cache) == 6
+    assert library.count_items(filled, "container: webp", cache=cache) == 0
+    # Schreibvorgang einer fremden Verbindung: nächster Aufruf zählt neu.
+    other = connect(db_path)
+    _add_item(other, "h9", "/m/neu.png", "2026-02-01T00:00:00+00:00")
+    other.close()
+    assert library.count_items(filled, EXPR, cache=cache) == 7
+    assert library.count_items(filled, None, cache=cache) == 7
+    with pytest.raises(ValueError):
+        library.count_items(filled, "kaputt:: (", cache=cache)
+
+
+def test_count_items_hits_cache_second_time(filled, cache):
+    scope: dict = {}
+    library.count_items(filled, EXPR, cache=cache, scope=scope)
+    assert scope[COLD_KEY] == "start"
+    scope = {}
+    library.count_items(filled, EXPR, cache=cache, scope=scope)
+    assert COLD_KEY not in scope

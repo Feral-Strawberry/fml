@@ -9,9 +9,9 @@
 // 0-Einträge werden gedimmt statt versteckt.
 
 import { STRINGS } from "./strings.js";
-import { getModels, getFacets, getRatings } from "./api.js";
+import { getSidebar } from "./api.js";
 import { emit, on } from "./main.js";
-import { looksLikeExpr } from "./search.js";
+import { looksLikeExpr, parseTypedValue } from "./search.js";
 import { displayModelName, modelChipValues, modelTitle } from "./sidebar.js";
 
 const esc = (s) =>
@@ -136,8 +136,7 @@ export function initAdvanced() {
       const f = filter || undefined;
       cache = {
         forFilter: filter,
-        promise: Promise.all([getModels(f), getFacets(f), getRatings(f)])
-          .then(([models, facets, ratings]) => ({ models, facets, ratings })),
+        promise: getSidebar(f),   // {models, facets, ratings} aus EINEM Lauf (#99)
       };
     }
     return cache.promise;
@@ -276,12 +275,11 @@ export function initAdvanced() {
     if (e.target.matches(".acinput")) {
       const raw = e.target.value.trim();
       if (!raw) return;
-      const exact = raw.startsWith('"') && raw.endsWith('"') && raw.length > 1;
-      const value = exact ? raw.slice(1, -1) : raw;
-      if (!value) return;
+      const typed = parseTypedValue(raw);
+      if (!typed.value) return;
       emit("chip-toggle", { pred: {
-        ...pred(e.target.dataset.kind, value), negated: negMode,
-        values: [{ value, exact }],
+        ...pred(e.target.dataset.kind, typed.value), negated: negMode,
+        values: [typed],
       }});
       e.target.value = "";
     } else if (e.target.matches(".acmvalue")) {

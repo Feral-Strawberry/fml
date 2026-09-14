@@ -3,8 +3,8 @@
 > Was ist das? Die lokale Weboberfläche der Feral Media Library (fml):
 > Bestand durchsehen und
 > durchsuchen, Metadaten lesen, Ordner scannen/beobachten und die Wartung
-> erledigen - alles ohne Kommandozeile. Seit Block 3.0 im Drei-Spalten-Layout
-> (dunkles Theme, umschaltbar).
+> erledigen - alles ohne Kommandozeile. Drei-Spalten-Layout, dunkles
+> Theme (umschaltbar auf hell).
 
 ## Starten
 
@@ -30,11 +30,11 @@ Port, Start per `start.bat --config name.toml`): [instanzen.md](instanzen.md).
 ## Aufbau
 
 **Topbar:** Suchfeld (Mitte), direkt daneben der **Sortier-Knopf** und die
-**Dichte S/M/L** (seit 2026-07-11 hier oben - die Leiste unter der Suche
-gehört den Chips), Bestandszähler (Items · Gesamtgröße), Aktivitäts-Anzeige
-(pulsiert, wenn Scan/Wartung läuft - Klick öffnet das Admin-Dashboard),
-Admin-Knopf (Klick öffnet das Schnellmenü - dort sitzt seit 2026-07-16 auch
-der einzige Dark/Light-Umschalter, das separate ◐-Icon ist weg). Ist in der
+**Dichte S/M/L** (die Leiste unter der Suche gehört den Chips), Aktivitäts-Anzeige
+(pulsiert, wenn Scan/Wartung läuft - ein Link auf die Admin-Seite),
+**Dark/Light-Umschalter** (Mond/Sonne; dieselbe Wahl gilt im Admin),
+Admin-Knopf (ein echter Link nach `/admin`: Klick öffnet den Admin,
+Mittelklick den Admin in einem zweiten Tab). Ist in der
 Konfiguration ein
 **Instanzname** gesetzt, steht er hier als farbige Pille (dazu Tab-Titel und
 Favicon-Farbpunkt - unterscheidet parallel laufende Instanzen). Läuft fml im
@@ -51,7 +51,7 @@ schaltet hart um: Einmal gesetzt, gilt die Wahl in diesem Browser dauerhaft
 und übersteuert die Browser-Sprache; der Wechsel lädt die Seite neu. Die
 Sprache gehört zum Betrachter (Browser), nicht zur Instanz - zwei Rechner
 können dieselbe Instanz in verschiedenen Sprachen ansehen (ADR 0054).
-Die Such-Grammatik versteht seit Block M.3 zusätzlich **englische
+Die Such-Grammatik versteht zusätzlich **englische
 Aliasse** für ihre deutschen Reste: `file:` = `datei:`, `location:` =
 `fundort:`, `portrait`/`square`/`landscape` = `hochformat`/`quadratisch`/
 `querformat`, `-asc`/`-desc` = `-auf`/`-ab`, `external` = `extern` und
@@ -59,7 +59,7 @@ Aliasse** für ihre deutschen Reste: `file:` = `datei:`, `location:` =
 immer verstanden, egal welche Sprache eingestellt ist; **kanonisch** (in
 Chips, gespeicherten Suchen und serialisierten Ausdrücken) bleibt die
 bisherige Schreibweise — gespeicherte Smart Folders bleiben unangetastet
-gültig. Seit Block M.2 folgen auch alle **vom Server erzeugten Texte**
+gültig. Auch alle **vom Server erzeugten Texte** folgen
 der UI-Sprache: Aktivitäts-Labels und Fortschritt im Admin-Dashboard,
 Ergebnis-Zusammenfassungen („Import: 3 neu · 2 Dubletten"), Fehlermeldungen
 der Such-Grammatik und alle übrigen Server-Fehler. Einzige Ausnahme:
@@ -70,26 +70,51 @@ sprachneutral gespeichert und werden beim Anzeigen übersetzt.
 **Links - Quellen:** „Alle Medien", **Dubletten** (Items, die an mehreren
 Pfaden auf der Platte liegen - das Panel zeigt alle Fundorte), deine
 **gespeicherten Suchen**, die Gruppe **Bewertung** (genau n Sterne - auch gezielt
-schlecht Bewertetes), **Nach Modell** - inklusive **„(unbekanntes Modell)"**
+schlecht Bewertetes), **Generator** (die Plattform, auf der die Datei
+entstand: ComfyUI, A1111, Midjourney, Google, OpenAI, Adobe, Topaz - aus den
+eingebetteten Metadaten bzw. Content Credentials, siehe
+[Interpretation](interpretation.md#generator-erkennung-gemini-chatgpt-firefly--co-c2paxmp);
+Chip `tool: google`, gleichbedeutend `generator: google`; ein Klick lässt
+die Modell-Liste darunter im Kontext zählen), **Nach Modell** - inklusive **„(unbekanntes Modell)"**
 für Medien ohne interpretiertes Modellfeld (Midjourney, Gemini, ChatGPT, …);
 WAN-2.2-Zweistufen-Checkpoints (High-/Low-Noise) erscheinen als EIN Eintrag,
 der Tooltip nennt beide Rohnamen und der Klick filtert auf beide -,
 **Nach Jahr** (Erstelldatum; das Caret vor der Jahreszahl klappt die Monate
 auf - Alt-Bestände bekommen ihr Datum per „Re-Scan: alle Fundorte"),
-**Nach LoRA** (die beim Generieren benutzten LoRAs, meistgenutzte zuerst),
+**Nach LoRA** (die beim Generieren benutzten LoRAs, meistgenutzte zuerst;
+in den langen Listen Generator, Modell und LoRA stehen bei aktiven Chips die
+Zeilen mit Treffern oben, die im Kontext leeren gedimmt unter einer
+Trennzeile „keine Treffer mit diesem Filter · 106 Modelle" - ohne aktiven Chip gibt es
+diese Zeile nicht),
 **Nach Dateityp** (PNG, WEBP, Video-Container, …), **Nach Format**
 (grobe Seitenverhältnis-Klassen: Hochformat / Quadratisch / Querformat /
 Widescreen - zur Fehlersuche nach einem Import), **Nach Auflösung**
 (Megapixel-Bereiche: unter 1 / 1-2 / 2-4 / über 4 MP), **Eingangsbild**
 (mit/ohne - findet img2img- und Bild-zu-Video-Ergebnisse) und **Fundort**
 („in der Library" = mindestens eine Kopie liegt in der Media Library, „nur
-extern" = nur am Ort indiziert, z. B. per `katalogisieren` von fremden
+extern" = nur am Ort katalogisiert, z. B. per `katalogisieren` von fremden
 Platten; die Gruppe erscheint nur, wenn eine Media Library konfiguriert
 ist). Ein Klick legt
-einen **Chip** in die Suchleiste über der Galerie (siehe „Suchen"); ein
-Klick auf einen **zweiten Wert derselben Gruppe** erweitert den Chip zum
-ODER („flux ODER krea"), ein Klick auf einen aktiven (markierten) Wert
-nimmt ihn wieder heraus.
+einen **Chip** in die Suchleiste über der Galerie (siehe „Suchen").
+
+**Klick-Regel wie in Lightroom (geändert im September 2026 - bitte lesen,
+wenn du fml schon länger nutzt):**
+
+- **Klick** auf einen Wert wählt ihn - ein Klick auf einen **anderen Wert
+  derselben Gruppe ersetzt** die Auswahl (von „Google" zu „OpenAI"
+  wechseln, ohne erst abzuwählen).
+- **Cmd-Klick (Mac) bzw. Strg-Klick (Windows/Linux)** **fügt hinzu** und
+  erweitert den Chip zum **ODER** („flux ODER krea").
+- **Klick auf den aktiven (markierten) Wert** nimmt ihn wieder heraus.
+
+Bis dahin erweiterte schon der einfache Klick zum ODER. Wer das ODER will,
+hält jetzt die Taste - oder tippt es in die Suchleiste (`tool: google |
+openai`). Das „+ Kriterium"-Popover und die Tipphilfe fügen weiterhin
+hinzu. Der Hinweis steht als Tooltip an jeder Gruppenüberschrift und an
+jeder Zeile - mit der Taste deines Systems (⌘ auf dem Mac, Strg sonst).
+Und beim ersten Mal, wenn ein Klick eine bestehende Auswahl ersetzt,
+erscheint kurz unter der Gruppe „Auswahl ersetzt · ⌘-Klick fügt hinzu
+(ODER)" - höchstens dreimal, dann ist die Regel gelernt.
 
 Die Zähler **filtern mit**: Sobald Chips aktiv sind, zeigt jede Gruppe, wie
 viele Treffer ein Klick **im aktuellen Kontext** brächte - gerechnet gegen
@@ -101,7 +126,7 @@ Jede Gruppe lässt sich per Klick auf ihre Überschrift **ein-/ausklappen**
 (bleibt gemerkt). Unten der Bibliotheks-Footer: Items und Gesamtgröße - mit
 konfigurierter Media Library getrennt als **„Library X GB · gesamt Y GB"**
 (Library = was physisch unter der Bestands-Wurzel liegt, gesamt = alles
-Indizierte, auch Externes).
+Katalogisierte, auch Externes).
 
 **Mitte - Galerie:** Virtualisiertes Grid (flüssig auch bei sehr großen
 Beständen - nur sichtbare Kacheln sind im Speicher), neueste zuerst. Oben:
@@ -111,7 +136,9 @@ leert die Filter, wenn kein Overlay offen ist) und **⚡ Sammel-Aktion**.
 War beim Filter- oder Sortierwechsel ein Medium ausgewählt und ist es
 auch in der neuen Trefferliste enthalten, **springt die Galerie dorthin
 zurück** statt oben neu zu beginnen - Esc aus der Seed-Varianten-Suche
-führt so direkt zum zuletzt angeklickten Bild.
+führt so direkt zum zuletzt angeklickten Bild. Einzige Ausnahme ist der
+Klick auf **„Alle Medien"** in der Sidebar: das ist die Reset-Taste, die
+Galerie steht danach oben, ohne Auswahl.
 Der **Sortier-Knopf** (Hinzugefügt / Erstellt /
 Dateiname / Dateigröße / Container / Bewertung - Unbewertete und Undatierte
 zuletzt) und die **Dichte S/M/L** sitzen oben in der Topbar neben dem
@@ -162,7 +189,7 @@ wieder her. Die Wahl bleibt gespeichert.
 
 **Doppelklick oder Enter** öffnet das ausgewählte Medium in der
 Einzelbildansicht - der Arbeitsansicht mit echtem Zoom: Stufen
-**Anpassen / 50 / 100 / 200 %**, **Mausrad** zoomt stufenlos,
+**Anpassen / max. 100 % / 50 / 100 / 200 %**, **Mausrad** zoomt stufenlos,
 **Doppelklick im Bild** springt zwischen Anpassen und 100 %, gezogen wird
 mit der Maus. Die Prozente meinen **echte Pixel**: Bei 100 % entspricht
 ein Bildpixel einem Bildschirmpixel - unabhängig von OS-Skalierung
@@ -170,7 +197,10 @@ ein Bildpixel einem Bildschirmpixel - unabhängig von OS-Skalierung
 pixelscharf und die verlässliche Stufe, um Details und Artefakte zu
 beurteilen. Die **zuletzt in der Zoomleiste gewählte Stufe wird
 gemerkt** und gilt für jedes weitere Bild (wer immer 100 % will, wählt
-es einmal); Mausrad und Doppelklick erzeugen bildabhängige
+es einmal). **max. 100 %** ist der Alltagsmodus für gemischte Bestände:
+echte Größe, aber höchstens bildschirmfüllend - ein kleines Bild steht
+pixelscharf in 100 %, ein großes Hochkantbild wird wie bei „Anpassen"
+verkleinert, statt nach unten aus dem Bild zu laufen. Mausrad und Doppelklick erzeugen bildabhängige
 Zwischenwerte und verändern die gemerkte Stufe bewusst nicht. Rechts steht das komplette Metadaten-Panel in breiter Form -
 Bewerten (auch Tasten 1-5), Tags, Modell und Notizen funktionieren hier
 genauso; mittelfristig kommen weitere Werkzeuge dazu (Metadaten bearbeiten,
@@ -178,15 +208,82 @@ Push-to-ComfyUI). **←/→** blättert in Grid-Reihenfolge; **Esc, Enter oder �
 führen zur Galerie zurück, die auf dem zuletzt betrachteten Bild steht.
 
 **📂 Im Dateimanager anzeigen** (oben rechts, auch in der Lupe): öffnet
-Explorer (Windows) bzw. Finder (macOS) mit markierter Datei - dem ersten
-noch existierenden Fundort, dessen Inhalt vor dem Öffnen **per SHA-256
-verifiziert** wird (liegt am katalogisierten Pfad inzwischen eine andere
-Datei, meldet der Knopf ehrlich „kein Fundort mehr vorhanden" statt aufs
-falsche Bild zu zeigen; bei großen Videos kann die Prüfung einen Moment
-dauern). Alles Weitere (umbenennen, endgültig löschen)
+Explorer (Windows) bzw. Finder (macOS) mit markierter Datei. Liegt die
+Datei an mehreren Fundorten, gilt eine feste Reihenfolge: **Library-
+Bestand vor Watch-Quelle vor sonstigen Orten**, und nur Fundorte, an denen
+die Datei noch liegt und deren Größe stimmt. Welcher Fundort das ist,
+zeigt das Panel **Fundorte** (siehe unten). Der Inhalt wird vor dem
+Öffnen **per SHA-256 verifiziert** (liegt am katalogisierten Pfad
+inzwischen eine andere Datei, meldet der Knopf ehrlich „kein Fundort mehr
+vorhanden" statt aufs falsche Bild zu zeigen) - bei Dateien über 64 MB
+entfällt das Hashen, dort zählt allein die Größenprüfung, damit der Knopf
+bei großen Videos nicht minutenlang hängt. Während der Server prüft,
+zeigt der Knopf ⏳; kann Explorer die Datei nicht markieren (Windows-Pfad
+über 259 Zeichen), öffnet fml nur den Ordner und sagt das (📁 + Hinweis).
+Alles Weitere (umbenennen, endgültig löschen)
 passiert bewusst dort: fml selbst fasst Dateien nie an. Hinweis: Das
 Fenster öffnet sich auf dem Rechner, auf dem der Server läuft - im
 normalen localhost-Betrieb ist das der eigene.
+
+**Fundorte** (Panel, aufklappbar): alle Pfade, an denen fml die Datei
+kennt, in derselben Reihenfolge, die der 📂-Knopf benutzt. Jede Zeile
+trägt ein Herkunfts-Kürzel - **Library** (unter der Bestands-Wurzel),
+**Quelle** (unter einer Watch-Quelle, typisch „katalogisieren") oder
+**extern** - und der Fundort, den „Im Dateimanager anzeigen" öffnet, ist
+mit 📂 markiert. Fehlt die Datei dort, steht „(fehlt)" dahinter; liegt am
+Pfad inzwischen eine andere Datei (Größe passt nicht), „(andere Datei an
+diesem Pfad)".
+
+Jeder Pfad ist ein **Breadcrumb**: Ein Klick auf ein Ordner-Segment öffnet
+genau diesen Ordner im Dateimanager - **ohne** Markierung, bewusst anders
+als der 📂-Knopf oben rechts. Ein Klick auf den **Dateinamen** (fett)
+öffnet die Datei mit dem Programm, das das System diesem Dateityp
+zuordnet (Photoshop, VLC, …). So kommt man auch an einen Zweit-Fundort,
+etwa um Dubletten im Dateisystem selbst abzuräumen, ohne dass fml den
+Ordner verwalten muss. Die Segmente sind erst beim Überfahren
+unterstrichen; ein Fehler (Ordner weg, Datei weg) erscheint für vier
+Sekunden an der Zeile. fml fasst dabei nichts an - was das geöffnete
+Programm danach mit der Datei macht, entscheidest du dort. Weil das Panel
+in Galerie und Einzelbildansicht dasselbe ist, gilt das an beiden
+Stellen.
+
+## A/B-Vergleich (zwei Bilder überblenden)
+
+Varianten aus Edit-Workflows unterscheiden sich oft nur in Kleinigkeiten
+(ein Finger, eine Kante, ein Artefakt) - nebeneinander sieht man das
+kaum. Der Vergleich legt **zwei markierte Bilder deckungsgleich
+übereinander** und deckt B mit einer **Wischkante** auf, wie in
+ComfyUI-Edit-Workflows.
+
+**Öffnen:** genau zwei Medien markieren (Strg/Cmd-Klick oder
+Shift-Klick), dann **Taste `C`** oder der Knopf **⇆ Vergleichen** in der
+Kopfzeile der Galerie (erscheint nur bei genau zwei markierten Medien).
+Das zuerst markierte Bild ist **A** (links), das zweite **B** (rechts).
+
+- **Wischkante:** mit der Maus oder dem Finger irgendwo im Bild ziehen;
+  **`←`/`→`** verschieben sie in kleinen Schritten (mit Shift grob),
+  **`Pos1`/`Ende`** ganz nach links/rechts.
+- **Space** (oder der Knopf oben rechts) schaltet dreifach um: **Wisch →
+  nur A → nur B → Wisch**. „nur A"/„nur B" zeigen ein Bild ganz - so
+  entsteht der Blinkvergleich, bei dem selbst winzige Unterschiede
+  „springen". **Tab** tauscht A und B (und damit das Bewertungsziel).
+- **Zoom** wie in der Einzelbildansicht: Anpassen / max. 100 % / 50 / 100 / 200 %,
+  Mausrad, `+`/`-`, Doppelklick springt zwischen Anpassen und 100 %. Die
+  Prozente meinen echte Pixel, die gemerkte Zoomstufe ist dieselbe wie
+  dort. Gezoomt scrollt man mit den Bildlaufleisten.
+- **Entscheiden:** Über dem Bild steht für jede Seite Name, Maße und die
+  **Rating-Punkte**; dazu **Ablehnen** (Item raus + Sperre, die Datei
+  bleibt unangetastet). Die Tasten **`1`-`5`/`0`** und **`Entf`** wirken
+  auf **A** - mit Tab holt man das andere Bild nach A. Nach dem Ablehnen
+  schließt sich der Vergleich.
+- **Ungleiche Maße:** Beide Bilder werden auf die Breite von A gebracht,
+  oben rechts erscheint der Hinweis „Maße unterschiedlich".
+- **Esc, Enter oder ✕** führen zur Galerie zurück; die Zweier-Auswahl
+  bleibt bestehen.
+
+Erste Version **nur für Bilder**: Ist ein Video dabei, öffnet sich der
+Vergleich mit einem Hinweis statt der Bilder (Frame-synchrones Vergleichen
+kommt später).
 
 ## Lupe (Vollbild)
 
@@ -198,13 +295,37 @@ ersten/letzten Medium, `Space`/`Esc` schließt - die Übersicht steht danach auf
 betrachteten Medium. Panel und Galerie folgen beim Blättern automatisch.
 
 **🕸 Workflow-Ansicht:** Bei ComfyUI-Medien (auch Videos!) schaltet der
-Bild/Workflow-Umschalter oben auf den eingebetteten Node-Graphen um - Nodes
-mit Titeln, Farben, Widget-Werten und Verbindungen; ziehen verschiebt, das
-Mausrad zoomt. Der dritte Knopf **„Einzelbild"** wechselt an gleicher
-Stelle in die Einzelbildansicht. „als .json laden" lädt den **unveränderten** Original-Workflow
-herunter, der sich per Drag&Drop direkt wieder in ComfyUI öffnen lässt.
-(Die Vorschau liest nur das gespeicherte Workflow-JSON - sie braucht kein
-laufendes ComfyUI und bricht nicht mit ComfyUI-Updates.)
+Bild/Workflow-Umschalter oben auf den eingebetteten Node-Graphen um. Seit
+September 2026 sieht er aus wie in ComfyUI selbst: Raster, Node-Farben aus
+dem Workflow, **Slot- und Verbindungsfarben nach Datentyp** (MODEL lila,
+CLIP gelb, CONDITIONING orange, LATENT rosa, IMAGE blau, VAE rot),
+**Widgets als Pillen mit Name und Wert** (`seed 123456789`, `steps 20`,
+`cfg 1`, `sampler_name euler`), Prompts als Textfelder, Gruppen mit
+Titelbalken, **stumme Nodes gedimmt, Bypass magenta**, eingeklappte Nodes
+als Titelbalken, und **Subgraphs als Kästen** („⧉ 2 Nodes · Klick öffnet") -
+ein Klick zeigt das Innere mit Ein- und Ausgängen, „‹ zurück" führt hoch.
+Ziehen verschiebt, das Mausrad zoomt. Der dritte Knopf **„Einzelbild"**
+wechselt an gleicher Stelle in die Einzelbildansicht. „als .json laden"
+lädt den **unveränderten** Original-Workflow herunter, der sich per
+Drag&Drop direkt wieder in ComfyUI öffnen lässt. (Die Vorschau liest nur
+das gespeicherte Workflow-JSON - sie braucht kein laufendes ComfyUI und
+bricht nicht mit ComfyUI-Updates.)
+
+*Widget-Namen:* ComfyUI speichert Widget-Werte ohne Namen. fml kennt die
+Namen der Kernknoten (KSampler, Loader, Encoder, Latent, Video, …) und
+liest sie, wenn vorhanden, direkt aus neueren Workflows
+(`widgets_values_named`). Für Custom-Nodes holt ein kleines Werkzeug die
+Namen aus deiner eigenen ComfyUI-Installation - einmal bei laufendem
+ComfyUI ausführen, danach beschriftet die Vorschau auch diese Nodes:
+
+```bash
+python tools/dump_object_info.py            # ComfyUI unter http://127.0.0.1:8188
+python tools/dump_object_info.py --url http://192.168.1.20:8188
+```
+
+Das Ergebnis liegt als `widgets.json` neben der Oberfläche und ist reine
+Information über deine Installation (kein Code, nicht im Repo). Werte, für
+die kein Name bekannt ist, stehen weiterhin nackt in der Pille - nie geraten.
 
 **A1111-Bilder** bekommen dieselbe Ansicht: aus den interpretierten Feldern
 wird ein minimaler, echter ComfyUI-Graph erzeugt (Checkpoint → LoRAs →
@@ -242,13 +363,13 @@ Dateien extrahiert wurde.
   (samt Bewertung/Tags/Notizen) und sein Hash kommt auf die **Sperrliste** -
   ein Re-Import wird verhindert (sichtbarer Ausgang `_gesperrt/` im
   Quellordner). **Die Datei selbst bleibt unangetastet**, egal ob sie in der
-  Library liegt oder nur indiziert wurde - fml löscht und verschiebt beim
+  Library liegt oder nur am Ort katalogisiert wurde - fml löscht und verschiebt beim
   Ablehnen nichts (»Original heilig«). Die Ansicht springt dabei nicht an
   den Anfang: Die Scrollposition bleibt stehen, und die Auswahl rückt auf
   den **Nachfolger** an derselben Position — eine Seed-Serie lässt sich so
   mit Entf, Entf, Entf … zügig durchsortieren. Die Sperrliste merkt sich die
-  letzten Fundorte der Datei. Entsperren: Admin-Dashboard → Probleme →
-  „Ansehen & aufräumen" → entsperren; nach einem erneuten Scan/Import ist
+  letzten Fundorte der Datei. Entsperren: Admin → Probleme → Sperrliste
+  (suchbar, seitenweise) → entsperren; nach einem erneuten Scan/Import ist
   das Medium vollständig wieder da (nur die frühere Kuratierung nicht).
 
 ## Sammel-Aktion: alle Treffer auf einmal (⚡)
@@ -278,71 +399,33 @@ Der Anwenden-Knopf fragt beim ersten Klick noch einmal nach
 („Wirklich anwenden auf …?"), der zweite Klick führt aus. Danach zeigt der
 Dialog eine Zusammenfassung, und Grid + Seitenleiste frischen sich auf.
 
-## Gespeicherte Suchen
+## Suche, gespeicherte Suche, Ranking: ein Gedanke
 
-Jede Suche - egal ob aus Sidebar-Klicks, Textbegriffen oder getippten
-Ausdrücken zusammengesetzt - lässt sich mit dem **☆ neben den Chips**
-speichern. Das ☆ öffnet den **Speicherdialog**: er zeigt die Chips als
-Vorschau, die aktuelle Trefferzahl, einen Hinweis, falls eine Sortierung
-mitgespeichert wird, und fragt nach dem Namen. Die Suche erscheint links
-unter „Gespeicherte Suchen" mit Live-Zähler; ein Klick lädt sie **als
-Chips zurück** (alles bleibt bearbeitbar). Ist eine gespeicherte Suche
-geladen, wird der Dialog zur Pflege: **Überschreiben** sichert den
-bearbeiteten Stand (ein geänderter Name benennt dabei um), **Als neue
-Suche speichern** legt eine Kopie an, **Löschen** entfernt sie (zweiter
-Klick bestätigt). Das ✕ an der Sidebar-Zeile löscht wie gehabt direkt.
-Eine mitgegebene Sortierung (`sort:` bzw. der Sortier-Knopf) wird
-mitgespeichert und beim Laden wiederhergestellt.
+Alles in fml beginnt mit einer **Suchentscheidung**: Welche Medien will
+ich gerade sehen? Drei Dinge bauen aufeinander auf, in dieser
+Reihenfolge:
 
-**Für Fortgeschrittene:** Die Suchleiste versteht auch Filterausdrücke - sie
-zeigen sofort das gefilterte Grid. Prädikate sind UND-verknüpft, `-` negiert;
-**mehrere Werte in einem Prädikat** trennt ` | ` (Pipe mit Leerzeichen) als
-ODER:
+1. **Die Suche** ist EIN Zustand aus **Chips** über der Galerie.
+   Sidebar-Klicks, getippte Begriffe und Filterausdrücke landen alle in
+   diesen Chips; die Galerie zeigt immer genau das, was die Chips sagen.
+2. **Eine gespeicherte Suche** ist dieser Zustand **mit Namen**. Ein
+   Klick in der Sidebar lädt die Chips zurück, du siehst die Bilder und
+   kannst die Chips weiter ändern. Das ☆ speichert: eine neue Suche oder,
+   wenn du von einer gespeicherten Suche kommst, wahlweise **„»Name«
+   überschreiben"** oder **„Als neue Suche speichern"**.
+3. **Ein Ranking** ist eine gespeicherte Suche, **über die Duelle
+   laufen** (Ranking-Modul, Standard aus). 🏆 legt es aus den aktuellen
+   Chips an; ✎ im Ranking lädt seine Population als Chips in die Galerie
+   (**Bearbeiten-Modus**), „Ranking speichern" führt zurück ins Ranking.
+   Ein Ranking hat zwei Ansichten: die **Bestenliste** und den
+   **Duell-Modus**.
 
-```
-model: flux -tag: wip rating>=4
-model: flux | krea rating>=4
-container: png -has: workflow
-prompt: "red hair" rating=0
-year: 2022 | unbekannt sort: created
-```
-
-`model: flux | krea` heißt Flux ODER Krea; `-tag: wip | alt` heißt weder
-`wip` noch `alt`. ODER gibt es nur bei Werte-Prädikaten - Vergleiche
-(`rating>=`, `width>=` …) bilden Bereiche über `>=`/`<=`-Paare. Die
-Direktive **`sort: <schlüssel>`** (einmal pro Ausdruck) legt die Sortierung
-fest und wird mit der Suche gespeichert: `added` (hinzugefügt), `created`
-(Erstelldatum), `size`, `name`, `container`, `rating`. Die Richtung dreht
-ein Suffix: `sort: created-auf` (älteste zuerst), `sort: name-ab` (Z–A) -
-englisch als `-asc`/`-desc` (`sort: created-asc`).
-Ohne Suffix gilt die sinnvolle Standardrichtung (Neuestes/Größtes/Bestes
-zuerst, Namen A–Z); Unbewertete und Undatierte bleiben in beiden
-Richtungen am Ende.
-
-`feld: wert` sucht als Teilstring, `feld: "wert"` exakt; `rating=0` heißt
-unbewertet; erlaubte Felder sind die der [Schicht 2](interpretation.md) plus
-`tag:`, `container:`, `has:` (`has: workflow` = eingebetteter Workflow,
-`has: model` = Schicht-2-Feld vorhanden - **`-has: model`** findet Medien
-**ohne** erkanntes Modell), `format:` (grobe Seitenverhältnis-Klassen
-`quadratisch`/`hochformat`/`querformat`/`widescreen` - englisch
-`square`/`portrait`/`landscape`/`widescreen`), `mp:`
-(Megapixel-Bereiche `<1`/`1-2`/`2-4`/`>4`), `year:`/`month:`
-(Erstelldatum: `year: 2022`, `month: 2022-07`, `year: unbekannt` -
-englisch `year: unknown`),
-`fundort:` (englisch `location:`; `library` = mindestens ein Fundort
-liegt in der Media Library, `extern` - englisch `external` - = nur
-außerhalb indiziert; braucht eine konfigurierte Library),
-`text:` (freier Begriff - kuratierte Suche über interpretierte Felder,
-Dateinamen und manuelle Schicht; genau die Semantik der Live-Suche:
-`text: ball text: wüste`), `raw:` (wie `text:`, aber **zusätzlich in den
-Roh-Metadaten** - findet z. B. Node-Namen im Workflow-JSON: `raw: ipadapter`),
-`datei:` (englisch `file:`; gezielt der **Dateiname** der Fundorte, ohne
-Verzeichnis - Teilstring, mit `"…"` exakt; praktisch für metadatenlose
-Bestände wie Midjourney-Exporte und natürlich auch in Arena-Ausdrücken
-nutzbar)
-und die Medien-Eckwerte `width`/`height`/`fps` mit Vergleich (z. B.
-`width>=1920 fps>=24`). Gespeicherte
-Suchen sind dynamisch: ausgewertet wird bei jedem Öffnen.
+Begriffe: Ein Kriterium in der Leiste heißt **Chip**; eine benannte
+Suche heißt **gespeicherte Suche**; eine benannte Suche mit Duellen
+heißt **Ranking** (nicht mehr „Arena"), ihre beiden Ansichten
+**Bestenliste** und **Duell**. Die Abschnitte unten folgen dieser
+Reihenfolge; die Rankings im Einzelnen beschreibt
+[rankings.md](rankings.md).
 
 ## Suchen: EIN Suchzustand aus Chips
 
@@ -351,26 +434,34 @@ Textbegriffe und getippte Ausdrücke landen alle im selben Zustand und
 kombinieren sich, statt einander zu ersetzen:
 
 ```
-Bibliothek / [ Modell: flux | krea ✕ ] [ Text: wüste ✕ ] [ ★ ≥ 4 ✕ ] · 1.234   ☆ speichern · ✕ · ⚡
+[ Modell: flux | krea ✕ ] [ Text: wüste ✕ ] [ ★ ≥ 4 ✕ ] · 1.234   ☆ speichern · 🏆 Ranking · ✕ · ⚡
 ```
 
 **☆ speichern**, **✕ Filter zurücksetzen** und **⚡ Sammel-Aktion** sitzen
 als EINE Knopf-Gruppe rechts; reicht die Breite nicht, rutscht die Gruppe
 geschlossen unter die Chips. Unterhalb von FullHD-Breite zeigen Zurücksetzen
-und Sammel-Aktion nur noch ihr Icon (Hover verrät die Funktion) und das
-Präfix „Bibliothek /" wird ausgeblendet - kleine Monitore bleiben aufgeräumt.
+und Sammel-Aktion nur noch ihr Icon (Hover verrät die Funktion) - kleine
+Monitore bleiben aufgeräumt. Im Bearbeiten-Modus eines Rankings (siehe
+[Rankings](rankings.md)) zeigen alle vier Knöpfe nur ihr Icon.
 
 - **Tippen filtert live:** Ab dem dritten Zeichen filtert die Galerie nach
   kurzer Tipp-Pause (die Galerie IST die Trefferliste - Thumbnails statt
   Textausschnitte). **Enter** macht aus den Begriffen feste **Text-Chips**
   (`"…"` hält Wortfolgen zusammen; ein Anführungszeichen IM Wert schreibt
-  man doppelt: `prompt: "sag ""hi"""`); mehrere Wörter sind UND-verknüpft.
+  man doppelt: `prompt: "sag ""hi"""`, ebenso den Apostroph in `'…'`:
+  `prompt: 'don''t stop'`); mehrere Wörter sind UND-verknüpft. Auch der
+  Chip-Editor und die Tipphilfe verstehen `"…"` (exakt) und `'…'`
+  (enthält).
   Begriffe zählen als **Wortanfänge** (`wüs` findet „Wüste"; dank
   Volltextindex auch bei 250k in Millisekunden).
-- **Sidebar-Klicks** werden Chips: ein zweiter Wert derselben Gruppe
-  erweitert zum **ODER**, ein Klick auf einen aktiven Wert entfernt ihn.
+- **Sidebar-Klicks** werden Chips: ein Klick **ersetzt** die Auswahl der
+  Gruppe, Cmd/Strg-Klick erweitert zum **ODER**, ein Klick auf einen
+  aktiven Wert entfernt ihn (Lightroom-Regel, seit September 2026).
   Die Sidebar-Zähler rechnen dabei im aktuellen Kontext mit (leere Werte
-  gedimmt); „mit/ohne Eingangsbild" ersetzen einander.
+  gedimmt); „mit/ohne Eingangsbild" ersetzen einander. Alle Zähler eines
+  Suchzustands kommen aus **einem** Lauf, und der Server merkt sich das
+  Ergebnis, bis sich am Bestand etwas ändert - der zweite Klick auf
+  dieselbe gespeicherte Suche kostet nichts mehr.
 - **Getippte Filterausdrücke** (siehe oben, Enter) werden in Chips zerlegt -
   getippt und geklickt ist garantiert dasselbe.
 - **Klick auf einen Chip** öffnet ihn zum Bearbeiten: Werte entfernen oder
@@ -379,8 +470,12 @@ Präfix „Bibliothek /" wird ausgeblendet - kleine Monitore bleiben aufgeräumt
   **„✕ Filter zurücksetzen"** rechts in der Kopfzeile - oder **Esc**
   (wenn gerade kein Overlay offen ist) bzw. „Alle Medien" in der Sidebar.
 - **☆ speichern** öffnet den Speicherdialog (Vorschau + Trefferzahl + Name)
-  und legt den ganzen Zustand als gespeicherte Suche ab; geladene Suchen
-  lassen sich dort überschreiben, umbenennen, kopieren und löschen.
+  und legt den ganzen Zustand als gespeicherte Suche ab; kam der Zustand
+  aus einer gespeicherten Suche, bietet er „»Name« überschreiben" und „Als
+  neue Suche speichern" an.
+- **🏆 Ranking** (nur bei eingeschaltetem Ranking-Modul, auch ohne Chips)
+  legt aus den Chips ein **neues Ranking** an (Paarvergleich mit
+  Bestenliste), siehe [Rankings](rankings.md).
 - **„+ Kriterium"** (neben den Chips) öffnet den **Baukasten**: alle
   Kategorien (Modell, LoRA, Tags, Bewertung, Text, Jahr, Dateityp, Format,
   Auflösung, Eingangsbild, Eckwerte, Rohdaten-Suche, Dateiname, Sortierung) mit
@@ -415,35 +510,126 @@ Während ein Import läuft, ändert sich der Bestand laufend - dann ist das
 Scrollen vorübergehend wieder so gemächlich wie früher, zeigt dafür aber
 immer den frischen Stand.
 
-## Schnellmenü + Admin-Konsole
+## Filterausdrücke (für Fortgeschrittene)
 
-Der Knopf oben rechts öffnet das **Schnellmenü**: Absprung ins
-Admin-Dashboard, die häufigsten Wartungsaktionen (Re-Scan, Neu
-interpretieren, Thumbnail-Cache leeren) und der Theme-Umschalter - ohne
-die Bibliothek zu verlassen. Esc oder Klick daneben schließt.
+Die Suchleiste versteht auch Filterausdrücke - sie
+zeigen sofort das gefilterte Grid. Prädikate sind UND-verknüpft, `-` negiert;
+**mehrere Werte in einem Prädikat** trennt ` | ` (Pipe mit Leerzeichen) als
+ODER:
 
-Das **Admin-Dashboard** (aus dem Schnellmenü oder über die
-Aktivitäts-Anzeige) ist EINE Seite mit Regionen:
+```
+model: flux -tag: wip rating>=4
+model: flux | krea rating>=4
+container: png -has: workflow
+prompt: "red hair" rating=0
+prompt: 'new york' -prompt: 'at night'
+year: 2022 | unbekannt sort: created
+```
 
-1. **Überblick:** Kennzahlen des Bestands (Items, Metadaten, Thumbnail-
-   Cache, DB-Größe, Parser, ffprobe/ffmpeg) und daneben die **Aktivität**
-   der laufenden Aufgabe mit Live-Fortschritt.
-2. **Quellen & Import:** EIN Aufnahme-Formular (Ordner + Modus
-   kopieren / verschieben / katalogisieren + „einmal jetzt" / „dauerhaft
-   beobachten") und die Liste der Watchordner.
-3. **Wartung:** kleine Knöpfe nach Funktionsbereich - Re-Scan, verwaiste
-   Fundorte, Thumbnails, Integritätscheck, VACUUM, Neu interpretieren,
-   Erstelldaten nachtragen, Suchindex neu aufbauen.
-4. **Probleme:** Zusammenfassung mit Overlay zum Quittieren (nach Fehlerart
-   gruppiert, ehrliche Zahlen); dort auch die Sperrliste (abgelehnte Medien
-   wieder entsperren).
-5. **Konfiguration:** Media Library (wirkt sofort), ältestes plausibles
-   Datum, Thumbnail-Größe (legt `config.toml.bak` an; kommentierte
-   Referenz ist `config.example.toml`).
+`model: flux | krea` heißt Flux ODER Krea; `-tag: wip | alt` heißt weder
+`wip` noch `alt`. ODER gibt es nur bei Werte-Prädikaten - Vergleiche
+(`rating>=`, `width>=` …) bilden Bereiche über `>=`/`<=`-Paare. Die
+Direktive **`sort: <schlüssel>`** (einmal pro Ausdruck) legt die Sortierung
+fest und wird mit der Suche gespeichert: `added` (hinzugefügt), `created`
+(Erstelldatum), `size`, `name`, `container`, `rating`. Die Richtung dreht
+ein Suffix: `sort: created-auf` (älteste zuerst), `sort: name-ab` (Z–A) -
+englisch als `-asc`/`-desc` (`sort: created-asc`).
+Ohne Suffix gilt die sinnvolle Standardrichtung (Neuestes/Größtes/Bestes
+zuerst, Namen A–Z); Unbewertete und Undatierte bleiben in beiden
+Richtungen am Ende.
 
-Details: [admin.md](admin.md). „Zurück zur Bibliothek" oben links (oder
-`Esc`) schließt das Dashboard. Nach abgeschlossenen Aufgaben aktualisieren
-sich Galerie und Zähler von selbst.
+`feld: wert` sucht als Teilstring, `feld: "wert"` exakt, `feld: 'zwei
+wörter'` als **mehrteiliger Teilstring** (»enthält«: `prompt: 'new york'`
+findet auch „a view of New York at night", `prompt: "new york"` nur den
+Prompt, der genau so lautet); `rating=0` heißt unbewertet; erlaubte Felder sind die der [Schicht 2](interpretation.md) plus
+`tag:`, `container:`, `has:` (`has: workflow` = eingebetteter Workflow,
+`has: model` = Schicht-2-Feld vorhanden - **`-has: model`** findet Medien
+**ohne** erkanntes Modell), `format:` (grobe Seitenverhältnis-Klassen
+`quadratisch`/`hochformat`/`querformat`/`widescreen` - englisch
+`square`/`portrait`/`landscape`/`widescreen`), `mp:`
+(Megapixel-Bereiche `<1`/`1-2`/`2-4`/`>4`), `year:`/`month:`
+(Erstelldatum: `year: 2022`, `month: 2022-07`, `year: unbekannt` -
+englisch `year: unknown`),
+`fundort:` (englisch `location:`; `library` = mindestens ein Fundort
+liegt in der Media Library, `extern` - englisch `external` - = nur
+außerhalb katalogisiert; braucht eine konfigurierte Library),
+`text:` (freier Begriff - kuratierte Suche über interpretierte Felder,
+Dateinamen und manuelle Schicht; genau die Semantik der Live-Suche:
+`text: ball text: wüste`), `raw:` (wie `text:`, aber **zusätzlich in den
+Roh-Metadaten** - findet z. B. Node-Namen im Workflow-JSON: `raw: ipadapter`),
+`datei:` (englisch `file:`; gezielt der **Dateiname** der Fundorte, ohne
+Verzeichnis - Teilstring, mit `"…"` exakt; praktisch für metadatenlose
+Bestände wie Midjourney-Exporte und natürlich auch in Ranking-Ausdrücken
+nutzbar)
+und die Medien-Eckwerte `width`/`height`/`fps` mit Vergleich (z. B.
+`width>=1920 fps>=24`). Gespeicherte
+Suchen sind dynamisch: ausgewertet wird bei jedem Öffnen.
+
+## Gespeicherte Suchen
+
+Jede Suche - egal ob aus Sidebar-Klicks, Textbegriffen oder getippten
+Ausdrücken zusammengesetzt - lässt sich mit dem **☆ neben den Chips**
+speichern. Das ☆ öffnet den **Speicherdialog**: er zeigt die Chips als
+Vorschau, die aktuelle Trefferzahl, einen Hinweis, falls eine Sortierung
+mitgespeichert wird, und fragt nach dem Namen. Die Suche erscheint links unter „Gespeicherte Suchen" mit
+Live-Zähler; ein Klick lädt sie **als Chips zurück** (alles bleibt
+bearbeitbar) und zeigt ihre Bilder, ohne weiteren Modus. Die Liste steht
+sofort, die Zähler kommen kurz danach („…" solange sie rechnen): nach dem
+Serverstart oder einem Import werden sie einmal frisch gezählt, danach
+kommen sie aus dem Speicher, bis sich am Bestand etwas ändert.
+
+Solange die Chips genau der geladenen Suche entsprechen, ist ihre Zeile in
+der Sidebar hervorgehoben. Ändert man einen Chip, geht die Markierung aus:
+ab da ist es eine freie Suche, nichts wird unbemerkt überschrieben. Drückt
+man dann ☆, sagt der Dialog **„Aus der gespeicherten Suche »Name«"**, der
+Name ist vorbelegt, und es gibt zwei klar benannte Wege:
+
+- **»Name« überschreiben** sichert die aktuellen Chips als neue Fassung
+  dieser Suche; ein geänderter Name benennt sie dabei um.
+- **Als neue Suche speichern** legt eine zweite Suche an und lässt die
+  alte, wie sie war.
+
+Der Ursprung endet mit „Alle Medien", Esc, dem Leeren der Chips oder dem
+Laden einer anderen Suche. Gelöscht wird über das ✕ an der Sidebar-Zeile
+(zweiter Klick bestätigt). Eine mitgegebene Sortierung (`sort:` bzw. der
+Sortier-Knopf) wird mitgespeichert und beim Laden wiederhergestellt.
+
+## Rankings: eine gespeicherte Suche mit Duellen
+
+Bei eingeschaltetem Ranking-Modul (Admin → Konfiguration → Module) steht
+in der Chip-Leiste **🏆 Ranking**: Es legt aus den aktuellen Chips ein
+neues Ranking an (ohne Chips: die ganze Bibliothek) und öffnet es. In der
+Sidebar erscheinen Rankings in der Gruppe **Rankings** mit ihrer
+Population als Zähler; Klick öffnet die Bestenliste. ✎ im Ranking lädt
+die Population in die Galerie, die Kopfzeile schaltet in den
+Bearbeiten-Modus, „Ranking speichern" führt zurück. Alles Weitere
+(Bestenliste, Duell-Modus, „Beide raus", Elo-Scores):
+[rankings.md](rankings.md).
+
+## Admin
+
+Der Knopf oben rechts führt direkt in den **Admin** (ein echter Link nach
+`/admin`: Lesezeichen, Mittelklick und Rechtsklick → neuer Tab). Das
+frühere Schnellmenü mit Wartungsaktionen gibt es nicht mehr; Re-Scan, Neu
+interpretieren und Thumbnail-Cache leeren stehen unter Admin → Wartung,
+Dark/Light sitzt als Mond/Sonne-Knopf neben dem Sprachumschalter.
+
+Der **Admin** ist seit ADR 0074 eine **eigene Seite** unter `/admin` mit
+Seitennavigation links (Übersicht, Konfiguration, Quellen & Import,
+Wartung, Probleme, Rankings, Logs) und dem Aktivitäts-Widget unten
+in der Navigation - auf jeder Seite sichtbar, was gerade läuft oder wartet.
+Jede Seite hat eine Adresse (`/admin/logs` …), Browser-Zurück und
+-Vorwärts funktionieren; „Zurück zur Bibliothek" ist ein normaler
+Seitenwechsel (die Galerie kommt aus dem Verlaufscache des Browsers oder
+startet frisch). Galerie und Admin dürfen in zwei Tabs nebeneinander
+laufen; die Galerie holt sich Kennzahlen, Übersichtsmodus-Badge und
+Instanzname frisch, sobald ihr Tab wieder sichtbar wird.
+
+Details: [admin.md](admin.md). Nach abgeschlossenen Aufgaben aktualisieren
+sich Galerie und Zähler von selbst - schonend: Die Kacheln bleiben stehen,
+neue Bilder (z. B. aus einem Watchordner neben ComfyUI) rücken oben ein
+und schieben den Rest, Scrollposition und Auswahl bleiben am Bild. Nur
+Kacheln, deren Inhalt sich geändert hat, werden neu gefüllt.
 
 ## Tastatur
 
@@ -451,13 +637,39 @@ sich Galerie und Zähler von selbst.
 | --- | --- |
 | `Space` | Lupe öffnen/schließen |
 | `Enter` / Doppelklick | Einzelbildansicht öffnen/schließen |
-| `+` / `-` | Zoomen (Einzelbildansicht) |
+| `C` | A/B-Vergleich zweier markierter Bilder öffnen |
+| `+` / `-` | Zoomen (Einzelbildansicht, Vergleich) |
 | `1`–`5` / `0` | Bewerten / Bewertung löschen (Toggle) |
-| `←` / `→` | Blättern - in Übersicht und Lupe |
+| `←` / `→` | Blättern - in Übersicht und Lupe; Wischkante im Vergleich |
 | `↑` / `↓` | Eine Zeile hoch/runter (Übersicht) |
 | `Entf` | Auswahl ablehnen (Item raus + Sperre, Datei bleibt) |
-| `Pos1` / `Ende` | Erstes/letztes Medium (Lupe) |
-| `Esc` | Offenes Overlay schließen (Lupe, Dialoge, Admin) - sonst: **Filter zurücksetzen** |
+| `Pos1` / `Ende` | Erstes/letztes Medium (Lupe); Wischkante ganz links/rechts (Vergleich) |
+| `Tab` / `Space` | Vergleich: A und B tauschen / Wisch → nur A → nur B |
+| `Esc` | Obersten Dialog schließen, sonst offenes Overlay (Lupe, Einzelbild) - sonst: **Filter zurücksetzen** |
+
+### Dialoge und hängende Anfragen
+
+Dialoge (Neues Ranking, Speichern, Sammel-Aktion, Ablehnen - im Admin nur noch
+Ordner-Auswahl und Bestätigung) dürfen übereinander liegen: die
+Ordner-Auswahl öffnet sich über der Seite bzw. einer Bestätigung, ein
+Abbruch lässt die bisherige Eingabe stehen. `Esc` schließt immer nur den obersten
+Dialog. Ein Wechsel der Ansicht (Lupe, Einzelbild, Vergleich, Ranking auf
+oder zu) schließt alle offenen Dialoge der Galerie; der Admin hat als
+eigene Seite einen eigenen Dialog-Stapel.
+
+Lesende Anfragen an den Server (Galerie-Seiten, Details, Zähler) brechen
+nach 60 Sekunden ab, Thumbnails nach 20 Sekunden, und melden das als
+normalen Fehler; Galerie-Seiten und Thumbnails versuchen es danach von
+selbst erneut. Schreibende Aktionen (Import, Wartung, Rausverschieben)
+haben kein Zeitlimit. Ein Video, das der Browser nicht öffnen kann, zeigt
+in Lupe, Einzelbild und Panel den Hinweis „Keine Vorschau verfügbar" statt
+einer schwarzen Fläche. Kennt fml den Codec (Schicht 2, Feld `video_codec`),
+fragt der Player den Browser schon VOR dem Laden: Bei ProRes, 10-bit-H.264
+oder HEVC in Firefox erscheint der Poster-Frame mit „Dieser Browser kann
+ProRes (HQ, 10-bit) nicht abspielen …" — kein Stream, kein schwarzer Player
+mit Ton. Der Codec steht auch in der Kopfzeile von Panel, Lupe und
+Einzelbild; `codec: prores` im Suchfeld findet alle Betroffenen
+([interpretation.md](interpretation.md#video-codec-und-abspielbarkeit)).
 
 ## Wichtig / Grenzen (Stand jetzt)
 
@@ -468,6 +680,29 @@ sich Galerie und Zähler von selbst.
 - **Video-Metadaten brauchen ffprobe** (Teil von ffmpeg, siehe
   [extraction.md](extraction.md)). Ohne ffprobe werden Videos trotzdem
   katalogisiert; ein erneuter Scan nach der Installation holt die Metadaten nach.
+- **Welche Videos der Browser abspielt:** fml liefert Videos unverändert
+  aus (kein Umkodieren, „Original heilig"); ob ein Codec läuft, entscheidet
+  deshalb der **Browser**, nicht fml. Der Player fragt ihn vor dem Laden und
+  zeigt bei Nein den Poster-Frame mit Hinweis. Stand 2026 (Browser ändern
+  sich, im Zweifel gilt die Antwort des Browsers):
+
+  | Codec / Container | Chrome, Edge | Firefox | Safari (macOS) |
+  |---|---|---|---|
+  | H.264 8-bit 4:2:0 (MP4, MOV) | ja | ja | ja |
+  | H.264 10-bit, 4:2:2, 4:4:4 (High 10 & Co.) | nein | nein | nein |
+  | HEVC / H.265 | mit Hardware-Decoder | je nach System (Windows: „HEVC-Videoerweiterungen", macOS: neuere Versionen, Linux: nein) | ja |
+  | VP8 / VP9 (WebM) | ja | ja | ja (macOS 11+) |
+  | AV1 | ja | ja | nur neuere Apple-Chips |
+  | **ProRes (MOV, Topaz-Export)** | nein | nein | **ja** |
+  | DNxHD, Motion JPEG, andere Zwischencodecs | nein | nein | nein |
+  | MKV-Container | teilweise | nein | nein |
+
+  Mac-Nutzer mit Safari sind vom ProRes-Problem also nicht betroffen; in
+  Chrome und Firefox hilft nur ein anderer Player (📂 im Dateimanager
+  anzeigen) oder ein H.264-Export. Welche Codecs im eigenen Bestand
+  stecken, zeigt `codec: prores` im Suchfeld bzw. das
+  [Diagnose-Kommando](scanning.md#diagnose-video-codecs-im-bestand); beim
+  Aufnehmen erscheint das Problem unter Admin → Probleme (Art `playback`).
 - **TIFF und PSD** zeigt kein Browser nativ — Galerie, Lupe und
   Einzelbildansicht rendern dafür serverseitig ein JPEG (das Original bleibt
   unangetastet). PSD nutzt das eingebettete Composite. PSDs, die **ohne

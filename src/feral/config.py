@@ -179,8 +179,12 @@ def import_rules(config: dict[str, Any]) -> dict[str, Any]:
       Maßen — ohne Maße wird nie gefiltert, kein Raten).
     - ``formate_ausschliessen``: Container-Namen (z. B. ``["psd", "arw"]``),
       die beim Import/Scan gar nicht erst aufgenommen werden.
+    - ``min_date`` (ISO-Datum): Untergrenze des Plausibilitätsfensters fürs
+      Erstelldatum — seit ADR 0075 eine Import-Regel: ohne plausibles Datum
+      (vor ``min_date`` oder in der Zukunft) wird nicht aufgenommen. Immer
+      aktiv (Standard 2015-01-01).
 
-    Alles inaktiv = die Funktionen filtern nichts (Auslieferungszustand).
+    Maße/Formate inaktiv = dort filtert nichts (Auslieferungszustand).
     """
     section = config.get("import", {})
     raw_formats = section.get("formate_ausschliessen") or []
@@ -204,6 +208,7 @@ def import_rules(config: dict[str, Any]) -> dict[str, Any]:
         "min_kante": _px("min_kante"),
         "max_kante": _px("max_kante"),
         "formate": formate,
+        "min_date": import_min_date(config),
     }
 
 
@@ -297,6 +302,24 @@ def ui_show_dupes(config: dict[str, Any]) -> bool:
     return bool(config.get("ui", {}).get("dubletten", True))
 
 
+# -- Leistung ([performance], Issue #110) ------------------------------------------
+
+SLOW_REQUEST_MS_DEFAULT = 250.0
+
+
+def slow_request_ms(config: dict[str, Any]) -> float:
+    """Schwelle in ms, ab der eine Anfrage als ``langsam:`` (WARNING) ins Log
+    geht (``[performance] slow_request_ms``, Standard 250). 0 = nie warnen,
+    langsame Anfragen bleiben dann still (Kaltstart/Hintergrund sind ohnehin
+    nur INFO). Ungültiges → Standard."""
+    value = config.get("performance", {}).get("slow_request_ms", SLOW_REQUEST_MS_DEFAULT)
+    try:
+        ms = float(value)
+    except (TypeError, ValueError):
+        return SLOW_REQUEST_MS_DEFAULT
+    return ms if ms >= 0 else SLOW_REQUEST_MS_DEFAULT
+
+
 def model_sort(config):
     """Sortierung der Modell-Liste (``[ui] modell_sortierung``):
     'zuletzt' (Standard, neueste Nutzung zuerst) | 'alphabet' | 'anzahl'."""
@@ -324,6 +347,7 @@ def update_config_file(
     instance_name: str | None = None,
     instance_accent: str | None = None,
     rankings_enabled: bool | None = None,
+    slow_request_ms: float | None = None,
 ) -> dict[str, Any]:
     """Aktualisiere verwaltete Felder der Config-Datei und schreibe sie zurück.
 
@@ -437,6 +461,13 @@ def update_config_file(
         # Modul-Schalter (ADR 0045): immer explizit schreiben — wer in der
         # Datei wühlt, soll die Option sehen (gleiche Logik wie beim Port).
         config.setdefault("rankings", {})["enabled"] = bool(rankings_enabled)
+    if slow_request_ms is not None:
+        # Langsam-Schwelle (#110): immer explizit schreiben, ganzzahlig in ms;
+        # 0 = nie warnen. Negatives fällt auf den Standard zurück.
+        ms = int(slow_request_ms)
+        config.setdefault("performance", {})["slow_request_ms"] = (
+            ms if ms >= 0 else int(SLOW_REQUEST_MS_DEFAULT)
+        )
     save_config(path, config)
     return config
 

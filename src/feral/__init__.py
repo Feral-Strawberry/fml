@@ -1,6 +1,6 @@
 """Feral Media Library — schlanke Medienverwaltung für AI-Medien.
 
-Siehe CLAUDE.md für Ziele, Architektur und verbindliche Arbeitsregeln.
+Siehe README.md für Ziele und Architektur.
 """
 
-__version__ = "0.1.0"
+__version__ = "2026.09"

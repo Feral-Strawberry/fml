@@ -1,6 +1,6 @@
 """Hilfen, um PNG-Dateien für Tests **programmatisch** zu bauen.
 
-So testen wir gegen bekannte, von uns konstruierte Eingaben (CLAUDE.md §8) — kein
+So testen wir gegen bekannte, von uns konstruierte Eingaben (Projektregel: Fixtures programmatisch) — kein
 einziger Binär-Blob muss ins Repo. Wir bauen nur so viel PNG, wie der Extraktor
 sieht: Signatur, ein gültiger IHDR, die Metadaten-Chunks, IEND.
 """

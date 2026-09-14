@@ -26,6 +26,19 @@ FFPROBE_JSON = {
     ],
 }
 
+# Topaz-Export als ProRes im MOV (Issue #71): Ton vorn, Video als Stream 1.
+PRORES_JSON = {
+    "format": {"format_name": "mov,mp4,m4a,3gp,3g2,mj2"},
+    "streams": [
+        {"index": 0, "codec_type": "audio", "codec_name": "aac", "profile": "LC",
+         "bit_rate": "128000", "tags": {"language": "und"}},
+        {"index": 1, "codec_type": "video", "codec_name": "prores",
+         "codec_tag_string": "apch", "profile": "HQ", "pix_fmt": "yuv422p10le",
+         "width": 3840, "height": 2160, "bit_rate": "734003200",
+         "avg_frame_rate": "24000/1001", "tags": {"encoder": "Apple ProRes 422 HQ"}},
+    ],
+}
+
 
 def test_items_from_ffprobe_maps_format_and_stream_tags():
     items = video_ffprobe.items_from_ffprobe(FFPROBE_JSON, container="matroska")
@@ -34,7 +47,36 @@ def test_items_from_ffprobe_maps_format_and_stream_tags():
     assert by_source_keyword[("matroska:format.tag", "COMMENT")] == "made with comfyui"
     assert by_source_keyword[("matroska:format.tag", "ENCODER")] == "Lavf60.3.100"
     assert by_source_keyword[("matroska:stream0.tag", "DURATION")] == "00:00:05.000"
-    assert len(items) == 3  # Stream 1 hat keine Tags, format.filename ist kein Tag
+    # Stream-Eckwerte (#71): nur die vorhandenen Felder, hier je einmal codec_type.
+    assert by_source_keyword[("matroska:stream0", "codec_type")] == "video"
+    assert by_source_keyword[("matroska:stream1", "codec_type")] == "audio"
+    assert len(items) == 5  # 2 Format-Tags + 1 Stream-Tag + 2× codec_type
+
+
+def test_stream_facts_are_stored_verbatim_per_stream():
+    items = video_ffprobe.items_from_ffprobe(PRORES_JSON, container="isobmff")
+    video = {i.keyword: i.text for i in items if i.source == "isobmff:stream1"}
+    assert video == {
+        "codec_type": "video", "codec_name": "prores", "codec_tag_string": "apch",
+        "profile": "HQ", "pix_fmt": "yuv422p10le", "width": "3840", "height": "2160",
+        "bit_rate": "734003200",
+    }
+    audio = {i.keyword: i.text for i in items if i.source == "isobmff:stream0"}
+    assert audio == {"codec_type": "audio", "codec_name": "aac", "profile": "LC", "bit_rate": "128000"}
+    # Tags bleiben unter ihrem eigenen Label, unverändert.
+    assert {(i.source, i.keyword) for i in items if i.source.endswith(".tag")} == {
+        ("isobmff:stream0.tag", "language"), ("isobmff:stream1.tag", "encoder"),
+    }
+    # Eckwerte stehen VOR den Tags desselben Streams (deterministischer Blob).
+    sources = [i.source for i in items]
+    assert sources.index("isobmff:stream1") < sources.index("isobmff:stream1.tag")
+
+
+def test_video_stream_facts_picks_first_video_stream():
+    facts = video_ffprobe.video_stream_facts(PRORES_JSON)
+    assert facts["codec_name"] == "prores" and facts["pix_fmt"] == "yuv422p10le"
+    assert video_ffprobe.video_stream_facts({"streams": [{"codec_type": "audio"}]}) is None
+    assert video_ffprobe.video_stream_facts({}) is None
 
 
 def test_items_from_ffprobe_empty_json():

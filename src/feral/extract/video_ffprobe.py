@@ -3,7 +3,10 @@
 ``ffprobe`` (Teil von ffmpeg, System-Binary, KEIN pip-Paket — ADR 0008) liest den
 Container-Umschlag und gibt die eingebetteten **Tags** als JSON aus. Wir übernehmen
 jeden Tag unverändert mit Quell-Label (``matroska:format.tag`` bzw.
-``matroska:stream0.tag`` usw.). Interpretiert wird nichts — Schicht 2 (ADR 0004).
+``matroska:stream0.tag`` usw.). Dazu je Stream die **Eckwerte** (Codec, Profil,
+Pixelformat, Maße, Bitrate — Issue #71, ADR 0070) unter dem Quell-Label
+``matroska:stream0`` mit dem ffprobe-Feldnamen als Keyword, ebenfalls
+unverändert als Text. Interpretiert wird nichts — Schicht 2 (ADR 0004).
 
 Fehlt ffprobe auf dem System, ist das **kein Fehler**: die Datei wird trotzdem
 katalogisiert (Hash + Fundort), die Extraktion liefert nur eine Warnung. Sobald
@@ -25,6 +28,15 @@ CONTAINERS = ("matroska", "isobmff")
 
 # Obergrenze pro Datei — ffprobe liest nur Header, sollte nie so lange brauchen.
 _TIMEOUT_SECONDS = 30
+
+# Stream-Eckwerte, die neben den Tags gesichert werden (Issue #71): genau die
+# Felder, aus denen sich „kann der Browser das abspielen?" beantworten lässt.
+# Werte bleiben, wie ffprobe sie liefert (nur nach str() — byte-treu genug,
+# es sind kurze ASCII-Bezeichner und Zahlen). Keyword = ffprobe-Feldname.
+STREAM_FACTS = (
+    "codec_type", "codec_name", "codec_tag_string", "profile", "pix_fmt",
+    "width", "height", "bit_rate",
+)
 
 
 def _ffprobe() -> str | None:
@@ -127,6 +139,18 @@ def items_from_ffprobe(data: dict[str, Any], *, container: str) -> list[RawMetad
         )
 
     for index, stream in enumerate(data.get("streams") or []):
+        # Eckwerte des Streams (Codec & Co.) VOR seinen Tags — feste
+        # Reihenfolge, damit der Roh-Blob deterministisch bleibt.
+        for key in STREAM_FACTS:
+            value = stream.get(key)
+            if value is None or value == "":
+                continue
+            items.append(
+                RawMetadataItem(
+                    source=f"{container}:stream{index}", keyword=key,
+                    text=str(value), data=None, encoding="utf-8",
+                )
+            )
         stream_tags = stream.get("tags") or {}
         for key in sorted(stream_tags):
             items.append(
@@ -137,3 +161,18 @@ def items_from_ffprobe(data: dict[str, Any], *, container: str) -> list[RawMetad
             )
 
     return items
+
+
+def video_stream_facts(data: dict[str, Any]) -> dict[str, str] | None:
+    """Eckwerte des ERSTEN Video-Streams als ``{feldname: text}`` (reine
+    Funktion). Grundlage des Diagnose-Kommandos ``python -m feral.diagnose
+    video-codecs`` (Issue #71), das ffprobe nur mit ``-select_streams v:0``
+    aufruft und die Antwort nicht in der DB ablegt. ``None`` ohne Video-Stream."""
+    for stream in data.get("streams") or []:
+        if stream.get("codec_type") != "video":
+            continue
+        return {
+            key: str(stream[key]) for key in STREAM_FACTS
+            if stream.get(key) is not None and stream.get(key) != ""
+        }
+    return None

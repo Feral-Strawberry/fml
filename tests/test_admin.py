@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 import pytest
 
@@ -31,6 +32,37 @@ def _store(db, file_hash, path):
     store_extraction(db, file_hash=file_hash, file_size=1, path=path, extraction=extraction)
 
 
+# --- Übersicht (ADR 0074 Nachtrag) ---------------------------------------------
+
+def test_overview_stats_kinds_years_growth_and_disks(db, db_path, tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    _store(db, "h1", "/a.png")
+    _store(db, "h2", "/b.png")
+    _store(db, "h3", "/c.png")
+    db.execute("UPDATE items SET media_kind = 'video', file_size = 500 WHERE file_hash = 'h3'")
+    db.execute("UPDATE items SET media_date = '2024-05-01 10:00:00' WHERE file_hash = 'h1'")
+    db.execute("UPDATE items SET media_date = '2026-01-02 10:00:00' WHERE file_hash = 'h2'")
+    old = (datetime.now(timezone.utc) - timedelta(days=40)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    db.execute("UPDATE items SET first_seen_at = ? WHERE file_hash = 'h3'", (old,))
+    db.commit()
+
+    o = admin.overview_stats(db, db_path=db_path, library_root=tmp_path)
+    kinds = {k["kind"]: k for k in o["by_kind"]}
+    assert kinds["image"]["count"] == 2 and kinds["video"] == {"kind": "video", "count": 1, "bytes": 500}
+    years = {y["year"]: y["count"] for y in o["by_year"]}
+    assert years == {"2024": 1, "2026": 1, None: 1}          # None = ohne Datum
+    assert len(o["growth"]) == 30
+    assert sum(g["count"] for g in o["growth"]) == 2          # h3 liegt außerhalb der 30 Tage
+    assert o["growth"][-1]["day"] == datetime.now(timezone.utc).date().isoformat()
+    assert o["growth"][-1]["count"] == 2
+    # DB und Library liegen hier auf demselben Laufwerk → nur EINE Platte
+    assert len(o["disks"]) == 1 and o["disks"][0]["for"] == "db"
+    assert o["disks"][0]["total"] > 0 and o["disks"][0]["free"] >= 0
+    # ohne Library: nur die DB-Platte, keine Ausnahme
+    assert len(admin.overview_stats(db, db_path=db_path, library_root=None)["disks"]) == 1
+
+
 # --- admin_info ---------------------------------------------------------------
 
 def test_admin_info_reports_counts_and_tools(db, db_path, tmp_path):
@@ -44,10 +76,85 @@ def test_admin_info_reports_counts_and_tools(db, db_path, tmp_path):
     assert info["schema_version"] >= 3
     assert info["tables"]["items"] == 1
     assert info["tables"]["raw_metadata"] == 1
-    assert info["thumb_count"] == 1 and info["thumb_bytes"] == 9
-    assert info["orphan_locations"] == 1          # /a.png existiert nicht
+    # Teure Zähler sind KEIN Teil des Seitenladens mehr (#118): ohne
+    # gemerkten Stand ehrlich „noch nie gezählt", kein Platten-Lauf.
+    assert info["orphans"] is None and info["cache"] is None and info["checking"] == []
+    assert "thumb_count" not in info and "orphan_locations" not in info
     assert isinstance(info["ffprobe"], bool)
     assert {p["name"] for p in info["parsers"]} >= {"a1111", "comfyui"}
+
+    slow = admin.SlowCounts(db_path, cache)
+    slow.count_cache()
+    slow.count_orphans(db)
+    info = admin.admin_info(db, db_path=db_path, thumb_cache=cache, slow=slow)
+    assert info["cache"]["count"] == 1 and info["cache"]["bytes"] == 9
+    assert info["orphans"]["count"] == 1          # /a.png existiert nicht
+    assert info["orphans"]["at"].endswith("Z") and info["cache"]["at"].endswith("Z")
+
+
+# --- Gemerkter Stand der teuren Zähler (#118, ADR 0077) ------------------------
+
+def test_slow_counts_remember_set_and_background_refresh(db, db_path, tmp_path):
+    _store(db, "h1", "/weg.png")
+    db.commit()
+    cache = tmp_path / "cache"
+    (cache / "ab").mkdir(parents=True)
+    (cache / "ab" / "x.jpg").write_bytes(b"12345")
+    slow = admin.SlowCounts(db_path, cache)
+    assert slow.snapshot() == admin.SlowCounts.EMPTY
+
+    # Direkt setzen (Ergebnis liegt vor: Cache leeren, Aufräumen überall).
+    slow.set_cache(0, 0)
+    slow.set_orphans(0)
+    snap = slow.snapshot()
+    assert snap["cache"]["count"] == 0 and snap["orphans"]["count"] == 0 and snap["checking"] == []
+
+    # Hintergrund (nach Aufgaben): eigene Verbindung, checking sichtbar,
+    # Doppelwunsch während des Laufs löst genau eine Nachrunde aus.
+    slow.refresh_later("orphans", "cache")
+    slow.refresh_later("orphans")
+    assert slow.wait_idle()
+    snap = slow.snapshot()
+    assert snap["orphans"]["count"] == 1 and snap["cache"] == {**snap["cache"], "count": 1, "bytes": 5}
+    assert snap["checking"] == []
+    with pytest.raises(ValueError):
+        slow.refresh_later("unsinn")
+
+
+def test_slow_counts_survive_restart_only_with_matching_stamp(db, db_path, tmp_path):
+    """ADR-0077-Nachtrag: gesetzte Stände gehen mit Herkunftsstempel nach
+    app_state; ein neuer SlowCounts (Neustart) nimmt sie zurück — außer der
+    Stempel passt nicht (anderer Rechner / anderer Cache-Ordner)."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+
+    def persist(key, value):
+        admin.write_app_state(db, key, value)
+        db.commit()
+
+    slow = admin.SlowCounts(db_path, cache, persist=persist)
+    slow.set_orphans(4)
+    slow.set_cache(7, 900)
+    stored = admin.read_app_state(db, "slow.cache")
+    assert stored["count"] == 7 and stored["stamp"] == slow.stamp()
+
+    again = admin.SlowCounts(db_path, cache)
+    again.load(db)
+    snap = again.snapshot()
+    assert snap["orphans"]["count"] == 4 and snap["cache"]["bytes"] == 900
+    assert "stamp" not in snap["cache"]
+
+    foreign = admin.SlowCounts(db_path, tmp_path / "anderer-cache")
+    foreign.load(db)
+    assert foreign.snapshot() == admin.SlowCounts.EMPTY
+
+    # Unlesbarer oder fremder Eintrag stört nicht.
+    db.execute("UPDATE app_state SET value = 'kaputt' WHERE key = 'slow.orphans'")
+    db.commit()
+    assert admin.read_app_state(db, "slow.orphans") is None
+    again = admin.SlowCounts(db_path, cache)
+    again.load(db)
+    assert again.snapshot()["orphans"] is None and again.snapshot()["cache"]["count"] == 7
 
 
 # --- Scan-Probleme --------------------------------------------------------------
@@ -128,7 +235,7 @@ def test_orphan_locations_and_prune(db, tmp_path):
     assert [o["path"] for o in orphans] == ["/weg/fort.png"]
 
     assert admin.prune_orphan_locations(db) == 1
-    # Item bleibt erhalten — nur die Pfad-Buchhaltung ist weg (BAUPLAN 2A.1).
+    # Item bleibt erhalten — nur die Pfad-Buchhaltung ist weg.
     assert db.execute("SELECT COUNT(*) FROM items WHERE file_hash='h2'").fetchone()[0] == 1
     assert db.execute(
         "SELECT COUNT(*) FROM file_locations WHERE file_hash='h2'"
@@ -199,6 +306,26 @@ def test_import_rules_overview_inactive_without_rules(db):
     assert admin.apply_import_rules(db, None, thumb_cache=None) == 0
 
 
+def test_import_rules_date_rule_hits_undated_items(db):
+    """Datumsregel im Bestandswerkzeug (ADR 0075, #113): Items ohne
+    plausibles Datum (media_date NULL nach dem Backfill) zählen mit und
+    werden abgelehnt — damit verschwinden sie aus Katalog UND Start-Trigger."""
+    _store_sized(db, "a1" * 32, "/ohne-datum.png", width=1024, height=1024)
+    _store_sized(db, "b2" * 32, "/datiert.png", width=1024, height=1024)
+    db.execute("UPDATE items SET media_date = '2024-01-01 10:00:00' WHERE file_hash = ?",
+               ("b2" * 32,))
+    db.commit()
+
+    rules = {"min_kante": 0, "max_kante": 0, "formate": [], "min_date": "2015-01-01"}
+    preview = admin.import_rules_overview(db, rules)
+    assert preview["active"] is True
+    assert preview["counts"] == {"datum": 1} and preview["total"] == 1
+    assert admin.apply_import_rules(db, rules, thumb_cache=None) == 1
+    left = {r[0] for r in db.execute("SELECT file_hash FROM items")}
+    assert left == {"b2" * 32}
+    assert db.execute("SELECT COUNT(*) FROM blocked_hashes").fetchone()[0] == 1
+
+
 def test_import_rules_hit_legacy_tiff_raws(db):
     # Alt-Bestand von VOR der RAW-Erkennung: .ARW steht noch als »tiff« im
     # Katalog (Feral Strawberrys Befund 2026-07-17) — der Format-Ausschluss »arw« muss
@@ -216,3 +343,130 @@ def test_import_rules_hit_legacy_tiff_raws(db):
     assert admin.apply_import_rules(db, rules, thumb_cache=None) == 2
     left = {r[0] for r in db.execute("SELECT file_hash FROM items")}
     assert left == {"b2" * 32}
+
+
+# --- Sperrliste seitenweise + Suche (A3 #107, schließt #66) -----------------------
+
+
+def _block(db, n, *, path_prefix="/Volumes/Archiv/IMG_"):
+    import json
+
+    db.executemany(
+        "INSERT INTO blocked_hashes(file_hash, reason, blocked_at, last_paths) VALUES (?, ?, ?, ?)",
+        [(f"{i:064x}", json.dumps({"key": "blockedRejected"}), f"2026-09-{1 + i % 28:02d}T10:00:00",
+          json.dumps([f"{path_prefix}{i:05d}.jpg"])) for i in range(n)])
+    db.commit()
+
+
+def test_blocked_page_counts_honestly_and_pages(db):
+    """Zähler = echter COUNT(*), Seite = offset/limit, neueste zuerst."""
+    _block(db, 250)
+    page = admin.blocked_page(db, offset=0, limit=100)
+    assert page["total"] == page["total_all"] == 250
+    assert len(page["blocked"]) == 100
+    assert page["blocked"][0]["blocked_at"] >= page["blocked"][-1]["blocked_at"]
+    last = admin.blocked_page(db, offset=200, limit=100)
+    assert len(last["blocked"]) == 50 and last["offset"] == 200
+    assert admin.blocked_page(db, offset=1000, limit=100)["blocked"] == []
+    # Kurzform für den Importer bleibt eine Liste.
+    assert len(admin.blocked_list(db, limit=5)) == 5
+
+
+def test_blocked_page_search_over_path_hash_and_reason(db):
+    """Suche per LIKE über gemerkte Pfade, Hash und Grund — Platzhalterzeichen
+    im Suchtext sind Zeichen, keine Jokerzeichen."""
+    _block(db, 30)
+    db.execute("INSERT INTO blocked_hashes(file_hash, reason, blocked_at, last_paths) VALUES (?, 'abgelehnt', '2026-09-30', ?)",
+               ("ab" * 32, '["/x/50%_off.png"]'))
+    db.commit()
+    by_path = admin.blocked_page(db, q="IMG_0001")
+    assert by_path["total"] == 10 and by_path["total_all"] == 31
+    assert all("IMG_0001" in b["last_paths"][0] for b in by_path["blocked"])
+    assert admin.blocked_page(db, q="abab")["total"] == 1
+    assert admin.blocked_page(db, q="abgelehnt")["total"] == 1
+    assert admin.blocked_page(db, q="50%_off")["total"] == 1
+    assert admin.blocked_page(db, q="50%")["total"] == 1
+    assert admin.blocked_page(db, q="5_%")["total"] == 0, "Unterstrich ist kein Joker"
+    assert admin.blocked_page(db, q="gibtsnicht")["blocked"] == []
+
+
+# --- Wartungskarten (A3 #107) ---------------------------------------------------
+
+
+def test_maintenance_stats_parsers_undated_and_counts(db, tmp_path):
+    from feral.db import store_interpretations
+    from feral.interpret.types import InterpretedField, Interpretation
+
+    _store(db, "a1" * 32, tmp_path / "a.png")
+    _store(db, "b2" * 32, tmp_path / "b.png")
+    for h in ("a1" * 32, "b2" * 32):
+        store_interpretations(db, file_hash=h, interpretations=[Interpretation(
+            parser="a1111", parser_version=3,
+            fields=[InterpretedField(field="prompt", value="x"), InterpretedField(field="seed", value="1")])])
+    db.execute("UPDATE items SET media_date = NULL WHERE file_hash = ?", ("a1" * 32,))
+    db.execute("UPDATE items SET media_date = '2026-01-01' WHERE file_hash = ?", ("b2" * 32,))
+    db.execute("INSERT INTO scan_issues(path, kind, message, first_seen_at, last_seen_at) VALUES ('/x', 'failed', 'm', '2026', '2026')")
+    db.commit()
+    st = admin.maintenance_stats(db)
+    by = {p["parser"]: p for p in st["parsers"]}
+    assert by["a1111"]["items"] == 2, "ordinal 0 = ein Treffer je Item, nicht je Feld"
+    assert by["a1111"]["version"] is not None
+    assert by["comfyui"]["items"] == 0, "registrierte Parser ohne Treffer stehen mit 0 drin"
+    assert st["undated"] == 1
+    assert st["open_issues"] == 1 and st["blocked_count"] == 0
+    assert isinstance(st["dbstat"], bool)
+    assert st["dbstat"] == admin.dbstat_available(db)
+
+
+def test_db_breakdown_groups_by_content(db, tmp_path):
+    """dbstat aggregiert: Gruppen decken die Datei ab; ohne dbstat ehrlich
+    nicht verfügbar (hier nur der Positivpfad — der Build hat dbstat)."""
+    import sqlite3
+
+    _store(db, "a1" * 32, tmp_path / "a.png")
+    db.commit()
+    try:
+        db.execute("SELECT 1 FROM dbstat LIMIT 1")
+    except sqlite3.OperationalError:
+        pytest.skip("SQLite-Build ohne dbstat")
+    d = admin.db_breakdown(db)
+    assert d["available"] is True
+    keys = [g["key"] for g in d["groups"]]
+    assert keys == ["raw", "items", "interpreted", "search", "other"]
+    total = sum(g["bytes"] for g in d["groups"])
+    assert total > 0 and d["free_bytes"] >= 0 and d["index_bytes"] >= 0
+    assert dict((g["key"], g["bytes"]) for g in d["groups"])["items"] > 0
+
+
+def test_package_versions_compare_installed_with_pins(tmp_path, monkeypatch):
+    """Instanz-Kachel (#42, ADR 0080): installierte Version je Laufzeit-Paket
+    neben dem Pin; Drift und fehlendes Paket werden ehrlich gemeldet."""
+    req = tmp_path / "requirements.txt"
+    req.write_text("Pillow==12.3.0\nfastapi==0.141.1  # web\nuvicorn==0.52.4\n", encoding="utf-8")
+    installed = {"pillow": "12.3.0", "fastapi": "0.136.3"}
+
+    def fake_version(name):
+        try:
+            return installed[name.lower()]
+        except KeyError:
+            raise admin.metadata.PackageNotFoundError(name)
+    monkeypatch.setattr(admin.metadata, "version", fake_version)
+    rows = admin.package_versions(req)
+    assert rows == [
+        {"name": "Pillow", "installed": "12.3.0", "pinned": "12.3.0", "ok": True},
+        {"name": "fastapi", "installed": "0.136.3", "pinned": "0.141.1", "ok": False},
+        {"name": "uvicorn", "installed": None, "pinned": "0.52.4", "ok": False},
+    ]
+    # Ohne requirements.txt (fremder Aufruf): installiert = ok, kein Pin.
+    assert admin.package_versions(tmp_path / "nope.txt")[0] == {
+        "name": "Pillow", "installed": "12.3.0", "pinned": None, "ok": True}
+
+
+def test_package_versions_real_environment_matches_requirements():
+    """Im Entwicklungs-venv müssen alle drei Laufzeit-Pakete installiert sein
+    und dem Pin entsprechen — sonst testet die Suite gegen einen anderen
+    Stand, als ausgeliefert wird."""
+    root = Path(__file__).resolve().parents[1]
+    rows = admin.package_versions(root / "requirements.txt")
+    assert [r["name"] for r in rows] == list(admin.RUNTIME_PACKAGES)
+    assert all(r["ok"] for r in rows), rows

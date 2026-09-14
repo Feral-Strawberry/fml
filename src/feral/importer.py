@@ -39,6 +39,7 @@ from .extract.container import ExtractorNotImplementedError, UnknownContainerErr
 from .extract.types import ContainerExtraction
 from .hashing import hash_file
 from .interpret import interpret_items
+from .scan import note_playability
 
 # Sichtbare Ausgänge im Quellordner (ADR 0019).
 STATE_DIRS = {
@@ -49,6 +50,10 @@ STATE_DIRS = {
     "gesperrt": "_gesperrt",       # ADR 0023: Hash steht auf der Sperrliste
     "ausgefiltert": "_ausgefiltert",  # ADR 0046: Import-Regeln (Maße/Format)
 }
+# Nur noch fürs Rausverschieben (moveout.py): abgelehnte Dateien ohne
+# plausibles Datum brauchen dort einen ehrlichen Zielordner. Neuimporte
+# landen seit Issue #113 nicht mehr hier — unplausibles Datum ist eine
+# Import-Regel (ausgefiltert), siehe ADR 0075.
 UNKNOWN_DATE_DIR = "_unbekanntes-datum"
 DEFAULT_MIN_DATE = datetime(2015, 1, 1, tzinfo=timezone.utc)
 
@@ -81,20 +86,20 @@ class ImportReport:
     probleme: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
-        parts = [f"{self.importiert} neu"]
+        parts = [f"{self.importiert} new"]
         if self.repariert:
-            parts.append(f"{self.repariert} repariert")
-        parts.append(f"{self.dublette} Dubletten")
+            parts.append(f"{self.repariert} repaired")
+        parts.append(f"{self.dublette} duplicates")
         if self.unbekanntes_format:
-            parts.append(f"{self.unbekanntes_format} unbekanntes Format")
+            parts.append(f"{self.unbekanntes_format} unknown format")
         if self.ausgefiltert:
-            parts.append(f"{self.ausgefiltert} ausgefiltert (Import-Regeln)")
+            parts.append(f"{self.ausgefiltert} filtered (import rules)")
         if self.gesperrt:
-            parts.append(f"{self.gesperrt} gesperrt")
+            parts.append(f"{self.gesperrt} blocked")
         if self.fehler:
-            parts.append(f"{self.fehler} Fehler")
+            parts.append(f"{self.fehler} errors")
         if self.leere_ordner:
-            parts.append(f"{self.leere_ordner} leere Ordner entfernt")
+            parts.append(f"{self.leere_ordner} empty folders removed")
         return "Import: " + " · ".join(parts)
 
 
@@ -128,6 +133,27 @@ def filter_reason(
     return None
 
 
+def rule_min_date(rules: dict[str, Any] | None) -> datetime:
+    """Untergrenze der Datumsregel aus den Import-Regeln (``min_date`` als
+    ISO-Text aus der Config oder schon als datetime); ohne Angabe
+    ``DEFAULT_MIN_DATE``. Die Datumsregel ist IMMER aktiv (ADR 0075)."""
+    value = (rules or {}).get("min_date")
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if value:
+        try:
+            return datetime.fromisoformat(str(value)).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return DEFAULT_MIN_DATE
+
+
+def date_reason(min_date: datetime) -> str:
+    """Grund-Text der Datumsregel (Import-Log-Detail, ADR 0075): kein
+    plausibles Datum aus Metadaten oder Dateistempel."""
+    return f"kein plausibles Datum (vor {min_date:%Y-%m-%d} oder in der Zukunft)"
+
+
 def _parse_date_text(text: str) -> datetime | None:
     for fmt in _DATE_FORMATS:
         try:
@@ -158,7 +184,9 @@ def determine_date(
     """Erstelldatum nach ADR-0019-Kaskade: Metadaten → Dateisystem → unplausibel.
 
     Liefert ``(datum, quelle)``; ``(None, "unplausibel")``, wenn kein Datum im
-    Plausibilitätsfenster liegt (dann: ``_unbekanntes-datum``-Bereich).
+    Plausibilitätsfenster liegt. Beim Import/Scan ist das seit Issue #113
+    ein Regel-Treffer (``ausgefiltert``, ADR 0075); nur das Rausverschieben
+    nutzt noch den ``_unbekanntes-datum``-Ordner.
     """
     upper = (now or datetime.now(timezone.utc)) + timedelta(days=1)
 
@@ -169,11 +197,7 @@ def determine_date(
     if embedded is not None and plausible(embedded):
         return embedded, "metadaten"
 
-    stamps = [stat.st_mtime]
-    birthtime = getattr(stat, "st_birthtime", None)
-    if birthtime:
-        stamps.append(birthtime)
-    fs_dt = datetime.fromtimestamp(min(stamps), tz=timezone.utc)
+    fs_dt = _fs_stamp(stat)
     if plausible(fs_dt):
         return fs_dt, "dateisystem"
     return None, "unplausibel"
@@ -204,6 +228,70 @@ def set_media_date(
         )
 
 
+def _fs_stamp(stat: Any) -> datetime:
+    """Älterer Dateisystem-Stempel (min aus mtime/birthtime, ADR 0019) als UTC."""
+    stamps = [stat.st_mtime]
+    birthtime = getattr(stat, "st_birthtime", None)
+    if birthtime:
+        stamps.append(birthtime)
+    return datetime.fromtimestamp(min(stamps), tz=timezone.utc)
+
+
+def _date_candidate(
+    conn: sqlite3.Connection, file_hash: str, *, min_date: datetime, upper: datetime,
+) -> tuple[datetime | None, str]:
+    """Datums-Kaskade aus zweiter Hand (Backfill, ADR 0021): eingebettetes
+    Datum aus den **gespeicherten Roh-Texten**, sonst der Stempel des ersten
+    noch existierenden Fundorts — beides nur im Plausibilitätsfenster.
+    Gemeinsamer Helfer für Lauf UND Start-Trigger (#113): was der Trigger
+    zählt, kann der Lauf auch datieren."""
+    for keyword in _DATE_KEYWORDS:
+        hit = conn.execute(
+            """SELECT value_text FROM raw_metadata
+                WHERE file_hash = ? AND keyword = ? AND value_text IS NOT NULL
+                ORDER BY ordinal LIMIT 1""",
+            (file_hash, keyword),
+        ).fetchone()
+        if hit is None:
+            continue
+        parsed = _parse_date_text(hit["value_text"])
+        if parsed is not None and min_date <= parsed <= upper:
+            return parsed, "metadaten"
+    for (path,) in conn.execute(
+        "SELECT path FROM file_locations WHERE file_hash = ? ORDER BY id",
+        (file_hash,),
+    ):
+        try:
+            stat = Path(path).stat()
+        except OSError:
+            continue
+        candidate = _fs_stamp(stat)
+        if min_date <= candidate <= upper:
+            return candidate, "dateisystem"
+        break
+    return None, "unplausibel"
+
+
+def backfill_pending(
+    conn: sqlite3.Connection, *, min_date: datetime = DEFAULT_MIN_DATE,
+) -> bool:
+    """Lohnt der automatische Backfill beim Start? Nur, wenn ein Item **ohne**
+    Datum vom Lauf auch **datiert werden könnte** — dieselbe Kaskade wie der
+    Lauf (``_date_candidate``), mit dem konfigurierten ``min_date``. Items,
+    deren Dateien weg sind (#62) oder deren Metadaten UND Stempel außerhalb
+    des Fensters liegen (#113: Feral Strawberrys 19 Items, ~200 vergebliche
+    Läufe), lösen keinen Lauf mehr aus; Alt-Einträge mit reinem Datum
+    (ADR 0061) laufen weiterhin nur über den Admin-Knopf. Bricht beim ersten
+    Treffer ab (frischer Import: erste Zeile)."""
+    upper = datetime.now(timezone.utc) + timedelta(days=1)
+    rows = conn.execute("SELECT file_hash FROM items WHERE media_date IS NULL")
+    for (file_hash,) in rows:
+        when, _ = _date_candidate(conn, file_hash, min_date=min_date, upper=upper)
+        if when is not None:
+            return True
+    return False
+
+
 def backfill_media_dates(
     conn: sqlite3.Connection,
     *,
@@ -218,7 +306,10 @@ def backfill_media_dates(
     **gespeicherten Roh-Texten** (DB, kein Dateizugriff), der Rückfall ist
     der älteste plausible Dateisystem-Stempel des ersten noch existierenden
     Fundorts — dieselbe Kaskade wie ADR 0019, nur aus zweiter Hand.
-    Items ohne plausibles Datum bleiben ehrlich NULL („ohne Datum").
+    Items ohne plausibles Datum bleiben ehrlich NULL („ohne Datum") und
+    werden als ``undatable`` gezählt (#113: die Zusammenfassung sagt, warum).
+    ``min_date`` kommt aus der Config (``[import] min_date``) — der Aufrufer
+    reicht es durch wie beim Import.
 
     Uhrzeit-Auffrischung (ADR 0061): Alt-Einträge mit reinem Datum
     (``length = 10``, vor ADR 0061 gespeichert) werden um die Uhrzeit
@@ -233,55 +324,26 @@ def backfill_media_dates(
         """SELECT file_hash, media_date FROM items
             WHERE media_date IS NULL OR length(media_date) = 10"""
     ).fetchall()
-    total, dated = len(rows), 0
+    total, dated, undatable = len(rows), 0, 0
     for index, row in enumerate(rows, start=1):
         file_hash = row["file_hash"]
-        when: datetime | None = None
-        source = "dateisystem"
-        for keyword in _DATE_KEYWORDS:
-            hit = conn.execute(
-                """SELECT value_text FROM raw_metadata
-                    WHERE file_hash = ? AND keyword = ? AND value_text IS NOT NULL
-                    ORDER BY ordinal LIMIT 1""",
-                (file_hash, keyword),
-            ).fetchone()
-            if hit is None:
-                continue
-            parsed = _parse_date_text(hit["value_text"])
-            if parsed is not None and min_date <= parsed <= upper:
-                when, source = parsed, "metadaten"
-                break
+        when, source = _date_candidate(conn, file_hash, min_date=min_date, upper=upper)
         if when is None:
-            for (path,) in conn.execute(
-                "SELECT path FROM file_locations WHERE file_hash = ? ORDER BY id",
-                (file_hash,),
-            ):
-                try:
-                    stat = Path(path).stat()
-                except OSError:
-                    continue
-                stamps = [stat.st_mtime]
-                birthtime = getattr(stat, "st_birthtime", None)
-                if birthtime:
-                    stamps.append(birthtime)
-                candidate = datetime.fromtimestamp(min(stamps), tz=timezone.utc)
-                if min_date <= candidate <= upper:
-                    when = candidate
-                break
-        if when is not None:
-            if row["media_date"] is None or source == "metadaten":
-                set_media_date(conn, file_hash, when, source)
-                dated += 1
-            else:
-                # Uhrzeit-Auffrischung aus dem Dateisystem: nur wenn der
-                # aktuelle Stempel noch auf dem gespeicherten Tag liegt.
-                value = f"{when:%Y-%m-%d %H:%M:%S}"
-                cur = conn.execute(
-                    """UPDATE items SET media_date = ?
-                        WHERE file_hash = ? AND media_date = substr(?, 1, 10)""",
-                    (value, file_hash, value),
-                )
-                dated += cur.rowcount
+            if row["media_date"] is None:
+                undatable += 1
+        elif row["media_date"] is None or source == "metadaten":
+            set_media_date(conn, file_hash, when, source)
+            dated += 1
+        else:
+            # Uhrzeit-Auffrischung aus dem Dateisystem: nur wenn der
+            # aktuelle Stempel noch auf dem gespeicherten Tag liegt.
+            value = f"{when:%Y-%m-%d %H:%M:%S}"
+            cur = conn.execute(
+                """UPDATE items SET media_date = ?
+                    WHERE file_hash = ? AND media_date = substr(?, 1, 10)""",
+                (value, file_hash, value),
+            )
+            dated += cur.rowcount
         if index % 500 == 0:
             conn.commit()
             if progress is not None:
@@ -289,7 +351,7 @@ def backfill_media_dates(
     conn.commit()
     if progress is not None:
         progress(total, total, dated)
-    return {"total": total, "dated": dated}
+    return {"total": total, "dated": dated, "undatable": undatable}
 
 
 def _free_name(directory: Path, name: str, *, matches_hash: str | None = None) -> Path | None:
@@ -386,13 +448,18 @@ class _Prepared:
     stat: Any = None
     healthy_bestand: Path | None = None
     known_in_bestand: bool = False
+    when: datetime | None = None         # Datums-Kaskade (ADR 0019), in Stage 1
+    date_source: str = "unplausibel"
 
 
 def _prepare(
     source: Path, conn: sqlite3.Connection, target_root: Path,
     rules: dict[str, Any] | None = None,
+    min_date: datetime = DEFAULT_MIN_DATE,
 ) -> _Prepared:
-    """Erkennen + hashen + Bestands-Gesundheitscheck — ohne DB-Schreibzugriff."""
+    """Erkennen + Regeln + hashen + Bestands-Gesundheitscheck — ohne
+    DB-Schreibzugriff. Die Datums-Kaskade läuft hier (vor dem Hashen), weil
+    ein unplausibles Datum seit #113 eine Import-Regel ist (ADR 0075)."""
     # 1) Container erkennen (unbekannt/kaputt aussortieren, ADR 0019).
     try:
         extraction = container.extract(source)
@@ -404,19 +471,25 @@ def _prepare(
     except OSError as exc:
         return _Prepared(source, outcome="fehler", detail=f"Lesefehler: {exc}")
 
-    # Import-Regeln (ADR 0046) — VOR dem Hashen: Ausgefiltertes kostet
-    # keinen Voll-Lesedurchgang.
+    # Import-Regeln (ADR 0046) + Datumsregel (ADR 0075) — VOR dem Hashen:
+    # Ausgefiltertes kostet keinen Voll-Lesedurchgang.
     reason = filter_reason(extraction, rules)
     if reason is not None:
         return _Prepared(source, outcome="ausgefiltert", detail=reason)
-
-    # 2) Hash + Stat der Quelle.
     try:
-        file_hash = hash_file(source)
         stat = source.stat()
     except OSError as exc:
+        return _Prepared(source, outcome="fehler", detail=f"Stat fehlgeschlagen: {exc}")
+    when, date_source = determine_date(extraction, stat, min_date=min_date)
+    if when is None:
+        return _Prepared(source, outcome="ausgefiltert", detail=date_reason(min_date))
+
+    # 2) Hash der Quelle.
+    try:
+        file_hash = hash_file(source)
+    except OSError as exc:
         return _Prepared(source, outcome="fehler",
-                         detail=f"Hash/Stat fehlgeschlagen: {exc}")
+                         detail=f"Hash fehlgeschlagen: {exc}")
 
     # Sperrliste (ADR 0023): bewusst Gelöschtes kommt nicht wieder herein.
     if conn.execute(
@@ -428,7 +501,8 @@ def _prepare(
     #    (ADR 0019; hasht ggf. die Bestandskopie — genau deshalb Stage 1).
     existing, known = _bestand_locations(conn, file_hash, target_root)
     return _Prepared(source, extraction=extraction, file_hash=file_hash,
-                     stat=stat, healthy_bestand=existing, known_in_bestand=known)
+                     stat=stat, healthy_bestand=existing, known_in_bestand=known,
+                     when=when, date_source=date_source)
 
 
 def _finish(
@@ -437,7 +511,6 @@ def _finish(
     *,
     source_root: Path,
     target_root: Path,
-    min_date: datetime,
     pending: dict[str, str],
     ts: str,
     keep_source: bool = False,
@@ -506,12 +579,11 @@ def _finish(
              detail=f"Bestand: {existing}", file_hash=file_hash)
         return "dublette", str(existing), None
 
-    # Zielpfad aus der Datums-Kaskade.
-    when, date_source = determine_date(extraction, stat, min_date=min_date)
-    if when is None:
-        target_dir = target_root / UNKNOWN_DATE_DIR
-    else:
-        target_dir = target_root / f"{when:%Y}" / f"{when:%m}" / f"{when:%d}"
+    # Zielpfad aus der Datums-Kaskade (Stage 1 hat sie schon gerechnet und
+    # Unplausibles ausgefiltert — hier gibt es immer ein Datum).
+    when, date_source = prep.when, prep.date_source
+    assert when is not None
+    target_dir = target_root / f"{when:%Y}" / f"{when:%m}" / f"{when:%d}"
 
     # Kopieren mit Verifikation (Tempname → Hash → endgültiger Name).
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -547,11 +619,14 @@ def _finish(
         path=destination, extraction=extraction, now=ts,
         mtime_ns=dst_mtime_ns,
     )
+    interpretations = interpret_items(extraction.items)
     store_interpretations(
-        conn, file_hash=file_hash,
-        interpretations=interpret_items(extraction.items), now=ts,
+        conn, file_hash=file_hash, interpretations=interpretations, now=ts,
     )
     set_media_date(conn, file_hash, when, date_source)  # ADR 0021
+    # Nicht abspielbare Codecs (ProRes & Co.) beim Import sichtbar machen —
+    # Problem am Ziel-Fundort, derselbe Weg wie beim Scan (Issue #71).
+    note_playability(conn, destination, interpretations)
     pending[file_hash] = str(destination)
 
     action = "repariert" if prep.known_in_bestand else "importiert"
@@ -590,10 +665,10 @@ def import_file(
       andere Ausgänge → Ausgangs-Ordner (Nachschau).
     """
     ts = now or now_iso()
-    prep = _prepare(source, conn, target_root, rules)
+    prep = _prepare(source, conn, target_root, rules, min_date)
     action, detail, deferred = _finish(
         conn, prep, source_root=source_root, target_root=target_root,
-        min_date=min_date, pending={}, ts=ts,
+        pending={}, ts=ts,
         keep_source=source_mode == "belassen",
     )
     conn.commit()
@@ -733,7 +808,7 @@ def import_folder(
         try:
             action, detail, deferred = _finish(
                 conn, prep, source_root=source_root, target_root=target_root,
-                min_date=min_date, pending=pending, ts=now_iso(),
+                pending=pending, ts=now_iso(),
                 keep_source=source_mode == "belassen",
             )
         except Exception as exc:  # Einzelfehler töten den Lauf nicht
@@ -752,7 +827,7 @@ def import_folder(
         # Keine Datei-DB (Tests mit :memory:): Vorarbeit seriell mit derselben
         # Verbindung — identische Semantik, nur ohne Parallelität.
         for index, path in enumerate(files, start=1):
-            handle(index, path, _prepare(path, conn, target_root, rules))
+            handle(index, path, _prepare(path, conn, target_root, rules, min_date))
         flush()
         return finish_run()
 
@@ -769,7 +844,7 @@ def import_folder(
             local.conn.execute("PRAGMA busy_timeout=30000")
             read_conns.append(local.conn)
         try:
-            return _prepare(path, local.conn, target_root, rules)
+            return _prepare(path, local.conn, target_root, rules, min_date)
         except Exception as exc:  # defensiv: Vorarbeit darf den Lauf nie töten
             return _Prepared(path, outcome="fehler", detail=f"Vorarbeit: {exc}")
 

@@ -8,12 +8,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
+import platform
 import re
+import sqlite3
+import time
+from datetime import datetime, timezone
 from typing import Any
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -25,6 +30,7 @@ from ..config import (
     import_rules as cfg_import_rules,
     model_sort as cfg_model_sort,
     thumbnail_low_priority as cfg_thumb_low_priority,
+    slow_request_ms as cfg_slow_request_ms,
     thumbnail_workers as cfg_thumb_workers,
     ui_show_dupes as cfg_show_dupes,
     library_root as cfg_library_root,
@@ -37,7 +43,7 @@ from ..config import (
     thumbnail_size,
     update_config_file,
 )
-from ..db import connect, folders as folders_db, manual
+from ..db import connect, folders as folders_db, manual, optimize
 from ..db import rankings as rankings_db
 from ..interpret import a1111_graph
 from .. import reveal
@@ -45,9 +51,13 @@ from ..thumbs import DEFAULT_SIZE, ThumbPool, fail_reason, render_preview, thumb
 from . import admin as admin_lib
 from . import bulk as bulk_lib
 from . import filters, library
-from .cache import EpochCache
+from .cache import COLD_KEY, EpochCache
+from .media import ABORTED_KEY, MediaFileResponse
 from . import rankings as rankings_lib
-from .engine import ScanEngine
+from ..logsetup import WEB_LOG, WORKER_LOG, tail as log_tail
+from .engine import AlreadyQueued, ScanEngine
+from .worker import default_pool_workers
+from .. import __version__ as feral_version
 
 _STATIC = Path(__file__).parent / "static"
 
@@ -66,6 +76,14 @@ class ImportRequest(BaseModel):
     path: str
     modus: str = "kopieren"                     # "kopieren" | "verschieben"
     leere_ordner_entfernen: bool = False        # ADR 0033, nur bei verschieben
+
+
+class OpenRequest(BaseModel):
+    """Fundort-Breadcrumb: einen Fundort (``file``) oder ein Verzeichnis-
+    Präfix davon (``folder``) öffnen (ADR-0041-Nachtrag)."""
+
+    path: str
+    what: str = "folder"
 
 
 class WatchRef(BaseModel):
@@ -134,6 +152,8 @@ class ConfigUpdate(BaseModel):
     akzentfarbe: str | None = None
     # Ranking-Modul (ADR 0045): None = Eintrag unangetastet lassen.
     rankings_enabled: bool | None = None
+    # Langsam-Schwelle in ms (#110): 0 = nie warnen; None = unangetastet.
+    slow_request_ms: int | None = None
 
 
 class RatingUpdate(BaseModel):
@@ -162,10 +182,17 @@ class RankingRequest(BaseModel):
 
 class DuelRequest(BaseModel):
     """Duell-Wertung (ADR 0045): outcome 'sieg' (winner schlägt loser) oder
-    'beide_verloren' (Ergänzung 2026-07-13; Reihenfolge der Hashes egal)."""
+    'beide_verloren' (Ergänzung 2026-07-13; Reihenfolge der Hashes egal) oder
+    'raus' (#87-Nachtrag: winner gewinnt, loser verliert und scheidet aus)."""
     winner: str
     loser: str
     outcome: str = "sieg"
+
+
+class ReinstateRequest(BaseModel):
+    """„Wieder rein" (#87): ein in dieser Arena ausgeschiedenes Item zurück
+    in den Pool — append-only Log-Zeile, kein Löschen."""
+    hash: str
 
 
 class FilterBuildRequest(BaseModel):
@@ -230,6 +257,109 @@ def _host_only(header: str) -> str:
     return value.rsplit(":", 1)[0] if ":" in value else value
 
 
+_log = logging.getLogger("feral.web")
+SLOW_REQUEST_MS = 250.0
+#: Schlüssel im ASGI-Scope: Anfrage läuft im Hintergrund, der Nutzer wartet
+#: nicht darauf (Vorholen; ADR-0072-Nachtrag) — langsam ist dann INFO.
+BACKGROUND_KEY = "feral.background"
+# Grund der Neuberechnung (cache.COLD_KEY) im Klartext fürs Log.
+# Log-Text immer englisch (#35, ADR-0055-Nachtrag: das Log ist
+# installationskritische Ausgabe, unabhängig von der Browser-Sprache).
+_COLD_REASONS = {
+    "start": "first computation since server start",
+    "write": "recomputed after a write",
+    "new": "recomputed after eviction from the cache",
+}
+
+
+class _SlowRequestLog:
+    """Reine ASGI-Middleware (#64/#65-Nachlese): langsame Anfragen ins Log.
+
+    Jede Antwort, die länger als ``SLOW_REQUEST_MS`` braucht, steht mit
+    Methode, Pfad, Dauer, Statuscode, gesendeten Bytes und der Zahl
+    gleichzeitig laufender Anfragen in ``fml-web.log``; ein vom Client
+    abgebrochener Transfer ebenso („abgebrochen"). Damit lässt sich „die
+    Oberfläche ruckelt" auf einen Endpunkt zurückführen, statt zu raten.
+
+    Trägt der Scope die Kalt-Markierung des Epochen-Caches (``COLD_KEY``,
+    Issue #95/ADR 0071), war die Dauer eine Erstberechnung nach Start oder
+    Schreibvorgang — echte DB-Arbeit, kein Fehler: dann INFO ``kalt:`` mit
+    dem Grund statt WARNING ``langsam:``. Andere Nutzer sollen beim Blick
+    ins Log nicht denken, beim Serverstart stimme etwas nicht.
+
+    Trägt der Scope die Hintergrund-Markierung (``BACKGROUND_KEY``,
+    ADR-0072-Nachtrag), hat der Client die Antwort vorgeholt und niemand
+    darauf gewartet — ebenfalls INFO (``hintergrund:``), nicht WARNING.
+    """
+
+    def __init__(self, app: Any, threshold_ms: float = SLOW_REQUEST_MS) -> None:
+        self.app = app
+        self.threshold_ms = threshold_ms
+        self.inflight = 0
+
+    def threshold(self, scope: dict) -> float:
+        """Schwelle je Anfrage: ``app.state.slow_request_ms`` (Issue #110 —
+        aus ``[performance]``, per Konfiguration ohne Neustart änderbar),
+        sonst der Konstruktor-Wert. 0 = nie WARNING (INFO ab Standardwert)."""
+        state = getattr(scope.get("app"), "state", None)
+        value = getattr(state, "slow_request_ms", None) if state is not None else None
+        return self.threshold_ms if value is None else float(value)
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        started = time.perf_counter()
+        status = {"code": 0, "bytes": 0}
+        self.inflight += 1
+        inflight = self.inflight
+
+        async def send_and_count(message: dict) -> None:
+            if message["type"] == "http.response.start":
+                status["code"] = message.get("status", 0)
+            elif message["type"] == "http.response.body":
+                status["bytes"] += len(message.get("body", b""))
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_and_count)
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError) as exc:
+            ms = (time.perf_counter() - started) * 1000
+            _log.info("aborted: %s %s after %.0f ms, %d bytes (%s), concurrent %d",
+                      scope.get("method"), scope.get("path"), ms, status["bytes"],
+                      exc.__class__.__name__, inflight)
+            raise
+        finally:
+            self.inflight -= 1
+        ms = (time.perf_counter() - started) * 1000
+        if scope.get(ABORTED_KEY):
+            # Client hat die Verbindung getrennt, der Stream wurde abgebrochen
+            # (media.py) — kein „langsam", sondern ehrlich „abgebrochen".
+            _log.info("aborted: %s %s after %.0f ms, %d bytes (client gone), concurrent %d",
+                      scope.get("method"), scope.get("path"), ms, status["bytes"], inflight)
+            return
+        # Schwelle 0 (#110, „nie warnen"): langsame Anfragen bleiben ab dem
+        # Standardwert als INFO nur in der Logdatei (Konsole zeigt WARNING+).
+        threshold = self.threshold(scope)
+        quiet = threshold <= 0
+        if ms < (SLOW_REQUEST_MS if quiet else threshold):
+            return
+        if scope.get(BACKGROUND_KEY):
+            _log.info("background: %s %s %.0f ms, status %s, %d bytes, concurrent %d (prefetched, nobody waited)",
+                      scope.get("method"), scope.get("path"), ms, status["code"],
+                      status["bytes"], inflight)
+            return
+        cold = scope.get(COLD_KEY)
+        if cold:
+            _log.info("cold: %s %s %.0f ms, status %s, %d bytes, concurrent %d (%s)",
+                      scope.get("method"), scope.get("path"), ms, status["code"],
+                      status["bytes"], inflight, _COLD_REASONS.get(cold, cold))
+            return
+        _log.log(logging.INFO if quiet else logging.WARNING,
+                 "slow: %s %s %.0f ms, status %s, %d bytes, concurrent %d",
+                 scope.get("method"), scope.get("path"), ms, status["code"],
+                 status["bytes"], inflight)
+
+
 class _HostGuard:
     """Reine ASGI-Middleware: Host-Allowlist + nosniff-Header."""
 
@@ -269,13 +399,50 @@ def create_app(
     import_target: str | Path | None = None,
     import_min_date: str = "2015-01-01",
     allowed_hosts: list[str] | None = None,
+    log_dir: str | Path | None = None,
+    slow_request_ms: float = SLOW_REQUEST_MS,
 ) -> FastAPI:
     db_path = str(db_path)
-    engine = ScanEngine(db_path)
+    # Serverlog (#64, ADR 0067): Ordner neben der Datenbank; der Web-Prozess
+    # schreibt fml-web.log (Aufbau in __main__), der Worker fml-worker.log.
+    log_dir = Path(log_dir) if log_dir else Path(db_path).resolve().parent / "logs"
+    # Worker-Prozess für Langläufer (ADR 0067); Pool-Größe wie beim
+    # Thumbnail-Pool ([cache] thumbnail_workers, sonst Kerne − 2).
+    engine = ScanEngine(db_path, log_dir=log_dir, pool_workers=thumb_workers,
+                        thumb_workers=thumb_workers, thumb_low_priority=thumb_low_priority)
     thumb_cache = Path(thumb_cache) if thumb_cache else Path(db_path).resolve().parent / "cache" / "thumbnails"
     # Ein Prozess-Pool für ALLE Thumbnail-Generierung (ADR 0020) — On-Demand
     # aus /api/thumb und der Warmer teilen ihn sich; entsteht lazy.
     thumb_pool = ThumbPool(workers=thumb_workers, low_priority=thumb_low_priority)
+    # Gemerkter Stand der teuren Admin-Kennzahlen (#118, ADR 0077): verwaiste
+    # Fundorte und Cache-Größe werden nie beim Seitenladen gezählt, sondern
+    # auf Klick oder nach passenden Aufgaben im Hintergrund.
+    def _persist_stand(key: str, value: dict) -> None:
+        # Kurzer Schreibgriff (ADR 0067); scheitert er (Worker hält gerade
+        # eine lange Transaktion), bleibt der Stand im Speicher — SlowCounts
+        # loggt das selbst.
+        def write(conn, _progress) -> dict:
+            admin_lib.write_app_state(conn, key, value)
+            return {}
+        engine.run_write(msg("taskStandSave"), write)
+
+    slow_counts = admin_lib.SlowCounts(db_path, thumb_cache, persist=_persist_stand)
+    _SLOW_AFTER = {
+        # Fundorte ändern sich durch Aufnahme (auch verschieben aus einer
+        # katalogisierten Quelle), Re-Scan und Rausverschieben; Aufräumen setzt
+        # den Stand direkt in seinem Endpunkt.
+        "orphans": {"scan_files", "rescan", "import_folder", "import_files", "moveout"},
+        # Cache-Dateien entstehen beim Vorwärmen und fallen beim Ablehnen
+        # (Import-Regeln, Rausverschieben) weg; Cache leeren setzt direkt.
+        "cache": {"thumb_warm", "import_rules", "moveout"},
+    }
+
+    def _recount_after(name: str, ok: bool) -> None:
+        keys = [k for k, names in _SLOW_AFTER.items() if name in names]
+        if keys:
+            slow_counts.refresh_later(*keys)
+
+    engine.on_finished.append(_recount_after)
 
     def configured_import() -> tuple[str | None, str]:
         # Bestands-Wurzel + min_date je Anfrage frisch (wie die Scan-Orte) —
@@ -291,6 +458,11 @@ def create_app(
         if config_path is not None:
             return cfg_import_rules(load_config(config_path))
         return None
+
+    def configured_min_date() -> datetime:
+        # Untergrenze der Datumsregel (ADR 0019/0075) als UTC-datetime — für
+        # den Backfill dieselbe Quelle wie für den Import (#113).
+        return datetime.fromisoformat(configured_import()[1]).replace(tzinfo=timezone.utc)
 
     # Übersichtsmodus vs. Library-Verwaltung (ADR 0041, I4): Ab Werk sind ALLE
     # dateischreibenden Wege gesperrt (kopieren/verschieben-Import, Watch-
@@ -312,6 +484,9 @@ def create_app(
     # Aufruf frisch aus der Config (Modul-Zustand: die zuletzt erzeugte App
     # gewinnt — pro Prozess läuft genau eine, ADR 0001).
     filters.library_root_provider = lambda: configured_import()[0]
+    # Watch-Quellen fürs Fundort-Ranking (ADR-0062-Nachtrag): gleiche Bauform.
+    library.watch_roots_provider = lambda: [
+        src["path"] for src in _configured_watch_sources()]
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -337,25 +512,42 @@ def create_app(
         thumb_pool.shutdown()
         hits_cache.close()
         models_cache.close()
+        stats_cache.close()
+        counts_cache.close()
 
     app = FastAPI(title="Feral Media Library", lifespan=lifespan)
     # Host-Allowlist + nosniff (ADR 0058). Standard: nur Loopback-Namen;
     # wer per --host bewusst weiter bindet (z. B. Tailscale), bekommt vom
     # Startskript allowed_hosts=["*"] durchgereicht.
     app.add_middleware(_HostGuard, allowed_hosts=allowed_hosts)
+    app.add_middleware(_SlowRequestLog)
 
     @app.exception_handler(TimeoutError)
     async def engine_busy(_request, _exc):
-        # Kurze Schreibgriffe warten auf den EINEN Writer (ADR 0007). Läuft
-        # dort gerade ein Langläufer (Import, VACUUM, …), gibt es eine
-        # ehrliche 503 statt eines anonymen Serverfehlers.
+        # Kurze Schreibgriffe schreibt der Web-Prozess selbst (ADR 0007,
+        # Nachtrag); hält der Worker gerade eine exklusive Sperre (VACUUM,
+        # Integritätscheck), gibt es eine ehrliche 503 statt eines anonymen
+        # Serverfehlers.
         label = engine.status().get("label") or msg("taskGeneric")
         return JSONResponse(
             status_code=503,
             content={"detail": msg("engineBusy", label=label)},
         )
+
+    @app.exception_handler(AlreadyQueued)
+    async def task_already_queued(_request, exc: AlreadyQueued):
+        # Mehrfachklick (ADR 0067): gleiche Aufgabe läuft oder wartet schon.
+        return JSONResponse(
+            status_code=409,
+            content={"detail": msg("taskAlreadyRunning" if exc.running else "taskAlreadyQueued",
+                                   label=exc.label)},
+        )
     app.state.engine = engine
     app.state.thumb_pool = thumb_pool
+    app.state.slow_counts = slow_counts
+    # Langsam-Schwelle (#110): die Middleware liest sie je Anfrage von hier,
+    # Konfiguration → Speichern setzt sie ohne Neustart neu.
+    app.state.slow_request_ms = float(slow_request_ms)
 
     # Beim Start automatisch nachziehen: Erstelldaten (ADR 0021 — die manuelle
     # Re-Scan-Pflicht war eine Stolperfalle) und der FTS5-Suchindex (ADR 0024 —
@@ -365,18 +557,20 @@ def create_app(
         # der Backfill reichert ihn um die Uhrzeit an. Unauffrischbare Reste
         # (mtime inzwischen verändert) bleiben ehrlich datumsgenau und werden
         # wie dauerhaft datenlose NULL-Items bei jedem Start mitgeprüft.
-        undated = boot_conn.execute(
-            """SELECT EXISTS(SELECT 1 FROM items
-                              WHERE media_date IS NULL OR length(media_date) = 10)"""
-        ).fetchone()[0]
+        # Nur, wenn ein undatiertes Item vom Lauf auch datiert werden könnte
+        # (#62: Datei weg; #113: Datum außerhalb des konfigurierten Fensters
+        # lösten sonst bei jedem Start einen vergeblichen Lauf aus).
+        from ..importer import backfill_pending
+        undated = backfill_pending(boot_conn, min_date=configured_min_date())
         index_drift = boot_conn.execute(
             """SELECT (SELECT COUNT(*) FROM items)
                     != (SELECT COUNT(*) FROM search_index)
                 OR (SELECT COUNT(*) FROM search_index)
                     != (SELECT COUNT(*) FROM search_index_map)"""
         ).fetchone()[0]
+        optimize(boot_conn)  # Planer-Statistik einmal beim Start (#85)
     if undated:
-        engine.enqueue_media_date_backfill()
+        engine.enqueue_media_date_backfill(configured_min_date())
     if index_drift:
         engine.enqueue_search_reindex()
 
@@ -388,11 +582,38 @@ def create_app(
         finally:
             conn.close()
 
+    # Gemerkte Stände aus app_state übernehmen (ADR-0077-Nachtrag): nach
+    # einem Neustart steht „Stand gestern 18:23" statt „?".
+    with read_conn() as conn:
+        slow_counts.load(conn)
+
     # Schreib-Epochen-Caches (ADR 0048): Trefferlisten fürs Galerie-Scrollen
     # und die Modell-Basisliste der Sidebar. Zwei getrennte Instanzen, damit
     # Scroll-Zustände die Basisliste nicht aus dem kleinen LRU verdrängen.
     hits_cache = EpochCache(db_path)
     models_cache = EpochCache(db_path)
+    # Issue #69 (ADR 0071): Kennzahlen (EIN Ergebnis für Boot, engine-idle,
+    # Topbar und Dashboard) und die Zähler von Smart Foldern/Arenen —
+    # bisher je Aufruf ein voller Bestandslauf pro Ordner. Eigene Instanzen
+    # mit passender Größe: Zähler sind viele kleine Einträge.
+    # stats_cache trägt auch die UNGEFILTERTEN Facetten/Bewertungen (der
+    # Boot-Schwung; filterunabhängig wie die Kennzahlen).
+    stats_cache = EpochCache(db_path, maxsize=8)   # library_stats + overview_stats je Library-Root
+    counts_cache = EpochCache(db_path, maxsize=256)
+    # Issue #99 (ADR 0073): die Sidebar-Zähler EINES Suchzustands (Modelle,
+    # Facetten, Bewertungen aus einem Lauf) je Ausdruck — der Wiederholklick
+    # auf eine gespeicherte Suche kommt aus dem Speicher.
+    sidebar_cache = EpochCache(db_path, maxsize=32)
+
+    def facets_base(conn, scope):
+        """Ungefilterte Facetten aus dem Epochen-Cache (ADR 0071) — Basis für
+        Zeilenmenge/Reihenfolge auch der gefilterten Zähler (#99)."""
+        return stats_cache.get(("facets", filters.library_like_prefix()),
+                               lambda: library.facets_payload(conn), scope=scope)
+
+    def ratings_base(conn, scope):
+        return stats_cache.get(("ratings",), lambda: library.ratings_facet(conn),
+                               scope=scope)
 
     # Shell-Module/CSS: immer revalidieren (ETag/304). Ohne das klebt der
     # Browser nach Updates an alten Modulen — bei einer lokalen App fatal,
@@ -412,6 +633,18 @@ def create_app(
         # eingebettete Browser (CMUX) würde sonst eine alte Version festhalten.
         return FileResponse(
             _STATIC / "index.html",
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+        )
+
+    # Admin ist ein eigenes Dokument (ADR 0074): /admin und /admin/<seite>
+    # liefern dieselbe Shell, den Seiten-Slug liest der Browser (pushState).
+    # Kein Server-Routing je Seite — unbekannte Slugs fallen im Frontend auf
+    # die Übersicht zurück.
+    @app.get("/admin")
+    @app.get("/admin/{page}")
+    def admin_page(page: str | None = None) -> FileResponse:
+        return FileResponse(
+            _STATIC / "admin.html",
             headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
         )
 
@@ -436,9 +669,17 @@ def create_app(
     # -- Bestand -----------------------------------------------------------
 
     @app.get("/api/stats")
-    def stats() -> dict:
+    def stats(request: Request) -> dict:
+        # Kennzahlen aus dem Epochen-Cache (#69): Boot, engine-idle, Topbar
+        # und Dashboard teilen sich EIN Ergebnis bis zum nächsten Schreib-
+        # vorgang. Die Library-Root steckt im Schlüssel — Config-Änderung
+        # (Verwaltungsmodus, ADR 0041) wirkt ohne Neustart. Flache Kopie:
+        # gecachte Werte sind unveränderlich, unten kommen Felder dazu.
         with read_conn() as conn:
-            payload = library.library_stats(conn)
+            payload = dict(stats_cache.get(
+                ("library_stats", filters.library_like_prefix()),
+                lambda: library.library_stats(conn), scope=request.scope,
+            ))
         # I4 (ADR 0041): das Topbar-Badge zeigt den Übersichtsmodus — Stats
         # lädt die Shell ohnehin beim Boot, kein eigener Endpunkt nötig.
         payload["verwaltung"] = verwaltung_enabled()
@@ -455,7 +696,7 @@ def create_app(
         return payload
 
     @app.get("/api/models")
-    def models(filter: str | None = Query(None)) -> dict:
+    def models(request: Request, filter: str | None = Query(None)) -> dict:
         # Mitfilternde Zähler (Block S4): ?filter= = aktiver Suchzustand;
         # der Gruppen-Ausschluss (eigene Chips raus) passiert serverseitig.
         with read_conn() as conn:
@@ -463,18 +704,22 @@ def create_app(
                      if config_path is not None else "zuletzt")
             try:
                 return library.models_facet(conn, order=order, filter_expr=filter,
-                                            cache=models_cache)
+                                            cache=models_cache, scope=request.scope)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=_err(exc))
 
     @app.get("/api/facets")
-    def facets(filter: str | None = Query(None)) -> dict:
+    def facets(request: Request, filter: str | None = Query(None)) -> dict:
         # Sidebar-Gruppen Dateityp/Format/Auflösung/Jahr + LoRA/Eingangsbild —
-        # ein Endpunkt, ein Request beim Sidebar-Refresh; je Gruppe zählt der
-        # Kontext der ANDEREN Chips (Block S4, ADR 0037).
+        # je Gruppe zählt der Kontext der ANDEREN Chips (Block S4, ADR 0037).
+        # Ungefiltert kommt das Ergebnis aus dem Epochen-Cache (ADR 0071);
+        # gefiltert rechnet es je Ausdruck über der gecachten Basis. Die
+        # Sidebar selbst holt alle Gruppen über /api/sidebar (#99).
         with read_conn() as conn:
             try:
-                payload = library.facets_payload(conn, filter_expr=filter)
+                base = facets_base(conn, request.scope)
+                payload = (library.facets_payload(conn, filter_expr=filter, base=base)
+                           if filter else dict(base))
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=_err(exc))
             # UI-Schalter: Dubletten-Zeile ausblendbar (Konfiguration).
@@ -484,6 +729,7 @@ def create_app(
 
     @app.get("/api/items")
     def items(
+        request: Request,
         limit: int = Query(200, ge=1, le=500),
         offset: int = Query(0, ge=0),
         sort: str = Query("added"),
@@ -498,7 +744,7 @@ def create_app(
                 return library.list_items(
                     conn, limit=limit, offset=offset, sort=sort,
                     model=model, rating=rating, filter_expr=filter, dupes=dupes,
-                    with_total=total, cache=hits_cache,
+                    with_total=total, cache=hits_cache, scope=request.scope,
                 )
             except ValueError as exc:   # ungültiger Filterausdruck (ADR 0018)
                 raise HTTPException(status_code=400, detail=_err(exc))
@@ -527,12 +773,62 @@ def create_app(
         return {"index": index}
 
     @app.get("/api/ratings")
-    def ratings(filter: str | None = Query(None)) -> dict:
+    def ratings(request: Request, filter: str | None = Query(None)) -> dict:
+        # Ungefiltert aus dem Epochen-Cache wie /api/facets (ADR 0071).
         with read_conn() as conn:
             try:
-                return {"ratings": library.ratings_facet(conn, filter_expr=filter)}
+                base = ratings_base(conn, request.scope)
+                ratings = (library.ratings_facet(conn, filter_expr=filter, base=base)
+                           if filter else base)
+                return {"ratings": ratings}
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=_err(exc))
+
+    @app.get("/api/sidebar")
+    def sidebar(request: Request, filter: str | None = Query(None)) -> dict:
+        # Alle Zählergruppen der Sidebar in EINEM Request (#99, ADR 0073):
+        # Modelle, Facetten und Bewertungen teilen sich die Treffermengen
+        # (ein Filterlauf je effektivem Ausdruck statt je Endpunkt), und
+        # das Ergebnis liegt je Suchzustand im Epochen-Cache — der zweite
+        # Klick auf dieselbe gespeicherte Suche ist ein Speichergriff. Die
+        # Erstberechnung trägt die Kalt-Markierung (ADR 0071). Ungefiltert
+        # setzt sich die Antwort aus den bestehenden Caches zusammen.
+        with read_conn() as conn:
+            order = (cfg_model_sort(load_config(config_path))
+                     if config_path is not None else "zuletzt")
+            try:
+                predicates = filters.parse(filter) if filter else []
+                where_sql, params = filters.build_where(predicates)
+                prefix = filters.library_like_prefix()
+                base_facets = facets_base(conn, request.scope)
+                base_ratings = ratings_base(conn, request.scope)
+                base_models, base_unknown = library.model_base(
+                    conn, order=order, cache=models_cache, scope=request.scope)
+                if where_sql:
+                    payload = sidebar_cache.get(
+                        ("sidebar", order, prefix, where_sql, tuple(params)),
+                        lambda: library.sidebar_payload(
+                            conn, filter_expr=filter, base_models=base_models,
+                            base_unknown=base_unknown, base_facets=base_facets,
+                            base_ratings=base_ratings),
+                        scope=request.scope,
+                    )
+                else:
+                    payload = {
+                        "models": {"models": base_models, "unknown": base_unknown,
+                                   "unknown_total": base_unknown},
+                        "facets": base_facets,
+                        "ratings": base_ratings,
+                    }
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=_err(exc))
+            show_dupes = (cfg_show_dupes(load_config(config_path))
+                          if config_path is not None else True)
+            return {
+                "models": payload["models"],
+                "facets": {**payload["facets"], "show_dupes": show_dupes},
+                "ratings": {"ratings": payload["ratings"]},
+            }
 
     @app.get("/api/item/{file_hash}")
     def item(file_hash: str) -> dict:
@@ -552,22 +848,67 @@ def create_app(
 
         Härtung (ADR 0062): ``verify=True`` hasht den Fundort vor dem Öffnen
         — ein größengleicher Fremdinhalt am katalogisierten Pfad wird
-        übersprungen statt als falsches Bild präsentiert. ``abspath``
+        übersprungen statt als falsches Bild präsentiert; große Dateien
+        (> ``library.VERIFY_MAX_BYTES``) nur per Größen-Wächter, sonst
+        hinge der Request minutenlang (Issue #37). Reihenfolge der
+        Fundorte: Library vor Watch-Quelle vor extern (ADR-0062-Nachtrag),
+        dieselbe wie im Detail-Panel. ``abspath``
         normalisiert den Pfad (``..``, relative Reste), denn explorer
         ``/select,`` scheitert an unnormalisierten Pfaden kommentarlos und
         öffnet stattdessen den Dokumente-Ordner."""
         _require_hash(file_hash)
         with read_conn() as conn:
-            resolved = library.resolve_media(conn, file_hash, verify=True)
+            resolved = library.resolve_media_verified(conn, file_hash, verify=True)
         if resolved is None:
             raise HTTPException(status_code=404, detail=msg("errNoLocation"))
         path = Path(os.path.abspath(resolved[0]))
         try:
-            reveal.show_in_file_manager(path)
+            selected, via = reveal.show_in_file_manager(path)
         except OSError as exc:
             raise HTTPException(status_code=500,
                                 detail=msg("errRevealFailed", error=str(exc)))
-        return {"revealed": str(path)}
+        # verified: per Hash geprüft (False = nur Größen-Wächter, Datei über
+        # VERIFY_MAX_BYTES); selected: Datei markiert (False = nur Ordner);
+        # via: welcher Weg (shell-api/explorer/open/xdg-open).
+        return {"revealed": str(path), "verified": resolved[2],
+                "selected": selected, "via": via}
+
+    @app.post("/api/item/{file_hash}/open")
+    def open_location_endpoint(file_hash: str, req: OpenRequest) -> dict:
+        """Fundort-Breadcrumb (ADR-0041-Nachtrag, Issue #37): einen
+        bestimmten Fundort öffnen — ``what="folder"``: der Ordner im
+        Dateimanager, OHNE Markierung (bewusst anders als der 📂-Knopf);
+        ``what="file"``: die Datei im vom System zugeordneten Programm.
+
+        Nur Pfade, die als Fundort dieses Items in der DB stehen (Datei)
+        bzw. ein Verzeichnis-Präfix davon sind (Ordner) — kein freier Pfad
+        von außen. Datei: Größen-Wächter (ADR 0049), keine Hash-Prüfung —
+        der Anwender wählt den Fundort bewusst selbst. Reine Anzeige, keine
+        Übersichtsmodus-Sperre (I4)."""
+        _require_hash(file_hash)
+        if req.what not in ("file", "folder"):
+            raise HTTPException(status_code=400, detail=msg("errForeignPath"))
+        with read_conn() as conn:
+            item = conn.execute(
+                "SELECT file_size FROM items WHERE file_hash = ?", (file_hash,)).fetchone()
+            if item is None:
+                raise HTTPException(status_code=404, detail=msg("errUnknownItem"))
+            locations = library.ordered_locations(conn, file_hash, item["file_size"])
+        target = library.match_location(locations, req.path, what=req.what)
+        if target is None:
+            raise HTTPException(status_code=400, detail=msg("errForeignPath"))
+        if req.what == "file" and not target["usable"]:
+            raise HTTPException(status_code=404, detail=msg("errNoLocation"))
+        path = Path(os.path.abspath(req.path))
+        if req.what == "folder" and not path.is_dir():
+            raise HTTPException(status_code=404,
+                                detail=msg("errFolderMissing", path=str(path)))
+        try:
+            reveal.open_in_default_app(path)
+        except OSError as exc:
+            raise HTTPException(status_code=500,
+                                detail=msg("errRevealFailed", error=str(exc)))
+        return {"opened": str(path), "what": req.what}
 
     # -- Manuelle Schicht: Rating, Notizen, Tags (Stufe 3.2, ADR 0017) --------
     # Kurze Schreibgriffe laufen synchron durch den EINEN Writer (ADR 0007);
@@ -588,24 +929,40 @@ def create_app(
 
     # -- Smart Folders (Stufe 3.3, ADR 0018) ----------------------------------
 
-    @app.get("/api/folders")
-    def folders_endpoint() -> dict:
-        # Zähler live mitliefern; ein (nach Grammatik-Änderung) ungültiger
-        # Ausdruck macht die Liste nicht kaputt, sondern trägt den Fehler.
-        with read_conn() as conn:
-            result = []
-            for f in folders_db.list_folders(conn):
-                entry = dict(f)
-                try:
-                    entry["count"] = library.list_items(
-                        conn, limit=1, filter_expr=f["expression"]
-                    )["total"]
-                    entry["error"] = None
-                except ValueError as exc:
-                    entry["count"] = None
-                    entry["error"] = _err(exc)
+    def _with_counts(conn, rows: list[dict], key: str, counts: bool, scope: dict,
+                     *, empty_is_all: bool = False) -> list[dict]:
+        # Zähler zu Smart Foldern/Arenen (#69, ADR 0071): aus dem Epochen-
+        # Cache — je Ausdruck EIN COUNT bis zum nächsten Schreibvorgang.
+        # ``counts=False`` = „Liste vor Zahlen": nur die Liste, der Zähler
+        # fehlt (Frontend zeigt ihn nach dem zweiten Aufruf). Ein (nach
+        # Grammatik-Änderung) ungültiger Ausdruck macht die Liste nicht
+        # kaputt, sondern trägt den Fehler.
+        result = []
+        for row in rows:
+            entry = dict(row)
+            if not counts:
                 result.append(entry)
-            return {"folders": result}
+                continue
+            expression = entry["expression"]
+            if empty_is_all and not (expression and expression.strip()):
+                # Leerer Ausdruck = ganze Bibliothek (ADR 0045) — der
+                # Parser lehnt Leeres ab, also gar nicht erst filtern.
+                expression = None
+            try:
+                entry[key] = library.count_items(
+                    conn, expression, cache=counts_cache, scope=scope)
+                entry["error"] = None
+            except ValueError as exc:
+                entry[key] = None
+                entry["error"] = _err(exc)
+            result.append(entry)
+        return result
+
+    @app.get("/api/folders")
+    def folders_endpoint(request: Request, counts: bool = Query(True)) -> dict:
+        with read_conn() as conn:
+            rows = folders_db.list_folders(conn)
+            return {"folders": _with_counts(conn, rows, "count", counts, request.scope)}
 
     @app.post("/api/folders")
     def create_folder(req: FolderRequest) -> dict:
@@ -673,26 +1030,13 @@ def create_app(
         return ranking
 
     @app.get("/api/rankings")
-    def rankings_endpoint() -> dict:
-        # Populations-Zähler live mitliefern; ein ungültig gewordener Ausdruck
-        # macht die Liste nicht kaputt, sondern trägt den Fehler (Muster
-        # /api/folders).
+    def rankings_endpoint(request: Request, counts: bool = Query(True)) -> dict:
+        # Populations-Zähler wie bei /api/folders: Epochen-Cache, optional
+        # „Liste vor Zahlen" (#69).
         with read_conn() as conn:
-            result = []
-            for r in rankings_db.list_rankings(conn):
-                entry = dict(r)
-                try:
-                    # Leerer Ausdruck = ganze Bibliothek (ADR 0045) — der
-                    # Parser lehnt Leeres ab, also gar nicht erst filtern.
-                    entry["population"] = library.list_items(
-                        conn, limit=1, filter_expr=r["expression"] or None
-                    )["total"]
-                    entry["error"] = None
-                except ValueError as exc:
-                    entry["population"] = None
-                    entry["error"] = _err(exc)
-                result.append(entry)
-            return {"rankings": result}
+            rows = rankings_db.list_rankings(conn)
+            return {"rankings": _with_counts(conn, rows, "population", counts,
+                                             request.scope, empty_is_all=True)}
 
     @app.post("/api/rankings")
     def create_ranking(req: RankingRequest) -> dict:
@@ -731,22 +1075,33 @@ def create_app(
         )
 
     @app.get("/api/rankings/{ranking_id}/pair")
-    def ranking_pair(ranking_id: int) -> dict:
+    def ranking_pair(request: Request, ranking_id: int,
+                     prefetch: bool = Query(False)) -> dict:
+        # Populationszahl aus dem Zähler-Cache (#98, ADR 0072): derselbe
+        # Schlüssel wie der Arena-Zähler der Sidebar. ``prefetch=1`` sagt
+        # das Frontend beim Vorholen: eine gefilterte Arena kostet je Paar
+        # einen Filterlauf, den niemand abwartet — im Log INFO statt WARNING.
+        if prefetch:
+            request.scope[BACKGROUND_KEY] = True
         with read_conn() as conn:
             ranking = _require_ranking(conn, ranking_id)
             try:
-                pair = rankings_lib.next_pair(conn, ranking)
+                pair = rankings_lib.next_pair(conn, ranking, cache=counts_cache,
+                                              scope=request.scope)
             except ValueError as exc:   # Ausdruck ungültig geworden
                 raise HTTPException(status_code=400, detail=_err(exc))
         if pair is None:
             raise HTTPException(status_code=409, detail=msg("errArenaTooSmall"))
+        # Pool erschöpft (#87) ist KEIN Fehler: 200 mit pair=None und den
+        # Zahlen — api() reicht Statuscodes nicht durch, der Client soll den
+        # Fall aber vom „Arena zu klein" unterscheiden und Zahlen zeigen.
         return pair
 
     @app.post("/api/rankings/{ranking_id}/duel")
     def ranking_duel(ranking_id: int, req: DuelRequest) -> dict:
         _require_hash(req.winner)
         _require_hash(req.loser)
-        if req.outcome not in (rankings_db.WIN, rankings_db.BOTH_LOST):
+        if req.outcome not in (rankings_db.WIN, rankings_db.BOTH_LOST, rankings_db.OUT):
             raise HTTPException(status_code=400,
                                 detail=msg("duelUnknownOutcome", outcome=repr(req.outcome)))
         result = engine.run_write(
@@ -762,8 +1117,25 @@ def create_app(
                                 detail=result.get("summary") or msg("errDuelFailed"))
         return result
 
+    @app.post("/api/rankings/{ranking_id}/reinstate")
+    def ranking_reinstate(ranking_id: int, req: ReinstateRequest) -> dict:
+        # Rückweg aus dem Ausscheiden (#87): append-only, Score bleibt.
+        _require_hash(req.hash)
+        result = engine.run_write(
+            msg("taskArenaReinstate"),
+            lambda conn, _p: (
+                rankings_db.reinstate(conn, ranking_id, req.hash),
+                {"reinstated": req.hash},
+            )[1],
+        )
+        if "reinstated" not in result:
+            raise HTTPException(status_code=400,
+                                detail=result.get("summary") or msg("errReinstateFailed"))
+        return result
+
     @app.get("/api/rankings/{ranking_id}/leaderboard")
     def ranking_leaderboard(
+        request: Request,
         ranking_id: int,
         limit: int = Query(100, ge=1, le=500),
         offset: int = Query(0, ge=0),
@@ -771,7 +1143,8 @@ def create_app(
         with read_conn() as conn:
             ranking = _require_ranking(conn, ranking_id)
             try:
-                return rankings_lib.leaderboard(conn, ranking, limit=limit, offset=offset)
+                return rankings_lib.leaderboard(conn, ranking, limit=limit, offset=offset,
+                                                cache=counts_cache, scope=request.scope)
             except ValueError as exc:   # Ausdruck ungültig geworden
                 raise HTTPException(status_code=400, detail=_err(exc))
 
@@ -914,9 +1287,15 @@ def create_app(
         return result
 
     @app.get("/api/admin/blocked")
-    def admin_blocked() -> dict:
+    def admin_blocked(
+        q: str | None = Query(None, max_length=200),
+        offset: int = Query(0, ge=0),
+        limit: int = Query(100, ge=1, le=500),
+    ) -> dict:
+        # Seitenweise + Suche mit ehrlichem Zähler (#66, A3 #107): bei rein
+        # indexierten Laufwerken sind es tausende Einträge.
         with read_conn() as conn:
-            return {"blocked": admin_lib.blocked_list(conn)}
+            return admin_lib.blocked_page(conn, q=q, offset=offset, limit=limit)
 
     @app.post("/api/admin/blocked/remove")
     def admin_unblock(file_hash: str | None = Query(None)) -> dict:
@@ -1017,7 +1396,7 @@ def create_app(
         return JSONResponse(content=graph)
 
     @app.get("/api/media/{file_hash}")
-    def media(file_hash: str) -> FileResponse:
+    def media(file_hash: str) -> Response:
         _require_hash(file_hash)
         with read_conn() as conn:
             resolved = library.resolve_media(conn, file_hash)
@@ -1026,8 +1405,10 @@ def create_app(
         path, mime = resolved
         # Hash-adressiert ⇒ Inhalt ändert sich nie: aggressiv cachen macht das
         # Blättern in der Detailansicht (Pfeiltasten) nach dem ersten Mal instant.
-        return FileResponse(path, media_type=mime,
-                            headers={"Cache-Control": "public, max-age=31536000, immutable"})
+        # MediaFileResponse statt FileResponse (ADR 0069 Nachtrag): bricht ab,
+        # wenn der Browser die Verbindung trennt, eigener Thread-Pool.
+        return MediaFileResponse(path, media_type=mime,
+                                 cache_control="public, max-age=31536000, immutable")
 
     @app.get("/api/preview/{file_hash}")
     def preview(file_hash: str) -> Response:
@@ -1112,7 +1493,7 @@ def create_app(
         # Import) — sonst erwürgt der erste Grid-Besuch die Oberfläche mit
         # zehntausenden On-Demand-Generierungen.
         if thumb_cache is not None:
-            engine.enqueue_thumb_warm(thumb_cache, thumb_size, pool=thumb_pool)
+            engine.enqueue_thumb_warm(thumb_cache, thumb_size, auto=True)
         return {"queued_files": count, "target": str(target)}
 
     @app.post("/api/scan")
@@ -1167,7 +1548,7 @@ def create_app(
                                                n=len(files)),
                                      rules=configured_rules())
                 if thumb_cache is not None:
-                    engine.enqueue_thumb_warm(thumb_cache, thumb_size, pool=thumb_pool)
+                    engine.enqueue_thumb_warm(thumb_cache, thumb_size, auto=True)
 
             engine.start_watch_source(source, on_scan_ready)
             return
@@ -1192,7 +1573,7 @@ def create_app(
                 remove_empty=remove_empty, rules=configured_rules(),
             )
             if thumb_cache is not None:
-                engine.enqueue_thumb_warm(thumb_cache, thumb_size, pool=thumb_pool)
+                engine.enqueue_thumb_warm(thumb_cache, thumb_size, auto=True)
 
         engine.start_watch_source(source, on_ready)
 
@@ -1280,8 +1661,75 @@ def create_app(
 
     @app.get("/api/admin/info")
     def admin_info() -> dict:
+        # Nur billige Zugriffe (#118): die teuren Zähler kommen als gemerkter
+        # Stand aus slow_counts, gezählt wird unter /api/admin/orphans und
+        # /api/admin/thumbcache bzw. nach Aufgaben im Hintergrund.
         with read_conn() as conn:
-            return admin_lib.admin_info(conn, db_path=db_path, thumb_cache=thumb_cache)
+            return admin_lib.admin_info(conn, db_path=db_path, thumb_cache=thumb_cache,
+                                        log_dir=log_dir, slow=slow_counts)
+
+    @app.get("/api/admin/log")
+    def admin_log(lines: int = 100, level: str | None = None,
+                  file: str | None = None) -> dict:
+        # Serverlog (#64): die letzten Zeilen beider Logdateien — Web-Prozess
+        # und Worker — für die Admin-Konsole, ohne Dateisystem-Scan.
+        # ?level=warning (ADR 0074): nur WARNING und höher, serverseitig
+        # gefiltert, Zeilen selbst unverändert (Traceback-Folgezeilen bleiben
+        # bei ihrem Eintrag).
+        lines = max(1, min(int(lines), 2000))
+        min_level = None
+        if level:
+            min_level = logging.getLevelName(level.strip().upper())
+            if not isinstance(min_level, int):
+                raise HTTPException(status_code=400, detail=msg("errLogLevel", level=level))
+        # ?file=web|worker: nur EINE Datei (die Logs-Seite hat je Datei
+        # eigene Zeilenzahl und eigenen Filter).
+        wanted = {"web": WEB_LOG, "worker": WORKER_LOG}
+        if file is not None and file not in wanted:
+            raise HTTPException(status_code=400, detail=msg("errLogFile", file=file))
+        files = []
+        for name in ((wanted[file],) if file else (WEB_LOG, WORKER_LOG)):
+            path = log_dir / name
+            files.append({"name": name, "path": str(path),
+                          "bytes": path.stat().st_size if path.is_file() else 0,
+                          "lines": log_tail(path, lines, min_level=min_level)})
+        return {"log_dir": str(log_dir), "files": files}
+
+    @app.get("/api/admin/overview")
+    def admin_overview(request: Request) -> dict:
+        # Diagramm-Zahlen der Übersicht (ADR 0074 Nachtrag) aus dem Epochen-
+        # Cache: ~100 ms bei 250k, einmal je Schreib-Epoche.
+        lib_root, _ = configured_import()
+        with read_conn() as conn:
+            payload = dict(stats_cache.get(
+                ("overview_stats", lib_root),
+                lambda: admin_lib.overview_stats(conn, db_path=db_path, library_root=lib_root),
+                scope=request.scope,
+            ))
+        payload["uptime"] = round(time.time() - app.state.started_at, 1)
+        payload["versions"] = {
+            "fml": feral_version, "python": platform.python_version(),
+            "sqlite": sqlite3.sqlite_version,
+        }
+        payload["packages"] = app.state.packages   # Laufzeit-Pakete + Pin-Abgleich (#42)
+        payload["pool_workers"] = engine.pool_workers or default_pool_workers()
+        payload["library_root"] = lib_root
+        payload["verwaltung"] = verwaltung_enabled()
+        payload["port"] = cfg_web_port(load_config(config_path)) if config_path is not None else None
+        return payload
+
+    @app.get("/api/admin/maintenance")
+    def admin_maintenance() -> dict:
+        # Wartungskarten (A3 #107): billige Zahlen je Seitenaufruf; die
+        # teuren (Fundorte prüfen, Cache zählen) kommen weiter aus admin/info.
+        with read_conn() as conn:
+            return admin_lib.maintenance_stats(conn)
+
+    @app.get("/api/admin/dbstat")
+    def admin_dbstat() -> dict:
+        # DB-Aufteilung nur auf Knopfdruck: dbstat liest jede Seite der Datei.
+        with read_conn() as conn:
+            return admin_lib.db_breakdown(conn)
 
     @app.get("/api/admin/issues")
     def admin_issues(per_kind: int = Query(20, ge=1, le=200)) -> dict:
@@ -1303,18 +1751,35 @@ def create_app(
         return count
 
     @app.get("/api/admin/orphans")
-    def admin_orphans() -> dict:
+    def admin_orphans(under: str | None = Query(None, max_length=1000),
+                      sample: int = Query(20, ge=1, le=200)) -> dict:
+        # Vorschau der Aufräum-Karte (A3 #107): ehrliche Zahl im gewählten
+        # Bereich (ADR 0033: „nur unter Ordner" schützt Offline-Speicher)
+        # plus gedeckelte Beispielpfade. Prüft jede Fundort-Datei per stat —
+        # deshalb nur auf Knopfdruck, nie beim Seitenladen. „überall" IST der
+        # volle Stand und wird gemerkt (#118); ein Teilbereich nicht.
         with read_conn() as conn:
-            return {"orphans": admin_lib.orphan_locations(conn)}
+            orphans = admin_lib.orphan_locations(conn, limit=None, under=under or None)
+        if not under:
+            slow_counts.set_orphans(len(orphans))
+        return {"total": len(orphans), "sample": [o["path"] for o in orphans[:sample]],
+                "under": under or None}
 
     @app.post("/api/admin/prune")
     def admin_prune(req: PruneRequest | None = None) -> dict:
         under = req.under if req is not None and req.under else None
-        return engine.run_write(
+        result = engine.run_write(
             msg("taskPrune"),
             lambda conn, _p: {"pruned": admin_lib.prune_orphan_locations(conn, under=under)},
             timeout=120,
         )
+        # Stand nachziehen (#118): „überall" räumt per Definition alles weg;
+        # ein Teilbereich lässt den Rest offen → im Hintergrund neu zählen.
+        if under is None:
+            slow_counts.set_orphans(0)
+        else:
+            slow_counts.refresh_later("orphans")
+        return result
 
     @app.get("/api/admin/import-rules")
     def admin_import_rules_preview() -> dict:
@@ -1332,11 +1797,8 @@ def create_app(
         if not preview["active"]:
             raise HTTPException(status_code=400, detail=msg("errNoImportRules"))
 
-        def fn(conn, _progress) -> dict:
-            n = admin_lib.apply_import_rules(conn, rules, thumb_cache)
-            return {"summary": msg("sumImportRules", n=n)}
-
-        engine.enqueue_task(msg("taskImportRules"), fn)
+        engine.enqueue("import_rules", {"rules": rules, "thumb_cache": str(thumb_cache)},
+                       msg("taskImportRules"))
         return {"queued": "Import-Regeln auf den Bestand", "expected": preview["total"]}
 
     @app.post("/api/admin/reparse")
@@ -1346,7 +1808,7 @@ def create_app(
 
     @app.post("/api/admin/backfill-dates")
     def admin_backfill_dates() -> dict:
-        engine.enqueue_media_date_backfill()
+        engine.enqueue_media_date_backfill(configured_min_date())
         return {"queued": "Erstelldaten nachtragen"}
 
     @app.post("/api/admin/reindex")
@@ -1356,7 +1818,7 @@ def create_app(
 
     @app.post("/api/admin/rescan")
     def admin_rescan() -> dict:
-        engine.enqueue_rescan()
+        engine.enqueue_rescan(configured_rules())
         return {"queued": "Re-Scan aller bekannten Fundorte"}
 
     @app.post("/api/admin/integrity")
@@ -1376,13 +1838,21 @@ def create_app(
         # Der Admin-Knopf ist der EINZIGE Weg mit Retry-Prinzip (bewusste
         # Aktion, z. B. nach ffmpeg-Installation) — die Automatik-Läufe
         # nach Import/Watch erzeugen nur Fehlende (ADR-0042-Ergänzung).
-        engine.enqueue_thumb_warm(thumb_cache, thumb_size, pool=thumb_pool, retry_failed=True)
+        engine.enqueue_thumb_warm(thumb_cache, thumb_size, retry_failed=True)
         return {"queued": "Thumbnails vorwärmen"}
+
+    @app.get("/api/admin/thumbcache")
+    def admin_thumbcache() -> dict:
+        # „Cache zählen" (#118): Verzeichnislauf über den ganzen Thumbnail-
+        # Cache nur auf Knopfdruck; das Ergebnis ist der neue gemerkte Stand.
+        return slow_counts.count_cache()
 
     @app.post("/api/admin/thumbcache/clear")
     def admin_thumbcache_clear() -> dict:
         # Reiner Platten-Cache, keine DB — braucht den Writer-Thread nicht.
-        return {"deleted": admin_lib.clear_thumb_cache(thumb_cache)}
+        deleted = admin_lib.clear_thumb_cache(thumb_cache)
+        slow_counts.set_cache(0, 0)
+        return {"deleted": deleted}
 
     # -- Config aus der GUI ---------------------------------------------------
 
@@ -1410,6 +1880,7 @@ def create_app(
             "instanz_name": cfg_instance_name(config),
             "akzentfarbe": cfg_instance_accent(config),
             "rankings_enabled": cfg_rankings_enabled(config),
+            "slow_request_ms": int(cfg_slow_request_ms(config)),
             "raw": p.read_text(encoding="utf-8") if p.is_file() else "",
         }
 
@@ -1448,6 +1919,8 @@ def create_app(
             r"^#[0-9a-fA-F]{6}$", update.akzentfarbe.strip()
         ):
             raise HTTPException(status_code=400, detail=msg("errAccent"))
+        if update.slow_request_ms is not None and not (0 <= update.slow_request_ms <= 600_000):
+            raise HTTPException(status_code=400, detail=msg("errSlowMs"))
         # Watch-Liste kommt normalerweise über /api/watch/save (Inline-
         # Verwaltung im Dashboard); wird sie hier mitgeschickt, gilt dieselbe
         # Prüfung. None = [[watch]] in der Datei unangetastet lassen.
@@ -1476,7 +1949,10 @@ def create_app(
             instance_name=update.instanz_name,
             instance_accent=update.akzentfarbe,
             rankings_enabled=update.rankings_enabled,
+            slow_request_ms=update.slow_request_ms,
         )
+        if update.slow_request_ms is not None:
+            app.state.slow_request_ms = float(update.slow_request_ms)   # sofort (#110)
         # Watch-Quellen übernehmen Änderungen sofort: alle neu aufsetzen
         # (entfernte Quellen fallen dabei weg). Fehler hier ≠ Speicher-Fehler.
         _start_all_watches()
@@ -1485,6 +1961,11 @@ def create_app(
     # -- Statische Dateien (CSS/JS der neuen Shell, Block 3.0) ---------------
 
     app.mount("/static", StaticFiles(directory=_STATIC), name="static")
+    app.state.started_at = time.time()   # Laufzeit für die Übersicht (ADR 0074)
+    # Installierte Laufzeit-Pakete neben ihrem Pin (ADR 0080): einmal beim
+    # Start — Versionen ändern sich nicht, solange der Prozess läuft.
+    app.state.packages = admin_lib.package_versions(
+        Path(__file__).resolve().parents[3] / "requirements.txt")
 
     return app
 

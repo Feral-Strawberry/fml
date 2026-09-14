@@ -11,6 +11,7 @@
 import { setRating, setNotes, addTag, removeTag, batchAnnotate, rejectItems } from "./api.js";
 import { STRINGS } from "./strings.js";
 import { emit, on } from "./main.js";
+import { registerDialog } from "./overlays.js";
 
 /** 5 Rating-Punkte als HTML (geteilt von Panel und Loupe). */
 export const dotsHtml = (rating) =>
@@ -106,8 +107,10 @@ rejectOverlay.id = "rejectdlg";
 rejectOverlay.className = "pickoverlay";
 rejectOverlay.hidden = true;
 let rejectHashes = [];
+let unregisterReject = () => {};   // Dialog-Stapel (ADR 0069)
 
-function openRejectDialog(hashes) {
+/** Ablehnen-Dialog für beliebige Hashes öffnen (auch aus der Vergleichsansicht). */
+export function openRejectDialog(hashes) {
   rejectHashes = hashes;
   rejectOverlay.innerHTML = `
     <div class="pickbox savebox">
@@ -120,11 +123,14 @@ function openRejectDialog(hashes) {
         <button type="button" class="rejcancel">${STRINGS.saveDlgCancel}</button>
       </div>
     </div>`;
+  unregisterReject();
+  unregisterReject = registerDialog(rejectOverlay, closeRejectDialog);
   rejectOverlay.hidden = false;
   rejectOverlay.querySelector(".rejgo").focus();
 }
 
 function closeRejectDialog() {
+  unregisterReject();
   rejectOverlay.hidden = true;
   rejectHashes = [];
 }
@@ -149,14 +155,8 @@ function initRejectDialog() {
     }
     if (e.target.closest(".rejcancel") || e.target === rejectOverlay) closeRejectDialog();
   });
-  // CAPTURE + stopPropagation: Esc soll NUR den Dialog schließen — nicht
-  // zusätzlich die Lupe/Einzelbildansicht darunter (Entf geht auch dort).
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !rejectOverlay.hidden) {
-      e.stopPropagation();
-      closeRejectDialog();
-    }
-  }, true);
+  // Esc schließt NUR den Dialog, nicht die Lupe/Einzelbildansicht darunter:
+  // das macht der zentrale Listener des Dialog-Stapels (overlays.js).
 }
 
 export function initCurate() {
@@ -173,12 +173,11 @@ export function initCurate() {
   document.addEventListener("keydown", async (e) => {
     const typing = e.target instanceof Element && e.target.matches("input, textarea, select");
     if (typing || !current) return;
-    if (!document.getElementById("admin").hidden) return;
     // Arena offen (Ranking-Modul): 1–5/Entf würden sonst unsichtbar auf
     // der Grid-Auswahl unter der Vollbild-Ebene arbeiten.
     if (!document.getElementById("rankings").hidden) return;
     // Entf = Ablehnen der Auswahl (ADR 0041): Item raus + Sperre — die
-    // Datei bleibt unangetastet, egal ob Library oder nur indiziert.
+    // Datei bleibt unangetastet, egal ob Library oder nur katalogisiert.
     if (e.key === "Delete") {
       const hashes = selectionHashes();
       if (!hashes.length) return;

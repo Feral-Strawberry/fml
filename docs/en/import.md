@@ -21,7 +21,7 @@ root = "/path/to/collection"
 
 ## Flow
 
-**Admin console → Sources & import:** pick a folder, pick a mode,
+**Admin → Sources & import:** pick a folder, pick a mode,
 frequency "once now", **Add**. The library side is the same in every mode:
 new content is **copied** to `collection/YYYY/MM/DD/`, the copy is
 verified against the source by hash and cataloged immediately (no extra
@@ -34,7 +34,11 @@ scan needed). The mode determines only what happens to the **source**
   The right mode for third-party folders and tool outputs.
 - **"move"** (with explicit confirmation) — successfully imported files
   are **deleted** from the source after verification; the folder empties
-  itself. Only follow-up cases stay visibly behind:
+  itself. Only follow-up cases stay visibly behind. The outcome folder
+  names are fixed identifiers, like the config values (`kopieren`,
+  `verschieben`, `katalogisieren`): they stay the same (German) in every
+  language so fml recognizes them in every installation; the table gives
+  the meaning.
 
   | Outcome | Meaning |
   | --- | --- |
@@ -42,7 +46,7 @@ scan needed). The mode determines only what happens to the **source**
   | `_unbekanntes-format/` | container not recognized — your stumbling-block folder for missing formats |
   | `_fehler/` | read error, or the copy could not be verified |
   | `_gesperrt/` | hash is on the blocklist (rejected in the library) — will not be imported again (ADR 0023/0041) |
-  | `_ausgefiltert/` | sorted out by the **import rules** (too small / too large / excluded format, see below) — after changing the rules, just drop them in again |
+  | `_ausgefiltert/` | sorted out by the **import rules** (too small / too large / excluded format / no plausible date, see below) — after changing the rules, just drop them in again |
 
   So the only thing ever deleted is what verifiably sits bit-identical in
   the collection with its catalog entry stored — everything else stays
@@ -51,7 +55,7 @@ scan needed). The mode determines only what happens to the **source**
   only mode that needs no media library — and the only one allowed in
   read-only mode (the default).
 
-Large runs execute as a **pipeline** (block 4S): several worker threads
+Large runs execute as a **pipeline**: several worker threads
 detect and hash ahead (the health check of collection copies for
 duplicates runs in parallel the same way), while copying and cataloging
 stays strictly sequential, stored in batches. Duplicate-heavy second
@@ -70,19 +74,26 @@ folders:
 - **Exclude formats**, e.g. `psd, arw`: don't even ingest half-supported
   formats. Camera RAW files (Sony ARW, Nikon NEF, Canon CR2, DNG) are
   recognized specifically instead of slipping through as TIFF.
+- **Earliest plausible date** (`[import] min_date`, default 2015-01-01):
+  a file whose creation date is plausible neither from its metadata nor
+  from its file timestamp (before `min_date` or in the future, e.g.
+  1970-01-01) is **not ingested** — it counts as a rule hit just like an
+  image that is too small. This rule is always active; lower `min_date`
+  if you want to keep old material.
 
 Both dimension rules apply only to **images with known dimensions** —
 never to videos, and nothing is guessed without dimensions. During import
-(move mode), hits land visibly in `_ausgefiltert/`; during cataloging they
-are simply skipped and counted in the report. Nothing disappears
-silently, and in copy mode the source is, as always, never touched.
+(move mode), hits land visibly in `_ausgefiltert/` (reason in the import
+log); during cataloging they are simply skipped and counted in the
+report. Nothing disappears silently, and in copy mode the source is, as
+always, never touched.
 
 For collections ingested **before** the rules existed, there is
 **Admin → Maintenance → "Import rules against the collection"**: it first
-shows how many items the current rules would hit (broken down by reason),
-and on confirmation rejects them collectively — the files stay put, only
-the catalog entries disappear (reversible via the blocklist). Background:
-ADR 0046.
+shows how many items the current rules would hit (broken down by reason,
+including "without a plausible date"), and on confirmation rejects them
+collectively — the files stay put, only the catalog entries disappear
+(reversible via the blocklist). Background: ADR 0046 and ADR 0075.
 
 ## Watch folders (automatic import)
 
@@ -103,16 +114,20 @@ migrated to a watch folder at startup.)
 ## Date
 
 Files are sorted by **creation date**: the embedded date from the metadata
-(if present), otherwise the older plausible filesystem timestamp.
-Implausible dates (before 2015, e.g. 1970-01-01, or in the future) land in
-`collection/_unbekanntes-datum/` instead of a wrong folder — marked
-`unplausibel` in the import log so they can be dealt with later. The lower
-bound is configurable: `[import] min_date = "2015-01-01"`.
+(if present), otherwise the older plausible filesystem timestamp. If there
+is no plausible date (before `min_date`, e.g. 1970-01-01, or in the
+future), the date rule above applies: the file is **not imported** and
+lands visibly in `_ausgefiltert/` — instead of in a wrong date folder or in
+the catalog with an empty date. The lower bound is configurable:
+`[import] min_date = "2015-01-01"`. A `collection/_unbekanntes-datum/`
+folder from earlier versions stays as it is: you can reject its entries
+via "Import rules against the collection" (files stay put) or date them
+honestly with a lowered `min_date` and "Backfill creation dates".
 
 ## Report
 
 Every run ends with a summary line ("4 new · 8,311 duplicates · …", in
-the admin console's Activity). Every single file is recorded in the DB
+the admin overview's Activity). Every single file is recorded in the DB
 table `import_log` (time, source, outcome, target, hash, date source).
 
 ## Safety

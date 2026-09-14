@@ -17,53 +17,85 @@ auf deinem Rechner: kein Cloud-Dienst, kein Konto, der Server ist nur unter
 > Hobby-Projekt in aktiver Entwicklung - mach Backups (siehe „Gut zu
 > wissen").
 
-## Die zwei Betriebsphilosophien
+## Drei Ziele, drei Modi
 
-fml ist **eine** Anwendung mit **zwei klar getrennten Arbeitsweisen**. Der
-Unterschied ist genau einer: ob fml deine Dateien anfassen darf. Der
-Schalter dafür heißt **Library-Verwaltung** (Admin → Konfiguration) und ist
-ab Werk **aus**.
+Jede Aufnahme in fml ist ein Ordner plus ein **Modus**. Der Modus legt
+allein fest, was mit der **Quelle** passiert, und damit, welches der drei
+Ziele du erreichst:
 
-### 1. Übersichtsmodus (Standard): ansehen und ordnen, ohne anzufassen
+| Ziel | Modus | Was mit der Quelle passiert | Braucht |
+| --- | --- | --- | --- |
+| **1. Übersicht** | **katalogisieren** | nichts: die Medien werden dort aufgenommen, wo sie liegen | nichts |
+| **2. Sammeln** | **kopieren** | bleibt unangetastet; die Kopie liegt in der Media Library | Library-Verwaltung |
+| **3. Konsolidieren** | **verschieben** | verifiziert Importiertes wird aus ihr gelöscht; nur Zweifelsfälle bleiben sichtbar liegen | Library-Verwaltung, Sicherheitsabfrage |
+
+Jeden Modus gibt es in zwei **Häufigkeiten**: **einmal jetzt** (der Ordner
+wird einmal verarbeitet) oder **dauerhaft beobachten** (der Ordner wird
+zum Watchordner: was ComfyUI & Co. dort ablegen, wird von selbst
+aufgenommen, sobald die Datei fertig geschrieben ist). Bit-identische
+Dubletten erkennt jeder Weg am Inhalt.
+
+### Ziel 1: Übersicht. Ansehen und ordnen, ohne anzufassen
 
 Für den Fall: „Meine Medien liegen verstreut (oder bereits fertig sortiert)
 auf der Platte, und ich will **Überblick, Suche und Kuratierung** - aber
 niemand außer mir soll je eine Datei bewegen."
 
-- **Hände-weg-Garantie:** fml **kopiert, verschiebt und löscht in diesem
-  Modus keine einzige Datei.** Die Garantie ist serverseitig durchgesetzt -
-  die entsprechenden Funktionen sind nicht versteckt, sondern gesperrt und
-  erklären das auch so. Ein Badge „👁 Übersichtsmodus" in der Kopfzeile
-  zeigt den Zustand.
-- **Was in diesem Modus geht:** Ordner oder ganze Laufwerke
-  **katalogisieren** (Aufnahme am Ort, auch dauerhaft als Watchordner),
-  suchen, filtern, bewerten, taggen, Notizen schreiben, **ablehnen**
-  (nimmt ein Medium nur aus dem Katalog - die Datei bleibt liegen) und per
-  📂-Knopf zur Datei in den Explorer/Finder springen.
-- **Was in diesem Modus bewusst nicht geht:** kopierender oder
-  verschiebender Import und das Rausverschieben Abgelehnter - alles, was
-  Dateien anlegt oder bewegt.
+- **Hände-weg-Garantie:** Im Übersichtsmodus (Auslieferungszustand)
+  **kopiert, verschiebt und löscht fml keine einzige Datei.** Die
+  Garantie ist serverseitig durchgesetzt - die entsprechenden Funktionen
+  sind nicht versteckt, sondern gesperrt und erklären das auch so. Ein
+  Badge „👁 Übersichtsmodus" in der Kopfzeile zeigt den Zustand.
+- **Was geht:** Ordner oder ganze Laufwerke **katalogisieren** (einmal
+  oder dauerhaft als Watchordner), suchen, filtern, bewerten, taggen,
+  Notizen schreiben, **ablehnen** (nimmt ein Medium nur aus dem Katalog -
+  die Datei bleibt liegen) und per 📂-Knopf zur Datei in den
+  Explorer/Finder springen.
+- **Was bewusst nicht geht:** kopieren, verschieben und das
+  Rausverschieben Abgelehnter - alles, was Dateien anlegt oder bewegt.
 
 Du kannst fml in diesem Modus gefahrlos auf einen fremden oder gewachsenen
 Bestand loslassen, um ihn erst einmal zu **verstehen**.
 
-### 2. Library-Verwaltung: Wildwuchs zu einem Bestand konsolidieren
+### Ziel 2: Sammeln. Eine Library aufbauen, die Quellen bleiben
+
+Für den Fall: „Ich will einen geordneten, dublettenfreien Bestand - aber
+meine Sicherungen und Tool-Ordner sollen unangetastet bleiben, bis ich dem
+Ergebnis traue."
+
+- **kopieren** legt jede neue Datei in der **Media Library** ab
+  (datumsbasierte Struktur `JJJJ/MM/TT/`), verifiziert die Kopie per
+  SHA-256 gegen die Quelle und legt **bit-identische Dubletten nicht
+  erneut ab**. Die Quelle wird nie angefasst; der Import ist rein lesend.
+- Der Dauerbetrieb: ein **Watchordner** im Modus kopieren auf dem
+  Output-Ordner von ComfyUI, A1111 & Co. Was dort entsteht, landet von
+  selbst in der Library, die Originale bleiben am Ort.
+- **Endzustand:** die Library ist vollständig und dublettenfrei, die
+  Quellen sind nachweislich obsolet - liegen aber noch da. Wer sie
+  loswerden will, geht zu Ziel 3.
+
+### Ziel 3: Konsolidieren. Ein Bestand, sonst nirgends Kopien
 
 Für den Fall: „Meine Medien liegen als Wildwuchs in alten Sicherungen,
-Download- und Output-Ordnern - vieles doppelt und dreifach. Ich will am
-Ende **einen konsolidierten, dublettenfreien Datei-Bestand**."
+Download- und Output-Ordnern - vieles doppelt und dreifach. Am Ende will
+ich **einen einzigen Bestand**, und die alten Ordner sollen leer sein."
 
-- **Import kopiert - er verschiebt nie von sich aus.** Quellordner werden
-  in die **Media Library** kopiert (datumsbasierte Struktur
-  `JJJJ/MM/TT/`), jede Kopie wird per SHA-256 gegen die Quelle
-  verifiziert, **bit-identische Dubletten werden erkannt und nicht erneut
-  abgelegt**. Was mit der Quelle passiert, bestimmst du pro Import:
-  Modus „kopieren" lässt sie vollständig unangetastet; Modus
-  „verschieben" (eigene Sicherheitsabfrage) löscht nur, was nachweislich
-  verifiziert im Bestand liegt, und lässt alle Zweifelsfälle sichtbar
-  liegen. Details: [`docs/import.md`](docs/import.md).
-- **Watchordner** automatisieren das: was ComfyUI & Co. dort ablegen,
-  wird von selbst importiert, sobald die Datei fertig geschrieben ist.
+- **verschieben** ist kopieren plus Aufräumen: dieselbe Kopie in die
+  Library, dieselbe Verifikation - und danach wird die Datei aus der
+  Quelle **gelöscht**. Gelöscht wird ausschließlich, was nachweislich
+  bit-identisch in der Library liegt und dessen Katalogeintrag
+  gespeichert ist. Der Modus verlangt eine ausdrückliche Bestätigung.
+- **Was in der Quelle übrig bleibt, ist Nachschau,** nie Verlust:
+  `_dubletten/` (Inhalt war schon im Bestand, die Bestandskopie wurde
+  frisch geprüft), `_fehler/`, `_unbekanntes-format/`, `_gesperrt/`
+  (in fml abgelehnt) und `_ausgefiltert/` (Import-Regeln). Die Namen
+  sind feste Bezeichner und bleiben in jeder Sprache gleich. Diese Ordner
+  schaust du an und löschst sie selbst - fml räumt nie hinter dir auf.
+- **Praxis:** Sicherung für Sicherung mit „verschieben" aufnehmen, oder
+  einen Watchordner im Modus verschieben anlegen und die Altordner der
+  Reihe nach hineinkippen; „leere Ordner löschen" räumt leer gewordene
+  Unterordner mit ab. Dubletten erkennt der Import am Inhalt, egal aus
+  welcher Sicherung sie kommen.
 - **Aufräumen ohne Löschtaste:** „Löschen" gibt es in fml nicht.
   **Ablehnen** nimmt ein Medium aus dem Katalog und setzt seinen Hash auf
   die Sperrliste (kommt bei keinem Import wieder herein) - die Datei
@@ -72,15 +104,22 @@ Ende **einen konsolidierten, dublettenfreien Datei-Bestand**."
   rausverschieben"** (Admin → Wartung) verschiebt sie hash-verifiziert in
   einen Zielordner außerhalb der Library. Endgültig entsorgen ist dann
   bewusst Sache des Dateimanagers, nicht von fml.
-- **Endzustand:** ein Bestand, in dem jeder Inhalt genau einmal liegt,
-  datumssortiert, vollständig katalogisiert - und die alten Quellordner
-  sind nachweislich obsolet.
+- **Endzustand:** jeder Inhalt liegt genau einmal in der Library,
+  datumssortiert, vollständig katalogisiert; die Quellordner sind leer
+  bis auf das, was du bewusst nachschauen wolltest. Details zu Ablauf und
+  Ausgangs-Ordnern: [`docs/import.md`](docs/import.md).
 
-Beide Arbeitsweisen nutzen dieselbe Oberfläche, dieselbe Suche, dasselbe
-Kuratieren. Sie lassen sich auch **kombinieren**: eine Library verwalten
-und zusätzlich externe Orte nur katalogisieren - die Sidebar-Facette
-„Fundort" (in der Library / nur extern) hält beides auseinander, samt
-getrennter Größenangaben.
+### Der Schalter: Library-Verwaltung
+
+Ziel 1 geht ab Werk. Ziele 2 und 3 brauchen den Haken
+**Library-Verwaltung** (Admin → Konfiguration), der ab Werk **aus** ist -
+ohne ihn sind kopieren, verschieben und Rausverschieben serverseitig
+gesperrt. Das ist der ganze Unterschied: ob fml deine Dateien anfassen
+darf. Oberfläche, Suche und Kuratieren sind für alle drei Ziele dieselben,
+und sie lassen sich **kombinieren**: eine Library verwalten und zusätzlich
+externe Orte nur katalogisieren - die Sidebar-Facette „Fundort" (in der
+Library / nur extern) hält beides auseinander, samt getrennter
+Größenangaben.
 
 ## Was fml kann - und wie es genau funktioniert
 
@@ -170,6 +209,19 @@ getrennter Größenangaben.
 Windows-Installer „Add to PATH" anhaken). Alles Weitere passiert
 automatisch.
 
+**Herunterladen:** auf GitHub über den grünen Knopf „Code" → „Download
+ZIP" und in einen Ordner entpacken, oder per Git:
+
+```bash
+git clone https://github.com/Feral-Strawberry/fml.git
+```
+
+Wer ComfyUI kennt, kennt das Muster: ein Ordner, ein Startskript, das
+beim ersten Mal die Python-Umgebung anlegt, danach läuft die Oberfläche
+im Browser. Ein Update ist ein neues ZIP über den Ordner entpackt bzw.
+`git pull`; Datenbank und `config.toml` liegen im selben Ordner und
+bleiben dabei erhalten.
+
 | System | Start |
 | --- | --- |
 | Windows | `start.bat` doppelklicken |
@@ -181,7 +233,7 @@ sobald der Server bereit ist (Standard: **http://127.0.0.1:8765**). Für
 (Windows: `winget install Gyan.FFmpeg`, macOS: `brew install ffmpeg`) - die
 Oberfläche weist darauf hin, falls es fehlt.
 
-### Einstieg, wenn du nur Übersicht willst (Philosophie 1)
+### Einstieg, wenn du nur Übersicht willst (Ziel 1)
 
 1. Admin-Knopf (oben rechts) → **Quellen & Import** → Ordner oder
    Laufwerk wählen, Modus **„katalogisieren"**, „einmal jetzt" oder
@@ -189,7 +241,7 @@ Oberfläche weist darauf hin, falls es fehlt.
 2. Stöbern: Grid, Suche oben, Filter links, Metadaten rechts. Bewerten,
    taggen, ablehnen - alles reine Katalogarbeit.
 
-### Einstieg, wenn du konsolidieren willst (Philosophie 2)
+### Einstieg, wenn du sammeln oder konsolidieren willst (Ziele 2 und 3)
 
 1. Admin → **Konfiguration** → Haken bei **Library-Verwaltung**, darunter
    „Media Library (Import-Ziel)" auf einen Ordner mit genug Platz setzen.
@@ -199,9 +251,10 @@ Oberfläche weist darauf hin, falls es fehlt.
    Ergebnis traust.
 3. Wiederholen für jede Sicherung/jeden Altordner - Dubletten erkennt der
    Import am Inhalt und legt sie nicht erneut ab.
-4. Wer Quellordner danach geleert haben will, nimmt Modus „verschieben"
-   (mit Sicherheitsabfrage) - gelöscht wird nur nachweislich
-   Verifiziertes, Zweifelsfälle bleiben sichtbar liegen.
+4. Wer die Quellordner leer haben will (Ziel 3), nimmt Modus
+   „verschieben" (mit Sicherheitsabfrage) - gelöscht wird nur
+   nachweislich Verifiziertes, Zweifelsfälle bleiben in Nachschau-Ordnern
+   sichtbar liegen und werden von dir selbst entsorgt.
 
 ## Gut zu wissen (bitte lesen!)
 
@@ -216,6 +269,11 @@ Oberfläche weist darauf hin, falls es fehlt.
   Alles daraus ist auch in der GUI editierbar (Admin → Konfiguration);
   die kommentierte Referenz ist
   [`config.example.toml`](config.example.toml).
+- **Geändert (September 2026) - Klick-Regel in der Seitenleiste wie in
+  Lightroom:** ein Klick wählt einen Wert (und ersetzt den vorherigen
+  derselben Gruppe), **Cmd/Strg-Klick fügt hinzu** (ODER), Klick auf den
+  aktiven Wert hebt ihn auf. Vorher erweiterte jeder Klick zum ODER.
+  Details in [`docs/gui.md`](docs/gui.md).
 
 ## Mehr Doku
 
@@ -234,11 +292,15 @@ Hand übernommen werden - dabei kann die Commit-Zuordnung (Attribution)
 verloren gehen. Wer tiefer einsteigen möchte: einfach melden - Mitarbeit
 läuft über eine Einladung ins Arbeitsrepo.
 
-**Zu den „ADR"-Verweisen** in Code-Kommentaren und Doku (z. B.
-„ADR 0041"): Das sind **Architecture Decision Records** - kurze,
+Was sich von Release zu Release geändert hat, steht im
+[`CHANGELOG.de.md`](CHANGELOG.de.md).
+
+**Zu den „ADR"- und Issue-Verweisen** in Code-Kommentaren und Doku (z. B.
+„ADR 0041", „Issue #37"): ADRs sind **Architecture Decision Records** - kurze,
 durchnummerierte Einträge nach dem Muster *Kontext → Entscheidung →
 Konsequenzen*, in denen jede nennenswerte Entscheidung dieses Projekts
-festgehalten ist. Sie liegen im privaten Arbeitsrepo und sind nicht Teil
+festgehalten ist; Issue-Nummern zeigen auf den Issue-Tracker des
+Arbeitsrepos. Beides liegt im privaten Arbeitsrepo und ist nicht Teil
 der Snapshots; die Verweise bleiben absichtlich stehen, damit
 Entscheidungen zuordenbar bleiben. Wer die Begründung zu einer bestimmten
 Nummer wissen möchte: einfach ein Issue aufmachen.

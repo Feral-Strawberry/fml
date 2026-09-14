@@ -1,7 +1,7 @@
 """Hilfen, um PSD-Dateien für Tests **programmatisch** zu bauen.
 
 Wie ``pngbuild``: bekannte, selbst konstruierte Eingaben statt Binär-Blobs im
-Repo (CLAUDE.md §8). Gebaut wird eine **vollständige, gültige** Minimal-PSD
+Repo (Projektregel: Fixtures programmatisch). Gebaut wird eine **vollständige, gültige** Minimal-PSD
 (RGB, 8 Bit, unkomprimierte Pixeldaten) — Pillow kann sie öffnen, damit
 dieselbe Fixture auch die Thumbnail-/Vorschau-Strecke testet (ADR 0052).
 """

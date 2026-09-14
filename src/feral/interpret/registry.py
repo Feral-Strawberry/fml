@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Protocol, Sequence
 
 from ..extract.types import RawMetadataItem
-from . import a1111, comfyui, xmp
+from . import a1111, comfyui, provenance, topaz, video, xmp
 from .types import Interpretation
 
 
@@ -30,7 +30,7 @@ class Parser(Protocol):
 
 
 # Reihenfolge = Speicher-Reihenfolge; inhaltlich unabhängig voneinander.
-PARSERS: list[Parser] = [a1111, comfyui, xmp]
+PARSERS: list[Parser] = [a1111, comfyui, xmp, topaz, provenance, video]
 
 
 def interpret_items(items: Sequence[RawMetadataItem]) -> list[Interpretation]:

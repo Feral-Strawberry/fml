@@ -18,7 +18,7 @@ PSD-Aufbau (Adobe-Spezifikation):
   größe(4) | daten (auf gerade Länge gepolstert)``.
 - Danach Ebenen- und Pixeldaten — für Schicht 1 uninteressant.
 
-Der Extraktor ist **defensiv** (CLAUDE.md §8): beschädigte oder
+Der Extraktor ist **defensiv** (Projektregel): beschädigte oder
 abgeschnittene Dateien werfen nicht, sondern sammeln `warnings`. Pixel-
 und Ebenen-Daten werden nie in den Speicher geladen.
 """

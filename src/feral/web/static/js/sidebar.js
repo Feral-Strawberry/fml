@@ -1,10 +1,11 @@
 // sidebar.js — linke Quellen-Spalte: Gruppe „Bibliothek" (Alle Medien) und
-// Facetten-Gruppen (Modell/LoRA/Bewertung/Jahr/Dateityp/Format/Auflösung/
-// Eingangsbild).
+// Facetten-Gruppen (Modell/Generator/LoRA/Bewertung/Jahr/Dateityp/Format/
+// Auflösung/Eingangsbild).
 //
 // Kommuniziert nur über den Bus. Seit Block S3 (ADR 0035) füttern die
-// Facetten-Zeilen den EINEN Suchzustand: Klick = 'chip-toggle' (ein weiterer
-// Wert derselben Gruppe wird ODER, ein aktiver Wert fliegt raus); aktive
+// Facetten-Zeilen den EINEN Suchzustand: Klick = 'chip-toggle' (Lightroom-
+// Regel seit 2026-09-08: Klick ersetzt die Auswahl der Gruppe, Cmd/Strg-Klick
+// erweitert zum ODER, Klick auf den aktiven Wert nimmt ihn heraus); aktive
 // Werte werden aus 'search-state-changed' markiert. Gespeicherte Suchen
 // laden ihren Ausdruck als Chips ('state-load'), „Alle Medien" leert den
 // Zustand ('state-clear'), Dubletten bleiben eine Spezialansicht
@@ -16,7 +17,7 @@
 // werden gedimmt statt versteckt — sichtbar bleibt, was es gäbe.
 
 import { STRINGS } from "./strings.js";
-import { getStats, getModels, getFacets, getRatings, getFolders, deleteFolder, getRankings } from "./api.js";
+import { getStats, getSidebar, getFolders, deleteFolder, getRankings } from "./api.js";
 import { emit, on } from "./main.js";
 import { serverMsg } from "./servermsg.js";
 
@@ -47,6 +48,20 @@ const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// Zusatztaste für „hinzufügen (ODER)" je Plattform — Feral Strawberry (2026-09-08):
+// Menschen lesen keine Doku, der Hinweis muss am Klickort stehen und die
+// RICHTIGE Taste nennen. navigator.platform ist veraltet, aber überall
+// gesetzt; userAgentData.platform als moderner Erstkandidat.
+export function modKey(platform = detectPlatform()) {
+  return /mac|iphone|ipad/i.test(platform) ? STRINGS.modKeyMac : STRINGS.modKeyOther;
+}
+function detectPlatform() {
+  const nav = typeof navigator !== "undefined" ? navigator : null;
+  return nav?.userAgentData?.platform || nav?.platform || "";
+}
+const clickHint = () => STRINGS.sidebarClickHint.replace("{mod}", modKey());
+const rowHint = () => STRINGS.sidebarRowHint.replace("{mod}", modKey());
+
 export function initSidebar() {
   const nav = document.getElementById("sidebar");
   nav.innerHTML = `
@@ -73,31 +88,35 @@ export function initSidebar() {
         <div id="sbRankings"></div>
       </div>
       <div class="sbgroup" data-group="rating">
-        <div class="mlabel">${STRINGS.groupByRating}</div>
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByRating}</div>
         <div id="sbRatings"></div>
       </div>
+      <div class="sbgroup" data-group="generator">
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByGenerator}</div>
+        <div id="sbTools"></div>
+      </div>
       <div class="sbgroup" data-group="model">
-        <div class="mlabel">${STRINGS.groupByModel}</div>
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByModel}</div>
         <div id="sbModels"></div>
       </div>
       <div class="sbgroup" data-group="lora">
-        <div class="mlabel">${STRINGS.groupByLora}</div>
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByLora}</div>
         <div id="sbLoras"></div>
       </div>
       <div class="sbgroup" data-group="year">
-        <div class="mlabel">${STRINGS.groupByYear}</div>
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByYear}</div>
         <div id="sbYears"></div>
       </div>
       <div class="sbgroup" data-group="container">
-        <div class="mlabel">${STRINGS.groupByContainer}</div>
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByContainer}</div>
         <div id="sbContainers"></div>
       </div>
       <div class="sbgroup" data-group="format">
-        <div class="mlabel">${STRINGS.groupByFormat}</div>
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByFormat}</div>
         <div id="sbFormats"></div>
       </div>
       <div class="sbgroup" data-group="megapixels">
-        <div class="mlabel">${STRINGS.groupByMegapixels}</div>
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByMegapixels}</div>
         <div id="sbMegapixels"></div>
       </div>
       <div class="sbgroup" data-group="inputimage">
@@ -116,6 +135,7 @@ export function initSidebar() {
 
   const modelsBox = nav.querySelector("#sbModels");
   const lorasBox = nav.querySelector("#sbLoras");
+  const toolsBox = nav.querySelector("#sbTools");
   const ratingsBox = nav.querySelector("#sbRatings");
   const foldersBox = nav.querySelector("#sbFolders");
   const containersBox = nav.querySelector("#sbContainers");
@@ -149,30 +169,67 @@ export function initSidebar() {
   const akeyOf = (chip) =>
     `${chip.negated ? "-" : ""}${chip.kind}:${chip.field || ""}:${chip.values[0].value}`;
   // count 0 = im aktuellen Kontext leer → gedimmt, aber klickbar (Block S4).
+  // Tooltip = Grammatik des Chips + Tastenhinweis fürs ODER (nur bei Werte-
+  // Facetten; Bewertung ersetzt ohnehin, has:-Paare schließen sich aus).
+  const canOr = (chip) => chip.kind !== "rating" && chip.kind !== "has";
   const chipRow = (chip, label, dot, count, title) => `
     <div class="sbrow${count === 0 ? " dim" : ""}" data-chip="${esc(JSON.stringify(chip))}"
-         data-akey="${esc(akeyOf(chip))}" title="${esc(title ?? label)}">
+         data-akey="${esc(akeyOf(chip))}" title="${esc(title ?? label)}${canOr(chip) ? " · " + esc(rowHint()) : ""}">
       <span class="sbdot" style="background:${dot}"></span>
       <span class="sblabel">${esc(label)}</span>
       <span class="sbcount">${count.toLocaleString(STRINGS.locale)}</span>
     </div>`;
+  // Lange Listen im Chip-Kontext (Konzeptrunde 2026-09-08): Zeilen mit Treffern
+  // zuerst, im Kontext leere Zeilen (gedimmt, ADR 0037) gesammelt darunter —
+  // getrennt durch die Zeile „keine Treffer mit diesem Filter" (erscheint
+  // nur bei aktivem Chip — ohne Filter gibt es keine leeren Zeilen). Reihenfolge innerhalb der
+  // Hälften bleibt (zuletzt/häufigste zuerst). Ohne leere Zeilen: unverändert.
+  const byContext = (entries, render, noun) => {
+    const live = entries.filter((x) => x.count !== 0);
+    const empty = entries.filter((x) => x.count === 0);
+    if (!live.length || !empty.length) return entries.map(render).join("");
+    return live.map(render).join("")
+      + `<div class="sbctx">${STRINGS.sidebarContextEmpty} · ${empty.length} ${noun}</div>`
+      + empty.map(render).join("");
+  };
   // Kurzform für Werte-Prädikate ohne Feld (container/format/mp/year/month).
   const pred = (kind, value, extra = {}) =>
     ({ kind, negated: false, field: "", op: "=", values: [{ value: String(value), exact: false }], ...extra });
 
+  // Zähler-Text: fehlt (Liste vor Zahlen, noch nicht gerechnet) → „…",
+  // null (Ausdruck ungültig geworden) → ⚠, sonst die Zahl.
+  const countText = (n) =>
+    n === undefined ? "…" : n === null ? "⚠" : n.toLocaleString(STRINGS.locale);
+
+  // Liste vor Zahlen (Issue #69): erst die Liste ohne Zähler (Millisekunden),
+  // dann die Zähler aus dem Epochen-Cache nachziehen. Nach einem Import ist
+  // die Erstberechnung echte DB-Arbeit — die Ordner sind trotzdem sofort
+  // klickbar. Ein Laufnummern-Wächter lässt bei überlappenden Aufrufen nur
+  // den jüngsten zeichnen (sonst könnte eine ältere „…"-Liste die fertigen
+  // Zahlen wieder überschreiben).
+  let foldersSeq = 0;
+  const renderFolders = (folders) => {
+    foldersBox.innerHTML = folders.length
+      ? folders.map((f) => `
+          <div class="sbrow" data-kind="folder" data-value="${esc(f.expression)}"
+               data-id="${f.id}" title="${esc(f.expression)}${f.error ? " — " + esc(serverMsg(f.error)) : ""}">
+            <span class="sbdot" style="background:#d9a441"></span>
+            <span class="sblabel">${esc(f.name)}</span>
+            <button type="button" class="sbdel" title="${STRINGS.folderDelete}">✕</button>
+            <span class="sbcount">${countText(f.count)}</span>
+          </div>`).join("")
+      : `<div class="sbempty">${STRINGS.foldersEmpty}</div>`;
+    refreshHighlights();   // geladene Suche bleibt markiert (#133)
+  };
   async function loadFolders() {
+    const seq = ++foldersSeq;
     try {
+      const list = await getFolders({ counts: false });
+      if (seq !== foldersSeq) return;
+      renderFolders(list.folders);
       const d = await getFolders();
-      foldersBox.innerHTML = d.folders.length
-        ? d.folders.map((f) => `
-            <div class="sbrow" data-kind="folder" data-value="${esc(f.expression)}"
-                 data-id="${f.id}" title="${esc(f.expression)}${f.error ? " — " + esc(serverMsg(f.error)) : ""}">
-              <span class="sbdot" style="background:#d9a441"></span>
-              <span class="sblabel">${esc(f.name)}</span>
-              <button type="button" class="sbdel" title="${STRINGS.folderDelete}">✕</button>
-              <span class="sbcount">${f.count === null ? "⚠" : f.count.toLocaleString(STRINGS.locale)}</span>
-            </div>`).join("")
-        : `<div class="sbempty">${STRINGS.foldersEmpty}</div>`;
+      if (seq !== foldersSeq) return;
+      renderFolders(d.folders);
     } catch (err) { console.warn(err); }
   }
 
@@ -182,61 +239,66 @@ export function initSidebar() {
   // gespeicherten Suchen); Duelle stehen im Tooltip.
   let rankingsEnabled = false;
   const rankingsBox = nav.querySelector("#sbRankings");
+  let arenasSeq = 0;
+  const renderArenas = (rankings) => {
+    rankingsBox.innerHTML = rankings.map((r) => `
+        <div class="sbrow" data-kind="arena" data-id="${r.id}"
+             data-name="${esc(r.name)}" data-expr="${esc(r.expression)}"
+             title="${esc(r.expression || STRINGS.allMedia)} · ${r.duels} ${STRINGS.rankingDuels}${r.error ? " — " + esc(serverMsg(r.error)) : ""}">
+          <span class="sbdot" style="background:#e05b8f"></span>
+          <span class="sblabel">${esc(r.name)}</span>
+          <span class="sbcount">${countText(r.population)}</span>
+        </div>`).join("")
+      || `<div class="sbempty">${STRINGS.rankingsEmpty}</div>`;
+    refreshHighlights();   // geladenes Ranking bleibt markiert (#133)
+  };
   async function loadArenas() {
     if (!rankingsEnabled) return;
+    const seq = ++arenasSeq;   // Liste vor Zahlen, wie loadFolders (#69)
     try {
+      const list = await getRankings({ counts: false });
+      if (seq !== arenasSeq) return;
+      renderArenas(list.rankings);
       const d = await getRankings();
-      rankingsBox.innerHTML = d.rankings.map((r) => `
-          <div class="sbrow" data-kind="arena" data-id="${r.id}"
-               data-name="${esc(r.name)}" data-expr="${esc(r.expression)}"
-               title="${esc(r.expression || STRINGS.allMedia)} · ${r.duels} ${STRINGS.rankingDuels}${r.error ? " — " + esc(serverMsg(r.error)) : ""}">
-            <span class="sbdot" style="background:#e05b8f"></span>
-            <span class="sblabel">${esc(r.name)}</span>
-            <span class="sbcount">${r.population === null ? "⚠" : r.population.toLocaleString(STRINGS.locale)}</span>
-          </div>`).join("")
-        + `<div class="sbrow" data-kind="arena-new">
-            <span class="sbdot" style="background:var(--faint)"></span>
-            <span class="sblabel vdim">${STRINGS.rankingNew}</span>
-          </div>`;
+      if (seq !== arenasSeq) return;
+      renderArenas(d.rankings);
     } catch (err) { console.warn(err); }
   }
 
-  async function loadRatings() {
-    try {
-      const ratings = await getRatings(currentFilter || undefined);
-      // Exakte Verteilung (= n Sterne): auch gezielt schlecht Bewertetes
-      // filtern können (Feral Strawberry, 2026-07-08), beste zuerst. rating ist ein
-      // Vergleich (kein ODER) — Klick ersetzt/entfernt den Wert (search.js).
-      ratingsBox.innerHTML = ratings.ratings.length === 0
-        ? `<div class="sbempty">${STRINGS.sidebarNoRatings}</div>`
-        : ratings.ratings.map((r) =>
-            chipRow(pred("rating", r.rating), "★".repeat(r.rating), "#d9a441", r.count)).join("");
-      refreshHighlights();
-    } catch (err) { console.warn(err); }
+  function renderRatings(ratings) {
+    // Exakte Verteilung (= n Sterne): auch gezielt schlecht Bewertetes
+    // filtern können (Feral Strawberry, 2026-07-08), beste zuerst. rating ist ein
+    // Vergleich (kein ODER) — Klick ersetzt/entfernt den Wert (search.js).
+    ratingsBox.innerHTML = ratings.length === 0
+      ? `<div class="sbempty">${STRINGS.sidebarNoRatings}</div>`
+      : ratings.map((r) =>
+          chipRow(pred("rating", r.rating), "★".repeat(r.rating), "#d9a441", r.count)).join("");
   }
 
   // Zähler-Refresh, robust (Feral Strawberrys 100-GB-Runde, 2026-07-08 — „Nach Jahr"
-  // blieb nach Neustarts leer/alt): (1) die drei Endpunkte unabhängig
-  // verarbeiten statt Alles-oder-nichts — ein einzelner Fehlschlag riss
-  // vorher AUCH die Jahres-/Format-Gruppen mit ab; (2) veraltete Antworten
+  // blieb nach Neustarts leer/alt): (1) Kennzahlen und Zähler unabhängig
+  // verarbeiten statt Alles-oder-nichts; (2) veraltete Antworten
   // verwerfen (Sequenznummer — parallele Refreshes konnten sich sonst in
   // falscher Reihenfolge überschreiben); (3) wenn gar nichts ankam (Seite
   // öffnet, bevor der Server fertig gebootet hat — start.bat!), automatisch
   // mit Backoff nachfassen statt auf das nächste Zufalls-Event zu warten.
+  // Die Zähler (Modelle, Facetten, Bewertungen) kommen seit #99 aus EINEM
+  // Request (/api/sidebar): ein Filterlauf statt drei, und der Server
+  // merkt sich das Ergebnis je Suchzustand bis zum nächsten Schreibvorgang.
   let countsSeq = 0;
   let retryTimer = null;
   let retryDelay = 1000;
-  // Aktiver Suchzustand (Block S4): geht als ?filter= an die Zähler-Endpunkte.
+  // Aktiver Suchzustand (Block S4): geht als ?filter= an den Zähler-Endpunkt.
   let currentFilter = "";
   async function loadCounts() {
     const seq = ++countsSeq;
     clearTimeout(retryTimer);
     const filter = currentFilter || undefined;
-    const [stats, models, facets] = await Promise.allSettled([
-      getStats(), getModels(filter), getFacets(filter),
-    ]);
+    const [stats, side] = await Promise.allSettled([getStats(), getSidebar(filter)]);
     if (seq !== countsSeq) return;   // eine jüngere Anfrage läuft schon
-    loadRatings();
+    const models = side.status === "fulfilled" ? { status: "fulfilled", value: side.value.models } : side;
+    const facets = side.status === "fulfilled" ? { status: "fulfilled", value: side.value.facets } : side;
+    if (side.status === "fulfilled") renderRatings(side.value.ratings.ratings);
     if (stats.status === "fulfilled") {
       const s = stats.value;
       nav.querySelector("#sbAllCount").textContent =
@@ -246,7 +308,7 @@ export function initSidebar() {
       const size = (b) => b >= 1e9
         ? `${(b / 1e9).toLocaleString(STRINGS.locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} GB`
         : `${Math.round(b / 1e6).toLocaleString(STRINGS.locale)} MB`;
-      // Library vs. indiziert gesamt getrennt (ADR 0041, I2) — ohne
+      // Library vs. katalogisiert gesamt getrennt (ADR 0041, I2) — ohne
       // konfigurierte Library gibt es die Unterscheidung nicht.
       const items = s.total_items.toLocaleString(STRINGS.locale);
       nav.querySelector("#sbTotals").textContent = s.library_configured
@@ -260,6 +322,7 @@ export function initSidebar() {
       if (rankingsEnabled !== !!s.rankings) {
         rankingsEnabled = !!s.rankings;
         nav.querySelector('.sbgroup[data-group="rankings"]').hidden = !rankingsEnabled;
+        emit("rankings-enabled", { enabled: rankingsEnabled });   // 🏆 in der Chip-Leiste
         loadArenas();
       }
     }
@@ -276,10 +339,10 @@ export function initSidebar() {
       // Modell-Chips sind exakt ("…"): der Sidebar-Wert ist der volle
       // Rohwert, Teilstring-Matching wäre hier falsch (ADR 0022-Zähler).
       modelsBox.innerHTML = m.models.length || m.unknown
-        ? m.models.map((x) => chipRow(
+        ? byContext(m.models, (x) => chipRow(
             { kind: "field", negated: false, field: "model", op: "=",
               values: modelChipValues(x) },
-            displayModelName(x.model), "#4bbf82", x.count, modelTitle(x))).join("") + unknownRow
+            displayModelName(x.model), "#4bbf82", x.count, modelTitle(x)), STRINGS.nounModels) + unknownRow
         : `<div class="sbempty">${STRINGS.sidebarNoModels}</div>`;
     }
     if (facets.status === "fulfilled") {
@@ -296,11 +359,24 @@ export function initSidebar() {
       // normalisierter Name, ADR 0026 — Teilstring-Matching wäre falsch);
       // Eingangsbild = has:-Chip (mit) bzw. dessen Negation (ohne).
       lorasBox.innerHTML = f.loras?.length
-        ? f.loras.map((x) => chipRow(
+        ? byContext(f.loras, (x) => chipRow(
             { kind: "field", negated: false, field: "lora", op: "=",
               values: [{ value: x.lora, exact: true }] },
-            x.lora, "#6fbf9a", x.count, x.lora)).join("")
+            x.lora, "#6fbf9a", x.count, x.lora), STRINGS.nounLoras)
         : `<div class="sbempty">${STRINGS.sidebarNoLoras}</div>`;
+      // Generator (ADR 0066 + Nachtrag 2026-09-08): Plattform-Zeilen aus dem
+      // tool-Feld — ComfyUI, A1111, Midjourney, Google, OpenAI, Adobe, Topaz …
+      // Grob vor fein: die Gruppe steht ÜBER „Nach Modell", ein Klick lässt
+      // die Modell-Liste im Kontext zählen (Treffer oben). Chip = exakter
+      // Rohwert; Anzeigename aus den Strings, unbekannte Werte roh.
+      toolsBox.innerHTML = f.tools?.length
+        ? byContext(f.tools, (x) => chipRow(
+            { kind: "field", negated: false, field: "tool", op: "=",
+              values: [{ value: x.tool, exact: true }] },
+            (Object.hasOwn(STRINGS.generatorLabels, x.tool) ? STRINGS.generatorLabels[x.tool] : x.tool),
+            "#e0915b", x.count,
+            `tool: ${x.tool}`), STRINGS.nounGenerators)
+        : `<div class="sbempty">${STRINGS.sidebarNoGenerators}</div>`;
       inputImageBox.innerHTML = f.input_image
         ? chipRow(pred("has", "input_image"), STRINGS.inputImageWith,
                   "#c9b45b", f.input_image.mit, "has: input_image")
@@ -322,7 +398,7 @@ export function initSidebar() {
       // ständig wieder zu (Feral Strawberrys Windows-Runde 4).
       yearsBox.innerHTML = f.years.map((y) => `
         <div class="sbrow sbyear${y.count === 0 ? " dim" : ""}" data-chip="${esc(JSON.stringify(pred("year", y.year)))}"
-             data-akey="year::${y.year}" title="year: ${y.year}">
+             data-akey="year::${y.year}" title="year: ${y.year} · ${esc(rowHint())}">
           <button type="button" class="sbtwist" data-year="${y.year}">${openMonths.has(y.year) ? "▾" : "▸"}</button>
           <span class="sblabel">${y.year}</span>
           <span class="sbcount">${y.count.toLocaleString(STRINGS.locale)}</span>
@@ -336,10 +412,10 @@ export function initSidebar() {
             : "");
     }
     refreshHighlights();
-    const failures = [stats, models, facets].filter((r) => r.status === "rejected");
+    const failures = [stats, side].filter((r) => r.status === "rejected");
     if (failures.length) {
       console.warn(...failures.map((r) => r.reason));
-      if (failures.length === 3) {
+      if (failures.length === 2) {
         modelsBox.innerHTML = `<div class="sbempty">${STRINGS.serverUnreachable}</div>`;
       }
       retryTimer = setTimeout(() => {
@@ -357,7 +433,63 @@ export function initSidebar() {
   let activeKeys = new Set();
   let stateEmpty = true;
   let dupesActive = false;
+  // Geladene Suche/Ranking (#133): ein Ranking leuchtet, solange sein
+  // Bearbeiten-Modus läuft (context-changed); eine gespeicherte Suche
+  // leuchtet, solange die Chips ihr entsprechen (Vergleich des kanonischen
+  // Ausdrucks — saved wird mit dem ersten Zustand nach dem Laden gefüllt,
+  // der gespeicherte Text kann aus alten Fassungen stammen). {kind, id,
+  // saved?, match} oder null.
+  let loaded = null;
+  const loadedActive = () =>
+    !!loaded && (loaded.kind === "arena" || loaded.match === true);
+  // Ersthinweis zur Klick-Regel (Feral Strawberry, 2026-09-08: „Menschen lesen keine
+  // Doku, Tooltips sieht man nur durch Zufall"): genau in dem Moment, in dem
+  // ein einfacher Klick eine ANDERE aktive Auswahl derselben Gruppe ersetzt,
+  // erscheint unter der Gruppe eine Zeile „Auswahl ersetzt · ⌘-Klick fügt
+  // hinzu". Sie verschwindet nach ein paar Sekunden und kommt höchstens
+  // dreimal je Browser (localStorage) — danach ist die Regel gelernt.
+  const OR_HINT_KEY = "feral-or-hint-shown";
+  const OR_HINT_MAX = 3;
+  // Jeder weitere Facetten-Klick, der NICHT lehrt, räumt einen noch stehenden
+  // Hinweis weg — der Nutzer hat weitergemacht.
+  function dismissOrHint() { orHint = null; placeOrHint(); }
+  function teachOr(row, pred) {
+    if (pred.kind === "rating" || pred.kind === "has") return dismissOrHint();   // dort gibt es kein ODER
+    if (row.classList.contains("active")) return dismissOrHint();               // Klick auf Aktives = entfernen
+    const group = row.closest(".sbgroup");
+    if (!group) return dismissOrHint();
+    const groupOf = (akey) => akey.split(":").slice(0, 2).join(":");
+    const other = [...group.querySelectorAll(".sbrow.active")]
+      .some((r) => r !== row && r.dataset.akey && groupOf(r.dataset.akey) === groupOf(row.dataset.akey));
+    if (!other) return dismissOrHint();                                          // nichts ersetzt
+    let shown = 0;
+    try { shown = parseInt(localStorage.getItem(OR_HINT_KEY) || "0", 10) || 0; } catch { /* privat */ }
+    if (shown >= OR_HINT_MAX) return dismissOrHint();
+    try { localStorage.setItem(OR_HINT_KEY, String(shown + 1)); } catch { /* privat */ }
+    // Direkt UNTER der geklickten Zeile (Feral Strawberry, 2026-09-08: am Gruppenende
+    // sieht ihn bei 60 Modellen niemand). Die Liste wird nach dem Klick neu
+    // gezeichnet — placeOrHint() setzt ihn in refreshHighlights() wieder
+    // unter dieselbe Zeile (über ihren Aktiv-Schlüssel), bis die Zeit um ist.
+    orHint = { akey: row.dataset.akey, text: STRINGS.sidebarOrHint.replace("{mod}", modKey()),
+               until: Date.now() + OR_HINT_MS };
+    placeOrHint();
+    setTimeout(() => { orHint = null; placeOrHint(); }, OR_HINT_MS);
+  }
+  const OR_HINT_MS = 6000;
+  let orHint = null;
+  function placeOrHint() {
+    nav.querySelector(".sbhint")?.remove();
+    if (!orHint || Date.now() >= orHint.until) return;
+    const row = [...nav.querySelectorAll(".sbrow")].find((r) => r.dataset.akey === orHint.akey);
+    if (!row) return;
+    const hint = document.createElement("div");
+    hint.className = "sbhint";
+    hint.textContent = orHint.text;
+    row.parentNode.insertBefore(hint, row.nextSibling);
+  }
+
   function refreshHighlights() {
+    placeOrHint();   // Ersthinweis überlebt die Neuzeichnung der Listen
     for (const row of nav.querySelectorAll(".sbrow")) {
       if (row.dataset.akey !== undefined) {
         row.classList.toggle("active", activeKeys.has(row.dataset.akey));
@@ -366,7 +498,9 @@ export function initSidebar() {
       } else if (row.dataset.kind === "dupes") {
         row.classList.toggle("active", dupesActive);
       } else {
-        row.classList.remove("active");   // gespeicherte Suchen: kein Dauer-Aktiv
+        // Gespeicherte Suchen/Rankings: aktiv NUR im Bearbeiten-Modus (#133).
+        row.classList.toggle("active",
+          loadedActive() && row.dataset.kind === loaded.kind && Number(row.dataset.id) === loaded.id);
       }
     }
   }
@@ -403,7 +537,11 @@ export function initSidebar() {
     if (!row) return;
     if (row.dataset.chip) {
       // Facetten-Wert togglen — search.js legt den Chip an/erweitert/entfernt.
-      emit("chip-toggle", { pred: JSON.parse(row.dataset.chip) });
+      // Lightroom-Regel (2026-09-08): Klick ersetzt, Cmd/Strg-Klick fügt hinzu.
+      const pred = JSON.parse(row.dataset.chip);
+      const additive = !!(e.metaKey || e.ctrlKey);
+      if (additive) dismissOrHint(); else teachOr(row, pred);
+      emit("chip-toggle", { pred, additive });
     } else if (row.dataset.kind === "folder") {
       // Gespeicherte Suche: Ausdruck als Chips laden (bearbeitbar, ADR 0035).
       // `folder` merkt sich der Speicherdialog (Block S7): Überschreiben/
@@ -423,8 +561,6 @@ export function initSidebar() {
         name: row.dataset.name,
         expression: row.dataset.expr,
       });
-    } else if (row.dataset.kind === "arena-new") {
-      emit("arena-create", {});
     } else if (row.dataset.kind === "all") {
       emit("state-clear", {});
     } else if (row.dataset.kind === "dupes") {
@@ -454,8 +590,28 @@ export function initSidebar() {
     }
     stateEmpty = !d.expression;
     dupesActive = false;
+    if (loaded?.kind === "folder") {
+      if (!d.canonical) loaded = null;
+      else {
+        if (loaded.saved === null) loaded.saved = d.canonical;
+        loaded.match = d.canonical === loaded.saved;
+      }
+    }
     refreshHighlights();
     applyFilter(d.expression || "");
+  });
+  // Gespeicherte Suche geladen (Sidebar-Klick) bzw. gerade gespeichert
+  // (Speicherdialog): ab jetzt ist sie die Quelle der Chips.
+  on("state-load", (d) => {
+    if (d.folder) { loaded = { kind: "folder", id: d.folder.id, saved: null, match: false }; refreshHighlights(); }
+    else if (!d.arena) { loaded = null; refreshHighlights(); }
+  });
+  on("folder-origin", (d) => { loaded = { kind: "folder", id: d.id, saved: d.expression, match: true }; refreshHighlights(); });
+  on("state-clear", () => { loaded = null; refreshHighlights(); });
+  on("context-changed", (d) => {
+    if (d) loaded = { kind: d.kind, id: d.id };
+    else if (loaded?.kind === "arena") loaded = null;
+    refreshHighlights();
   });
   on("source-changed", (d) => {
     if (d?.kind !== "dupes") return;
@@ -472,12 +628,12 @@ export function initSidebar() {
   on("engine-idle", () => { loadCounts(); loadFolders(); loadArenas(); });
   // Nach Arena-Änderungen/Duellen (rankings.js) die Gruppe nachziehen.
   on("rankings-changed", loadArenas);
-  on("annotation-changed", () => { loadRatings(); loadFolders(); });
+  on("annotation-changed", () => { loadCounts(); loadFolders(); });
   on("model-changed", () => { loadCounts(); loadFolders(); });  // ADR 0022
   on("items-rejected", () => { loadCounts(); loadFolders(); }); // ADR 0041
   on("folders-changed", loadFolders);
   // Sammel-Aktion (ADR 0040): kann Tags/Modelle/Bewertungen in Masse ändern.
-  on("bulk-applied", () => { loadCounts(); loadRatings(); loadFolders(); });
+  on("bulk-applied", () => { loadCounts(); loadFolders(); });
 
   // Tab kommt zurück in den Vordergrund (z. B. nach einem Server-Neustart bei
   // offenem Browser): Zähler auffrischen — heilt veraltete Gruppen von selbst.

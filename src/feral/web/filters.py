@@ -43,6 +43,9 @@ FIELDS = frozenset({
     "sampler", "scheduler", "steps", "cfg_scale", "denoise", "size",
     "lora", "vae", "description", "credit", "ai_source_type",
     "creator_tool", "job_id", "feature", "input_image",
+    "topaz_version", "topaz_model", "upscale_factor", "source_size", "topaz_settings",
+    "claim_generator", "software_agent",
+    "video_codec", "video_profile", "pixel_format",
 })
 
 # Whitelist der sort:-Direktive (ADR 0035). Muss die Schlüssel von
@@ -103,13 +106,17 @@ NORM_PATH = "replace(path, '\\', '/')"
 library_root_provider: Callable[[], str | None] = lambda: None
 
 # Die zwei Werte des fundort:-Prädikats: „library" = mindestens ein Fundort
-# unter library.root, „extern" = keiner (nur indiziert, ADR 0041).
+# unter library.root, „extern" = keiner (nur katalogisiert, ADR 0041).
 FUNDORTE = ("library", "extern")
 
 # Englische Aliasse der deutschen Grammatik-Reste (ADR 0054, Block M.3) —
 # nur beim Parsen; kanonisch (Prädikate, serialize()) bleibt die heutige
 # Schreibweise, damit gespeicherte Ausdrücke nie migriert werden müssen.
-_KEY_ALIASES = {"file": "datei", "location": "fundort"}
+# ``generator:`` ist der sprechende Alias der Facette „Generator" (ADR 0066)
+# auf das kanonische Feld ``tool``; ``codec:`` der kurze auf ``video_codec``
+# (Issue #71).
+_KEY_ALIASES = {"file": "datei", "location": "fundort", "generator": "tool",
+                "codec": "video_codec"}
 _FORMAT_ALIASES = {"portrait": "hochformat", "square": "quadratisch",
                    "landscape": "querformat"}
 _SORT_DIRECTION_ALIASES = {"asc": "auf", "desc": "ab"}
@@ -139,11 +146,14 @@ _RATING = re.compile(r"^rating(>=|<=|=)([0-5])$")
 # Eckwert-Vergleiche auf items-Spalten (Whitelist! Wert = Zahl).
 _METRIC = re.compile(r"^(width|height|fps)(>=|<=|=)(\d+(?:\.\d+)?)$")
 _METRIC_COLUMNS = {"width": "i.width", "height": "i.height", "fps": "i.fps"}
-# Ein Wert: "…" (darf Leerraum enthalten) oder ein Token ohne Leerraum.
-# Anführungszeichen IM Wert werden verdoppelt (SQL-Muster, ADR-0035-Nachtrag):
-# "sag ""hi""" = ein exakter Wert `sag "hi"` — vorher konnte die Grammatik
-# solche Werte gar nicht tragen (Seed-Varianten-Suche verlor den Prompt).
-_VALUE = r'"(?:[^"]|"")*"|\S+'
+# Ein Wert: "…" (exakt, darf Leerraum enthalten), '…' (Teilstring-Phrase,
+# darf Leerraum enthalten — Nachtrag #132 zu ADR 0035) oder ein Token ohne
+# Leerraum (Teilstring). Das Anführungszeichen trägt also ZWEI Bits: Leerraum
+# erlaubt UND exakt/enthält. Anführungszeichen IM Wert werden verdoppelt
+# (SQL-Muster, ADR-0035-Nachtrag): "sag ""hi""" = ein exakter Wert `sag "hi"`,
+# 'don''t stop' = Phrase `don't stop`. Ein nacktes Token darf Apostrophe
+# enthalten (don't, cats') — nur ein FÜHRENDES Anführungszeichen öffnet.
+_VALUE = r'"(?:[^"]|"")*"|\'(?:[^\']|\'\')*\'|\S+'
 _VALUE_RE = re.compile(_VALUE)
 # feld: wert1 | wert2 | "wert drei" — Doppelpunkt mit optionalem Leerraum,
 # Pipe MIT Leerraum beidseits als ODER-Trenner (ADR 0035; ohne Leerraum bleibt
@@ -185,12 +195,14 @@ def _split_values(key: str, blob: str) -> list[tuple[str, bool]]:
         raw = m.group(0)
         if raw == "|":  # der Trenner selbst (matcht als \S+)
             continue
-        if raw.startswith('"'):
+        quote = raw[0]
+        if quote in ('"', "'"):
             # Unbalancierte Quotes landen in der \S+-Alternative (die
-            # Quoted-Alternative verlangt den schließenden Abschluss).
-            if len(raw) < 2 or not raw.endswith('"'):
+            # Quoted-Alternativen verlangen den schließenden Abschluss).
+            if len(raw) < 2 or not raw.endswith(quote):
                 raise UserError("filterUnclosedQuote", value=raw)
-            values.append((raw[1:-1].replace('""', '"'), True))
+            # "…" = exakt, '…' = enthält als Phrase (Nachtrag #132).
+            values.append((raw[1:-1].replace(quote * 2, quote), quote == '"'))
         else:
             values.append((raw, False))
     if not values or any(not v for v, _ in values):
@@ -332,14 +344,26 @@ def parse(expression: str) -> list[Predicate]:
     return preds
 
 
+def _render_value(value: str, exact: bool) -> str:
+    """Ein Wert in Grammatik-Schreibweise (Gegenstück zu ``_split_values``)."""
+    if exact:
+        return '"{}"'.format(value.replace('"', '""'))
+    if re.search(r"\s", value) or value[:1] in ('"', "'") or value == "|":
+        return "'{}'".format(value.replace("'", "''"))
+    return value
+
+
 def serialize(predicates: list[Predicate]) -> str:
     """Prädikate → kanonischer Ausdruckstext (ADR 0035).
 
     Die Gegenrichtung zu ``parse()``, damit Chips ↔ Text verlustfrei in beide
     Richtungen gehen; ``parse(serialize(preds)) == preds`` ist garantiert
     (Round-Trip-Tests). Exakte Werte werden mit ``"…"`` ausgegeben — das
-    Anführungszeichen trägt die Bedeutung; enthaltene ``"`` werden
-    verdoppelt (Gegenstück zu ``_split_values``).
+    Anführungszeichen trägt die Bedeutung; Teilstring-Werte, die nackt nicht
+    darstellbar sind (Leerraum, führendes Anführungszeichen, das ODER-Zeichen
+    selbst), mit ``'…'`` (Nachtrag #132); enthaltene Anführungszeichen werden
+    verdoppelt. Damit ist JEDES ``(wert, exakt)``-Paar schreibbar — die
+    Chip-Brücke muss nichts mehr stillschweigend hochstufen.
     """
     parts: list[str] = []
     for p in predicates:
@@ -350,10 +374,7 @@ def serialize(predicates: list[Predicate]) -> str:
             parts.append(f"{neg}{p.field}{p.op}{p.value}")
         else:
             key = p.field if p.kind == "field" else p.kind
-            rendered = " | ".join(
-                '"{}"'.format(v.replace('"', '""')) if exact else v
-                for v, exact in p.values
-            )
+            rendered = " | ".join(_render_value(v, exact) for v, exact in p.values)
             parts.append(f"{neg}{key}: {rendered}")
     return " ".join(parts)
 
@@ -387,19 +408,16 @@ def predicate_to_dict(p: Predicate) -> dict[str, Any]:
 def predicate_from_dict(d: dict[str, Any]) -> Predicate:
     """Chip-Dict → Prädikat (lose — die Validierung macht parse()).
 
-    Werte mit Leerraum sind in der Grammatik nur exakt/als Phrase
-    darstellbar und werden entsprechend hochgestuft; dito Werte, die mit
-    ``"`` beginnen (unquotiert läse parse() das als offene Phrase).
-    Eingebettete Anführungszeichen trägt die Grammatik seit dem
-    Escaping-Nachtrag zu ADR 0035 per Verdopplung — das frühere
-    Rundweg-Ablehnen ließ die Seed-Varianten-Suche Prompts mit Zitaten
-    still verlieren.
+    Das ``exact``-Bit wird 1:1 übernommen: seit ``'…'`` (Nachtrag #132 zu
+    ADR 0035) ist jeder Wert in der Grammatik darstellbar, ``serialize()``
+    wählt die Schreibweise. Bis dahin wurden Werte mit Leerraum oder
+    führendem ``"`` hier stillschweigend auf exakt hochgestuft — ein
+    »enthält new york« war aus der Chip-Leiste gar nicht formulierbar.
+    Facetten (Modell/LoRA/Tag/Generator) senden ``exact: true`` ausdrücklich.
     """
     values: list[tuple[str, bool]] = []
     for v in d.get("values", []):
-        text = str(v.get("value", "")).strip()
-        values.append((text, bool(v.get("exact"))
-                       or bool(re.search(r"\s", text)) or text.startswith('"')))
+        values.append((str(v.get("value", "")).strip(), bool(v.get("exact"))))
     return Predicate(
         kind=str(d.get("kind", "")),
         negated=bool(d.get("negated")),
@@ -463,14 +481,31 @@ def _value_match(column: str, values: tuple[tuple[str, bool], ...],
     return f"({' OR '.join(frags)})"
 
 
-def build_where(predicates: list[Predicate]) -> tuple[str, list[Any]]:
+def build_where(
+    predicates: list[Predicate], *, memo: Callable[[str, list[Any]], str] | None = None
+) -> tuple[str, list[Any]]:
     """Prädikate → (SQL-Fragment über Alias ``i``, Parameter). UND-verknüpft.
 
     Die ``sort:``-Direktive ist kein Filter und wird übersprungen — ein
     Ausdruck nur aus ``sort:`` ergibt ein leeres Fragment.
+
+    ``memo`` (#99, ADR 0073): Haken für die TEUREN Mengen-Subselects —
+    Volltext (``text:``/``raw:`` über FTS5) und die LIKE-Scans über die
+    Fundorte (``datei:``-Teilstring, ``fundort:``). Er bekommt
+    (Subselect-SQL, dessen Parameter) und liefert den Ersatz-Subselect
+    (z. B. ``SELECT file_hash FROM facet_memo_0``); die Parameter gehören
+    dann der Materialisierung, nicht mehr dieser Abfrage. Die Negation
+    bleibt außen (``NOT (… IN …)``), der Haken sieht immer die positive
+    Menge. Ohne ``memo`` laufen die Subselects inline wie bisher.
     """
     parts: list[str] = []
     params: list[Any] = []
+
+    def inner(sql: str, inner_params: list[Any]) -> str:
+        if memo is None:
+            params.extend(inner_params)
+            return sql
+        return memo(sql, list(inner_params))
     # WICHTIG (Feral Strawberrys Windows-Runde 5): Mengen-Prädikate als UNKORRELIERTE
     # ``IN (SELECT …)``-Subqueries — SQLite materialisiert die Treffermenge
     # EINMAL je Abfrage (ephemärer Index), danach nur noch Lookups. Die alte
@@ -504,11 +539,11 @@ def build_where(predicates: list[Predicate]) -> tuple[str, list[Any]]:
             # Live-Suche (Token-Präfix, kuratierte Spalten — ADR 0036).
             # Mehrere text: = UND, ODER-Werte innerhalb eines text: = FTS-OR.
             # raw: sucht ZUSÄTZLICH in den Roh-Blobs (Opt-in, ADR 0038).
-            sub = ("i.file_hash IN (SELECT file_hash FROM search_index "
-                   "WHERE search_index MATCH ?)")
             columns = FTS_RAW_COLUMNS if p.kind == "raw" else FTS_DEFAULT_COLUMNS
             joined = " OR ".join(fts_match_query([v]) for v, _ in p.values)
-            params.append(f"{columns}: ({joined})")
+            sub = "i.file_hash IN (" + inner(
+                "SELECT file_hash FROM search_index WHERE search_index MATCH ?",
+                [f"{columns}: ({joined})"]) + ")"
         elif p.kind == "tag":
             match = _value_match("t.name", p.values, params)
             sub = (f"i.file_hash IN (SELECT it.file_hash FROM item_tags it "
@@ -562,9 +597,10 @@ def build_where(predicates: list[Predicate]) -> tuple[str, list[Any]]:
             # (Migration 0016, exakt dieselbe BASENAME-Formel); Teilstring
             # bleibt ein Scan über file_locations — dieselbe Größenordnung
             # wie fundort: (~90 ms bei 275k Fundorten, gemessen §0.6).
-            match = _value_match(BASENAME, p.values, params)
-            sub = (f"i.file_hash IN (SELECT file_hash FROM file_locations "
-                   f"WHERE {match})")
+            file_params: list[Any] = []
+            match = _value_match(BASENAME, p.values, file_params)
+            sub = "i.file_hash IN (" + inner(
+                f"SELECT file_hash FROM file_locations WHERE {match}", file_params) + ")"
         elif p.kind == "fundort":
             # Library vs. Extern (ADR 0041, I2): ein Item ist „library", wenn
             # MINDESTENS EIN Fundort unter library.root liegt (Dublette
@@ -574,15 +610,15 @@ def build_where(predicates: list[Predicate]) -> tuple[str, list[Any]]:
             # schalten SQLites LIKE-Optimierung ab). Ohne konfigurierte Root
             # ist nichts „library" — ehrliche Konstanten statt Fehler.
             prefix = library_like_prefix()
-            in_lib = (f"i.file_hash IN (SELECT file_hash FROM file_locations "
-                      f"WHERE {NORM_PATH} LIKE ? ESCAPE '\\')")
+            in_lib_sql = (f"SELECT file_hash FROM file_locations "
+                          f"WHERE {NORM_PATH} LIKE ? ESCAPE '\\'")
             subs = []
             for v, _ in p.values:
                 if prefix is None:
                     subs.append("1=0" if v == "library" else "1=1")
                 else:
+                    in_lib = f"i.file_hash IN ({inner(in_lib_sql, [prefix])})"
                     subs.append(in_lib if v == "library" else f"NOT ({in_lib})")
-                    params.append(prefix)
             sub = subs[0] if len(subs) == 1 else f"({' OR '.join(subs)})"
         elif p.kind == "rating":
             if p.value == "0":

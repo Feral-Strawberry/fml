@@ -12,6 +12,10 @@
 *.db-wal
 *.db-shm
 
+# Serverlog (#64): entsteht neben der Datenbank (<db-Ordner>/logs), bei
+# --db ./feral.sqlite also hier im Repo — Betriebsdaten, kein Code.
+/logs/
+
 # Backup der lokalen Config (entsteht beim GUI-Speichern)
 config.toml.bak
 
@@ -132,3 +136,7 @@ $RECYCLE.BIN/
 
 # --- Claude Code: lokale Session-Daten (Permissions wachsen automatisch, §6) ---
 .claude/settings.local.json
+
+# Auszug aus der eigenen ComfyUI-Instanz für die Workflow-Vorschau (#47):
+# python tools/dump_object_info.py — Daten der Installation, nicht Code.
+src/feral/web/static/widgets.json

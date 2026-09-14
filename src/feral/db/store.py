@@ -49,6 +49,25 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def record_issue(conn: sqlite3.Connection, path: str | Path, kind: str, message: str) -> None:
+    """Halte ein Scan-Problem fest (``scan_issues``, ADR 0014) — idempotent
+    über (Pfad, Art, Meldung); ein erneutes Auftreten öffnet Quittiertes
+    wieder. ``message`` ist der Meldungs-JSON-Text (``messages.dump``).
+    Gemeinsamer Schreibgriff für Scanner UND Importer (Issue #71)."""
+    ts = now_iso()
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO scan_issues (path, kind, message, first_seen_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(path, kind, message) DO UPDATE SET
+                last_seen_at = excluded.last_seen_at,
+                resolved = 0
+            """,
+            (str(path), kind, message, ts, ts),
+        )
+
+
 def _value_raw(item: RawMetadataItem) -> bytes:
     """Byte-exakter Nutzinhalt eines Eintrags (ADR 0010).
 
@@ -175,40 +194,52 @@ def store_interpretations(
     file_hash: str,
     interpretations: Sequence["Interpretation"],
     now: str | None = None,
+    commit: bool = True,
 ) -> None:
     """Schreibe die Schicht-2-Felder einer Datei in die DB (ADR 0011).
 
     Ersetzt alle vorhandenen interpretierten Felder des Items vollständig
     (idempotent) — die Roh-Metadaten (Schicht 1) bleiben unangetastet. Eine
     leere Liste löscht entsprechend nur den Altbestand.
+
+    ``commit=False`` (ADR 0067): in der offenen Transaktion des Aufrufers
+    schreiben — der Reparse bündelt so hunderte Items je Commit (der Commit
+    je Item war der teurere Teil: 2,3 von 2,8 ms, Issue #62).
     """
     ts = now or now_iso()
-    with conn:
-        conn.execute(
-            "DELETE FROM interpreted_metadata WHERE file_hash = ?", (file_hash,)
+    if commit:
+        with conn:
+            _write_interpretations(conn, file_hash, interpretations, ts)
+    else:
+        _write_interpretations(conn, file_hash, interpretations, ts)
+
+
+def _write_interpretations(conn, file_hash, interpretations, ts) -> None:
+    conn.execute(
+        "DELETE FROM interpreted_metadata WHERE file_hash = ?", (file_hash,)
+    )
+    for interpretation in interpretations:
+        conn.executemany(
+            """
+            INSERT INTO interpreted_metadata
+                (file_hash, parser, parser_version, ordinal, field,
+                 value_text, interpreted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    file_hash,
+                    interpretation.parser,
+                    interpretation.parser_version,
+                    ordinal,
+                    item.field,
+                    item.value,
+                    ts,
+                )
+                for ordinal, item in enumerate(interpretation.fields)
+            ],
         )
-        for interpretation in interpretations:
-            conn.executemany(
-                """
-                INSERT INTO interpreted_metadata
-                    (file_hash, parser, parser_version, ordinal, field,
-                     value_text, interpreted_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        file_hash,
-                        interpretation.parser,
-                        interpretation.parser_version,
-                        ordinal,
-                        item.field,
-                        item.value,
-                        ts,
-                    )
-                    for ordinal, item in enumerate(interpretation.fields)
-                ],
-            )
-        update_search_index(conn, file_hash)
+    update_search_index(conn, file_hash)
 
 
 def update_search_index(conn: sqlite3.Connection, file_hash: str) -> None:

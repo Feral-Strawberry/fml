@@ -1,14 +1,14 @@
 // loupe.js — Vollbild-Loupe: großes Medium, ←/→-Blättern mit Vorladen,
 // Bild/Workflow-Umschalter, Tastatur (←/→, Pos1/Ende, Esc; Enter im Grid).
 //
-// Das schnelle Durchblättern ist essenziell (docs/DESIGN.md): Blättern läuft
+// Das schnelle Durchblättern ist essenziell (Design-Leitbild): Blättern läuft
 // in Grid-Reihenfolge über den Seiten-Cache der Galerie, Nachbarbilder werden
 // vorgeladen, /api/media ist immutable-gecacht — nach dem ersten Mal instant.
 // Blättern zieht die Auswahl mit ('selection-changed'), damit Panel und
 // Grid-Ring beim Schließen auf dem zuletzt betrachteten Item stehen.
 
 import { STRINGS } from "./strings.js";
-import { displayUrl, getItem, mediaUrl, wireImageFallback, wireReveal } from "./api.js";
+import { displayUrl, getItem, mediaUrl, wireMediaFallback, wireReveal, releaseVideos, scopeSignal, abortScope, isAbort, canPlayVideo, mountUnplayable, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
 import { galleryItemAt, galleryTotal } from "./gallery.js";
 import { renderWorkflowInto } from "./workflow.js";
 import { dotsHtml, rate } from "./curate.js";
@@ -78,6 +78,7 @@ export function initLoupe() {
     segImg.classList.toggle("active", mode === "media");
     segWf.classList.toggle("active", mode === "workflow");
     if (mode === "workflow") {
+      releaseVideos(stage);
       stage.innerHTML = `<div class="lpwf" id="lpWfBox"></div>`;
       renderWorkflowInto(stage.querySelector("#lpWfBox"), cur.hash);
     }
@@ -86,8 +87,8 @@ export function initLoupe() {
   async function show(hash, index) {
     const mySeq = ++seq;
     let d;
-    try { d = await getItem(hash); }
-    catch (err) { console.warn(err); return; }
+    try { d = await getItem(hash, { signal: scopeSignal("loupe") }); }
+    catch (err) { if (!isAbort(err)) console.warn(err); return; }
     if (mySeq !== seq || !open) return;
 
     cur = { hash, index };
@@ -103,16 +104,23 @@ export function initLoupe() {
     root.querySelector("#lpTitle").textContent = name;
     root.querySelector("#lpMeta").textContent =
       `${d.width ? `${d.width}×${d.height} · ` : ""}${d.fps ? `${d.fps} fps · ` : ""}`
-      + `${d.container.toUpperCase()}${d.media_kind === "video" ? " · VIDEO" : ""}`;
+      + `${d.container.toUpperCase()}${d.media_kind === "video" ? " · VIDEO" : ""}`
+      + `${d.media_kind === "video" && videoCodecFacts(d) ? ` · ${codecLabel(videoCodecFacts(d))}` : ""}`;
     renderCounter();
     renderDots(d.manual.rating);
     emit("annotation-loaded", { hash, rating: d.manual.rating });
 
     if (mode === "media") {
-      stage.innerHTML = d.media_kind === "video"
-        ? `<video src="${mediaUrl(hash)}" controls autoplay loop></video>`
-        : `<img src="${displayUrl(d)}" alt="">`;
-      wireImageFallback(stage, STRINGS.noPreview);
+      releaseVideos(stage);   // #89: voriges Video gibt seine Verbindung zurück
+      // Nicht dekodierbarer Codec (#71): Poster + Hinweis statt Player.
+      if (d.media_kind === "video" && !canPlayVideo(d)) {
+        mountUnplayable(stage, d);
+      } else {
+        stage.innerHTML = d.media_kind === "video"
+          ? `<video src="${mediaUrl(hash)}" controls autoplay loop></video>`
+          : `<img src="${displayUrl(d)}" alt="">`;
+        wireMediaFallback(stage, mediaFallbackLabel(d), d);
+      }
     } else {
       renderMode();
     }
@@ -149,13 +157,17 @@ export function initLoupe() {
     open = true;
     mode = wantedMode === "workflow" ? "workflow" : "media";
     root.hidden = false;
+    emit("view-changed", { view: "loupe", open: true });
     show(hash, index ?? null);
   }
 
   function close() {
     open = false;
     root.hidden = true;
-    stage.innerHTML = "";   // stoppt laufende Videos
+    abortScope("loupe");    // laufende Anfragen der Ansicht verfallen (ADR 0069)
+    releaseVideos(stage);   // stoppt laufende Videos UND gibt den Stream frei (#89)
+    stage.innerHTML = "";
+    emit("view-changed", { view: "loupe", open: false });
   }
 
   // -- Verdrahtung -------------------------------------------------------------
@@ -184,6 +196,9 @@ export function initLoupe() {
     if (open && cur && cur.hash === d.hash) renderDots(d.manual.rating);
   });
   on("items-reloaded", () => { if (!open) cur = null; });
+  // Einzelansicht geht auf (Galerie-Doppelklick, Arena, Panel): Lupe schließen
+  // statt sie darüber hängen zu lassen — symmetrisch zu singleview.js (#28).
+  on("single-open", () => { if (open) close(); });
 
   document.addEventListener("keydown", (e) => {
     const typing = e.target instanceof Element && e.target.matches("input, textarea, select");
@@ -197,8 +212,11 @@ export function initLoupe() {
       else if (e.key === "End") { e.preventDefault(); navTo(galleryTotal() - 1); }
     } else if (e.key === " " && cur) {
       // In der Arena (Ranking-Modul) gehört Space dem Überspringen —
-      // die Lupe darf sich nicht über das Duell legen.
+      // die Lupe darf sich nicht über das Duell legen. Und über der offenen
+      // Einzelansicht auch nicht (#28: sonst spielt ein Video zweimal) —
+      // Tastatur-Guards in ALLEN Richtungen, spiegelbildlich zu singleview.js.
       if (!document.getElementById("rankings").hidden) return;
+      if (!document.getElementById("single").hidden) return;
       e.preventDefault();               // Space darf die Seite nicht scrollen
       openLoupe(cur.hash, cur.index);
     }

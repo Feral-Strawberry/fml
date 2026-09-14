@@ -95,7 +95,6 @@ export function initGallery() {
   let sortKey = storedSort();   // kanonischer Sortierschlüssel (ADR 0039/0057)
   let reloadSeq = 0;            // entwertet Antworten überholter Reloads (Sort-Wechsel)
   let firstLoadDone = false;    // Leer-Hinweis erst nach der ersten Antwort zeigen
-  let needTotal = false;        // Soft-Refresh: Gesamtzahl mit der nächsten Seite neu holen
 
   // Layout-Messwerte — bei Resize und Dichte-Wechsel neu erhoben.
   let cols = 1;
@@ -132,9 +131,9 @@ export function initGallery() {
       // Gesamtzähler nur mit Seite 0 anfordern — der Filter-COUNT je
       // Folgeseite war beim Tief-Scrollen ein Prüf-Scan pro Anfrage.
       const d = await getItems({ limit: PAGE, offset: page * PAGE, sort: sortKey,
-                                 total: page === 0 || needTotal ? 1 : 0, ...filter });
+                                 total: page === 0 ? 1 : 0, ...filter });
       if (seq !== reloadSeq) return;   // inzwischen neu geladen (Sort/Quelle)
-      if (d.total >= 0) { total = d.total; needTotal = false; }
+      if (d.total >= 0) total = d.total;
       firstLoadDone = true;
       d.items.forEach((it, k) => items.set(page * PAGE + k, it));
       renderGrid();
@@ -144,7 +143,11 @@ export function initGallery() {
     }
   }
 
-  async function reloadGrid() {
+  // keepSelection: false = „Alle Medien" in der Sidebar (Issue #33): oben
+  // beginnen, keine Auswahl, kein Rücksprung. Standard true = jeder andere
+  // Zustandswechsel (Chips, ✕, Esc, Sortierung) mit Rücksprung zum
+  // ausgewählten Bild (ADR 0060).
+  async function reloadGrid({ keepSelection = true } = {}) {
     const seq = ++reloadSeq;           // laufende Antworten alter Seiten entwerten
     firstLoadDone = false;             // „leer"-Hinweis erst NACH der Antwort
     total = 0;
@@ -152,12 +155,13 @@ export function initGallery() {
     loadedPages = new Set();
     tiles.forEach((el) => el.remove());
     tiles = new Map();
-    const keepHash = selectedHash;     // Rücksprung-Anker (ADR 0060)
+    const keepHash = keepSelection ? selectedHash : null;  // Rücksprung-Anker (ADR 0060)
     selectedHash = null;               // alte Auswahl gehört zur alten Reihenfolge
     selectedIndex = null;
+    selectedSet = new Set();           // sonst malt renderGrid alte Ringe nach (#33)
     wrap.scrollTop = 0;
     await loadPage(0);
-    emit("items-reloaded", { total });
+    emit("items-reloaded", { total, reset: !keepSelection });
     // Zweiter Durchgang im nächsten Frame: Erst mit gesetzter Spacer-Höhe steht
     // fest, ob ein Scrollbalken erscheint (der die Spaltenbreite ändert).
     requestAnimationFrame(() => { measureLayout(); renderGrid(); });
@@ -186,11 +190,14 @@ export function initGallery() {
   // Grid-Position nach — so lässt sich eine Serie ohne Fokusverlust
   // durchsortieren. Meldet 'items-refreshed' (Trefferzahl), bewusst NICHT
   // 'items-reloaded' — auf das reagieren Panel/Ansichten mit Zustands-Resets.
+  //
+  // Kein Leer-Zwischenstand (#32): Der alte Seiten-Cache bleibt bis zum
+  // Eintreffen der neuen Seite stehen (ein Scroll währenddessen rendert
+  // weiter die alten Kacheln) und wird dann in EINEM Schritt ersetzt. Die
+  // Kacheln selbst zieht renderGrid per Hash nach — eingerückte neue Items
+  // schieben die alten, statt alle Kacheln neu zu befüllen.
   async function refreshGrid() {
-    const seq = ++reloadSeq;           // laufende Antworten alter Seiten entwerten
-    items = new Map();
-    loadedPages = new Set();
-    needTotal = true;
+    let seq = ++reloadSeq;             // laufende Antworten alter Seiten entwerten
     const keepHash = selectedHash;
     const keepIndex = selectedIndex;
     // Anker: Seite der Auswahl, sonst die erste sichtbare Position.
@@ -198,8 +205,23 @@ export function initGallery() {
       scrollTop: wrap.scrollTop, viewportH: wrap.clientHeight,
       padTop, rowH, gap, cols, total,
     }).first;
-    await loadPage(Math.floor(Math.max(0, anchorIndex) / PAGE));
+    const page = Math.floor(Math.max(0, anchorIndex) / PAGE);
+    let d;
+    try {
+      d = await getItems({ limit: PAGE, offset: page * PAGE, sort: sortKey, total: 1, ...filter });
+    } catch (err) {
+      console.warn(err);               // alter Stand bleibt stehen, nächster Anlass lädt erneut
+      return;
+    }
     if (seq !== reloadSeq) return;     // inzwischen kam ein echter Reload
+    // Tausch: Seiten, die während des Wartens noch in die ALTE Reihenfolge
+    // geladen wurden, gehören nicht in den neuen Cache — zweite Entwertung.
+    seq = ++reloadSeq;
+    total = d.total;
+    firstLoadDone = true;
+    items = new Map();
+    loadedPages = new Set([page]);
+    d.items.forEach((it, k) => items.set(page * PAGE + k, it));
     emit("items-refreshed", { total });
     if (keepHash) {
       let found = null;
@@ -248,20 +270,37 @@ export function initGallery() {
     for (const [i, el] of tiles) {
       if (i < w.first || i >= w.last) { el.remove(); tiles.delete(i); }
     }
-    // … dann das Fenster in DOM-Reihenfolge auffüllen. Die verbleibenden
-    // Kacheln sind ein lückenlos aufsteigender Ausschnitt; die Zielposition
-    // von Index i ist daher immer Kind Nr. (i - first).
+    // … dann das Fenster in DOM-Reihenfolge auffüllen. Kacheln werden per
+    // HASH wiederverwendet, nicht per Position (#32): rückt nach einem
+    // Refresh oben Neues ein, wandert jedes Item um Positionen — sein
+    // Kachel-Element (samt geladenem Thumb) zieht mit, statt dass jede
+    // Position neu befüllt wird. Erst beanspruchen, dann den Rest aus
+    // freien Kacheln decken oder neu anlegen, zuletzt die Reihenfolge
+    // herstellen: die Zielposition von Index i ist immer Kind Nr. (i - first).
+    const byHash = new Map();
+    for (const el of tiles.values()) if (el.dataset.hash) byHash.set(el.dataset.hash, el);
+    const next = new Map();
     for (let i = w.first; i < w.last; i++) {
       const page = Math.floor(i / PAGE);
       if (!loadedPages.has(page)) loadPage(page);
-      let el = tiles.get(i);
-      if (!el) {
-        el = document.createElement("div");
-        el.className = "tile";
-        el.dataset.index = i;
-        tiles.set(i, el);
-        grid.insertBefore(el, grid.children[i - w.first] ?? null);
-      }
+      const item = items.get(i);
+      const el = item && byHash.get(item.file_hash);
+      if (el) { next.set(i, el); byHash.delete(item.file_hash); }
+    }
+    const claimed = new Set(next.values());
+    const spare = [...tiles.values()].filter((el) => !claimed.has(el));
+    for (let i = w.first; i < w.last; i++) {
+      if (next.has(i)) continue;
+      let el = spare.pop();
+      if (!el) { el = document.createElement("div"); el.className = "tile"; }
+      next.set(i, el);
+    }
+    spare.forEach((el) => el.remove());
+    tiles = next;
+    for (let i = w.first, k = 0; i < w.last; i++, k++) {
+      const el = tiles.get(i);
+      el.dataset.index = i;
+      if (grid.children[k] !== el) grid.insertBefore(el, grid.children[k] ?? null);
       fillTile(el, items.get(i));
     }
   }
@@ -472,7 +511,7 @@ export function initGallery() {
     // Sitzungs-Standard (gemerkte Sortierung, ADR 0057).
     sortKey = d.sort || storedSort();
     renderSortButton();
-    reloadGrid();
+    reloadGrid({ keepSelection: !d.reset });
   });
   // Dubletten: Spezialansicht außerhalb des Chip-Zustands.
   on("source-changed", (d) => {
@@ -530,13 +569,12 @@ export function initGallery() {
   });
 
   // Pfeiltasten in der Übersicht (Lightroom-Gefühl): ←/→ ein Item, ↑/↓ eine
-  // Zeile. Nur wenn weder Loupe noch Admin offen sind und niemand tippt.
+  // Zeile. Nur wenn keine Loupe offen ist und niemand tippt.
   document.addEventListener("keydown", async (e) => {
     const typing = e.target instanceof Element && e.target.matches("input, textarea, select");
     if (typing || !total) return;
     if (!document.getElementById("loupe").hidden) return;
     if (!document.getElementById("single").hidden) return;
-    if (!document.getElementById("admin").hidden) return;
     if (!document.getElementById("rankings").hidden) return;  // ←/→ werten dort Duelle
     const delta = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -cols, ArrowDown: cols }[e.key];
     if (delta === undefined) return;

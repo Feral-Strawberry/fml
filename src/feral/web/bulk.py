@@ -191,7 +191,7 @@ def _apply_reject(
     """Ablehnen (ADR 0041): Hash auf die Sperrliste samt letzter Fundort-
     Pfade, Item raus (CASCADE räumt Fundorte/Metadaten/manuelle Schicht ab),
     FTS-Zeile weg, Thumb-Cache-Dateien weg. Die Mediendatei bleibt liegen —
-    egal ob Library oder nur indiziert (»Original heilig«)."""
+    egal ob Library oder nur katalogisiert (»Original heilig«)."""
     from ..thumbs import thumb_path
 
     hashes = [r[0] for r in conn.execute(f"SELECT file_hash FROM {_HITS}")]

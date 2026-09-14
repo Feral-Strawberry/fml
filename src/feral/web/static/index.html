@@ -6,11 +6,12 @@
 <title>Feral Media Library</title>
 <link rel="icon" type="image/png" href="/static/img/feral-strawberry.png">
 <link rel="stylesheet" href="/static/css/theme.css">
+<link rel="stylesheet" href="/static/css/base.css">
 <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
 
-<!-- Topbar: Logo · Suche · Zähler · Aktivität · Theme · Admin -->
+<!-- Topbar: Logo · Suche · Badges · Aktivität · Sprache · Admin -->
 <header id="topbar">
   <div id="logo">
     <img class="mascot" src="/static/img/feral-strawberry.png" alt="">
@@ -34,11 +35,15 @@
   <span id="instanceBadge" hidden></span>
   <!-- Badge NUR im Übersichtsmodus (ADR 0041, I4): fml fasst keine Dateien an. -->
   <span id="modeBadge" hidden></span>
-  <span id="counts"></span>
-  <span id="activity" hidden></span>
+  <!-- Aktivität: Link in den Admin (eigenes Dokument, ADR 0074). -->
+  <a id="activity" href="/admin" hidden></a>
   <!-- Harter Sprachumschalter (ADR 0054): übersteuert die Browser-Sprache. -->
   <button id="langBtn" type="button"></button>
-  <button id="adminBtn" type="button" title="Admin-Konsole"></button>
+  <!-- Dark/Light (#123): Wahl in localStorage, geteilt mit dem Admin (appearance.js). -->
+  <button id="themeBtn" type="button"></button>
+  <!-- Echter Link nach /admin (ADR 0074): Klick öffnet den Admin direkt,
+       Mittelklick den zweiten Tab, Lesezeichen funktionieren (#123). -->
+  <a id="adminBtn" href="/admin" title="Admin"></a>
 </header>
 
 <!-- Drei Spalten: Sidebar · Grid · Detail-Panel -->
@@ -52,8 +57,12 @@
            (auch per Esc, wenn kein Overlay offen) und die Sammel-Aktion. -->
       <div id="midtools">
         <button type="button" id="saveBtn" hidden></button>
+        <!-- 🏆 legt eine NEUE Arena aus den Chips an (ADR 0081); nur bei
+             aktivem Ranking-Modul, auch ohne Chips (ganze Bibliothek). -->
+        <button type="button" id="arenaBtn" hidden></button>
         <button type="button" id="filterReset" hidden></button>
         <button type="button" id="bulkBtn" hidden></button>
+        <button type="button" id="compareBtn" hidden></button>
       </div>
     </div>
     <div id="gridwrap">
@@ -70,7 +79,7 @@
 <div id="rankings" hidden></div>
 <div id="loupe" hidden></div>
 <div id="single" hidden></div>
-<div id="admin" hidden></div>
+<div id="compare" hidden></div>
 
 <script type="module" src="/static/js/main.js"></script>
 </body>

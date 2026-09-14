@@ -1,39 +1,105 @@
-# Admin console (in the web GUI)
+# Admin (its own page under `/admin`)
 
-> What is this? A **single dashboard** (button top right → quick menu →
-> admin console) with everything needed for administration — no terminal
-> and no page switching. The regions sit as tiles in a grid across the full
-> screen width: on top the overview strip (key figures **and** activity),
-> below it three columns (Sources & import | Maintenance, Issues |
-> Configuration). On narrow windows the tiles stack; the "Jump to …" header
-> then scrolls to the desired region (ADR 0029, 0034).
+> What is this? The administration area of the Feral Media Library — a
+> **page of its own** under `/admin` (ADR 0074), reached via the admin
+> button top right, the activity indicator or
+> directly by address. The button is a real link: middle-click opens the
+> admin in a second tab (watch an import while reviewing), bookmarks and
+> browser back work. On the left a side navigation with **seven pages**,
+> at its bottom the **activity widget** (what is running, waiting, whether
+> the worker process is alive — visible on every page, click leads to the
+> overview), below it instance name, schema version and port. On narrow
+> windows (below 960 px) the navigation becomes an icon bar. "Back to the
+> library" is an ordinary page change; the gallery then starts fresh or
+> from the browser's history cache.
 
-## Regions
+## Pages
 
-1. **Overview** — split in two (ADR 0034): on the left the collection's
-   key figures (items total; with a configured media library also
-   **"library X GB / total indexed Y GB"** — what physically sits under
-   the collection root vs. everything indexed (ADR 0041, I2) —, how many
-   carry metadata, how many are interpreted, thumbnail cache, DB size
-   (+WAL), orphaned locations, open issues; plus the `ffprobe`/`ffmpeg`
-   status and the active layer-2 parsers), on the right the
-   **Activity**: live progress of the running task (import/scan/VACUUM …)
-   with counters in the same look. The numbers come from the **same
-   source** as the gallery overview (ADR 0029).
-2. **Sources & import** — the watch folders, ONE import form (once now /
-   watch permanently) and "catalog without copying" (scanning in place) —
-   see below.
-3. **Maintenance** — small buttons, grouped by functional area (see
-   below).
-4. **Issues** — a one-line summary ("⚠ N open issues · M blocklist
-   entries"). **View & clean up …** opens an overlay, **grouped by error
-   kind** with honest counters: per kind the most recent entries plus
-   "acknowledge all N of this kind"; the all-button names the true total
-   ("Acknowledge all 2013") — even thousands of errors (a drive scan)
-   stay manageable (ADR 0034, block N). Below it the blocklist: rejected
-   media (ADR 0041) with their remembered location; unblocking allows
-   re-import — the file itself was never touched when rejecting.
-5. **Configuration** — edit `config.toml` from the GUI.
+1. **Overview** (`/admin/overview`) — collection, running work and system
+   state, in four fixed rows:
+   - **Collection:** key-figure tiles with share bars (items with "+N
+     today"; with a configured media library **"library X GB / total
+     cataloged Y GB"** — what physically sits under the collection root vs.
+     everything cataloged (ADR 0041, I2) —, with metadata, interpreted,
+     thumbnails with cache size, DB size with WAL). Next to them three
+     panels: **composition by type** (stacked bar with table legend;
+     underneath images and videos, each with their share of the item count
+     and the storage they occupy across the whole collection — the sum is
+     "total cataloged"), **growth of the last 30 days** (columns per day,
+     today highlighted) and **years** by creation date. The numbers come
+     from **the same source** as the gallery overview (ADR 0029).
+   - **Activity:** the running task with bar, file counter, throughput
+     (files/s) and remaining time; below it the **funnel** "where do files
+     drop out" (seen → media → taken in → with metadata → interpreted,
+     drops in between, failures red — only for tasks with a file report:
+     ingest, scan, re-scan), **"new in this run"** with a throughput curve
+     of the last three minutes, the **queue** with names and the
+     **history** of the most recently finished tasks with duration
+     (failures red).
+   - **System:** six state tiles — worker process (running/ready/crashed,
+     pool size), tools (`ffprobe`/`ffmpeg`, with an installation hint when
+     missing), database (size, schema, WAL), **disk space** of the
+     database drive as a ring with percentage, active parsers with
+     version, instance (name, port, read-only mode/library management,
+     fml/Python/SQLite version, uptime) — and the paths of database, logs
+     and media library. The fml version is the release's date version
+     (`2026.09`); a `+dev` suffix means "work in progress after that
+     release", i.e. not a published state. Next to it the three runtime
+     packages **Pillow, fastapi, uvicorn** with their actually installed
+     version. If it differs from the pin in `requirements.txt` or a
+     package is missing, the chip turns yellow, the tile gets the warning
+     dot and the command to catch up is shown underneath. Anyone starting
+     via `start.sh`/`start.bat` never sees this: the scripts install
+     changed pins themselves before starting. The hint only concerns
+     hand-maintained venvs and direct starts with `python -m feral.web`.
+   - **Hint cards** with jumps: orphaned locations → Maintenance, open
+     issues → Issues, block-list entries → Issues, watched sources →
+     Sources.
+2. **Configuration** (`/admin/config`) — edit `config.toml` from the GUI
+   (see below): five cards, per setting a label, the input, an explanation
+   underneath and a badge **immediate** or **restart**; changes collect in
+   the **save bar** at the bottom. Plus **language** and **appearance**
+   (dark/light), which apply immediately and only to this browser.
+3. **Sources & import** (`/admin/sources`) — ONE ingest form at the top
+   (once now / watch permanently), below it the watch folders as cards
+   with live counters — see below.
+4. **Maintenance** (`/admin/maintenance`) — four cards (raw files,
+   thumbnails, database, re-evaluation) with a motivating key figure at
+   the top and one row per action: title, explanation, button, **state
+   right in the row** (running with bar · queued with position · last ✓
+   result with time). Below them three cards of their own with the same
+   logic in three steps and arming: **Move rejected out**, **Import rules
+   on the collection** and **Clean up orphaned locations** — see
+   "Maintenance actions".
+5. **Issues** (`/admin/issues`) — one card per error kind with an honest
+   counter, the most recent entries and "dismiss all N of this kind"; the
+   all button at the top names the true total. Below it the **block list**
+   as its own card: loaded separately, **paged** (100 per page) with
+   **search** over path, hash and reason — see "Issues and block list".
+6. **Rankings** (`/admin/rankings`) — table of rankings (name,
+   expression, population, duels, items with score, created) with
+   **Delete** behind a confirmation dialog; below it "Recompute ranking
+   scores" — see "Rankings".
+7. **Logs** (`/admin/logs`) — both server-log files immediately visible
+   (see "Activity, queue and server log").
+
+> The admin has no overlays, only two dialogs (folder picker,
+> confirmation). Overview and Maintenance load in two stages: key figures and charts
+> immediately, the system state (tools, database, parsers) a moment
+> later — until then "…" is shown.
+>
+> **Orphaned locations and cache size** are NOT counted on page load
+> (several seconds of disk work on large collections); instead a
+> **remembered stand with time** is shown ("as of 18:23"). Counting
+> happens on click — **Check locations** and **Count cache** under
+> Maintenance — and by itself in the background after matching tasks
+> (intake, rescan, move-out, clean-up → locations; create thumbnails,
+> clear cache, import rules → cache); while that runs, "checking …" is
+> shown and the page fetches the new stand on its own. The stand
+> **survives restarts** (remembered in the database; older stands carry
+> the date: "as of 09/12 18:23"); it belongs to this computer and cache
+> folder — a database carried to another machine shows "?" again there.
+> "?" means: never counted.
 
 ## Read-only mode and library management (default: hands off)
 
@@ -55,9 +121,10 @@ it is not explicitly `false`.
 
 ## Adding folders — ONE form for everything
 
-The "Sources & import" region has **one** ingest form: path (type it, or
-📁 folder picker with click-through navigation and file counts per
-folder) + **mode** + **frequency** ("once now" / "watch permanently").
+The "Sources & import" page has **one** ingest form in the card at the
+very top: path (type it, or 📁 folder picker with click-through navigation
+and file counts per folder) + **mode** + **frequency** ("once now" /
+"watch permanently").
 The three modes (ADR 0031), with the same meaning everywhere:
 
 - **copy (original stays)** — copy into the media library; the source is
@@ -70,16 +137,20 @@ The three modes (ADR 0031), with the same meaning everywhere:
   "just add to the data" option.
 
 "Once now" processes the folder immediately, once; "watch permanently"
-turns it into a **watch folder** in the list above.
+turns it into a **watch folder** below the form.
 
 ## Watch folders — the purpose
 
-Every watch folder (list at the top of the region, ADR 0030) is monitored
+Every watch folder (cards below the form, ADR 0030) is monitored
 continuously; new files are imported by themselves after a quiet period
 (copied into the `YYYY/MM/DD` structure, with duplicate check and hash
-verification). On each card the mode can be changed later (again with a
-prompt); ✕ removes the folder from monitoring (deletes no files). The
-**mode** per folder:
+verification). Each card shows name, path, state (watching / off / not
+found) and two **live counters**: how many files are currently
+**pending** (in the quiet period) and how many have been **imported**
+since the server started; the counters follow every status poll without
+reloading. On each card the mode can be changed later (again with a
+prompt), **Stop/Watch** toggles monitoring, and **✕ Remove** takes the
+folder out of monitoring (deletes no files). The **mode** per folder:
 
 - **copy** — for **standing watchers** on the output folders of your
   ComfyUI/tool installations: new media are continuously copied into the
@@ -116,83 +187,232 @@ still checks every file's content by hash. The very first round after the
 update is slow one single time (the memory fills up during the first
 pass).
 
-> This resolves the old duplications: there used to be a single hotfolder
-> **and** a separate in-place watcher (ADR 0030 revises ADR 0025) — and
-> the interface showed "watched sources" and "fixed scan locations" as
-> competing folder lists side by side (Feral Strawberry, 2026-07-09: "nobody
-> understands this"). Now: **ONE** folder concept, the watch folders. The
-> former "fixed scan locations" (`[[scan.locations]]`) are gone without
-> replacement; navigation happens everywhere in the 📁 folder dialog,
-> which always starts at the neutral entry points project folder / home /
-> drives and shows the file count per folder. The former "scanning" is
-> the mode "catalog only" in the ingest form.
+> There is **ONE** folder concept, the watch folders. Older configs with
+> `[hotfolder]` are taken over as a watch folder on start-up; "fixed scan
+> locations" (`[[scan.locations]]`) no longer exist. The former
+> "scanning" is the mode "catalog only" in the ingest form. Navigation
+> happens everywhere in the 📁 folder dialog, which starts at the entry
+> points project folder / home / drives and shows the file count per
+> folder.
 
 ## Maintenance actions (by functional area)
 
-All actions run through the internal queue (only ever one writer);
-progress and result appear under **Activity**.
+Long-running jobs go through the internal queue in a separate worker
+process (section "Activity, queue and server log"). Every action is a
+**row** with title, explanation, button and its state: **running** (with
+counter, duration and bar), **queued · position n** or **last ✓ result ·
+time** from the engine history (empty after a restart — the log has
+everything). While an action runs or waits, its button is locked.
+Synchronous actions (clean up, clear cache) write their result into the
+row immediately.
 
-**Raw files**
-- **Re-scan all locations** — re-read all known, still existing locations
-  (idempotent). Useful after installing ffmpeg or when files might have
+The key figure at the top of each card motivates the actions below; cheap
+numbers show immediately. Orphaned locations and cache size are a
+**remembered stand with time** (box above) with their own button in the
+meter — **Check locations** and **Count cache**; "?" means never counted,
+"checking …" means a background count is running.
+
+**Raw files** — key figure: orphaned locations (share of all locations),
+remembered stand; **Check locations** recounts everywhere.
+- **Re-scan all locations** — read all known, still existing locations
+  again (idempotent). Useful after installing ffmpeg or when files may have
   changed.
-- **Clean up orphaned locations** — remove path entries whose file no
-  longer exists. **Items and metadata stay**; media files are never
-  touched. The button first asks **where**: "everywhere" or "only under
-  folder …" (ADR 0033). Careful with "everywhere" while an external
-  drive/NAS is unmounted — its locations would look orphaned. (Rarely
-  needed since ADR 0033: move imports clean up the location row of a
-  moved source automatically.)
-- **Move rejected out …** — the **only** way besides import in which fml
-  moves files (ADR 0041). Opens a dialog with honest numbers: how many
-  rejected files (blocklist with remembered paths) still sit **inside
-  the media library**, how many GB, plus sample paths. Choose a target
-  folder (must be outside the library) → confirm in two steps → the
-  files move into a date structure `YYYY/MM/DD/` under the target
-  (collisions get `__2` suffixes, as in the import). Safeties: before
-  anything is touched, the **hash is verified** — if the file is missing
-  or was replaced by hand, that is only reported and nothing is touched.
-  Every file (including skipped ones) is recorded in the import log; the
-  blocklist remembers the new location. External (indexed-only)
-  locations are never candidates. After that it is the file manager's
-  call — final deletion deliberately happens outside fml.
-- **Import rules against the collection** — applies the configured import
-  rules (minimum/maximum size, excluded formats — see the
-  [import docs](import.md) and ADR 0046) retroactively to the catalog:
-  first an honest preview (how many items, broken down by reason), then
-  after clicking "reject now" the bulk rejection via the blocklist. Files
-  stay untouched; unblocking makes individual items importable again.
-  Legacy collections whose RAW files (ARW/NEF/DNG/CR2) are still
-  cataloged as TIFF are still hit by the format exclusion (file extension
-  match) — a re-scan is not needed for that, but does fix the container
-  labels permanently. Common spellings such as `tif` or `jpg` are mapped
-  to the internal names (`tiff`, `jpeg`).
+- Cleaning up orphaned locations is a card of its own (below).
 
-**Thumbnails**
-- **Generate thumbnails** — create missing ones and **retry** failed ones
-  (important after installing ffmpeg); permanent failures appear with
-  their reason under Issues (kind `thumbnail`). This button is the ONLY
-  path that retries: the automatic runs after import/watch only create
-  missing ones and leave known failures and acknowledged issues alone —
-  acknowledged stays acknowledged, across restarts and config saves.
-- **Clear cache** — delete all thumbnails including fail markers; they
-  regenerate on viewing.
+**Thumbnails** — key figure: cache files versus items (rough; failure
+markers count too) and cache size, remembered stand; **Count cache**
+re-reads the cache folder.
+- **Create thumbnails** — create missing ones and **retry** failed ones
+  (important after installing ffmpeg); permanent failures appear with a
+  reason under Issues (kind `thumbnail`). This button is the ONLY path
+  with a retry: the automatic runs after import/watch only create missing
+  ones and leave dismissed failures alone.
+- **Clear cache** — delete all previews including failure markers; they
+  regenerate when viewed.
 
-**Database**
-- **Integrity check** — `PRAGMA integrity_check` + compact the WAL.
-- **VACUUM** — compact the database (after large delete/rebuild
-  operations).
+**Database** — key figure: file size, WAL, schema version. The button
+**Compute breakdown** shows what the file consists of (raw blobs, items +
+locations, layer 2, search index, other, free) — it reads the whole file
+for that (seconds for GB-sized files) and therefore runs only on click;
+if the SQLite build lacks the `dbstat` table needed for it (depends on the
+platform of the Python build), there is no button at all, only the note
+"not available".
+- **Integrity check** — `PRAGMA integrity_check` + checkpoint the WAL.
+- **VACUUM** — compact the database (after big delete/rebuild actions);
+  "free" in the breakdown is what VACUUM reclaims.
 
-**Re-evaluating existing data** (all retroactive, no file access)
-- **Re-interpret** — run the layer-2 parsers retroactively over the whole
-  collection. After new/improved parsers.
-- **Backfill creation dates** — fill in missing capture/creation dates
+**Re-evaluation** (all retroactive, no file access) — key figure:
+interpreted items per parser (with parser version), plus items with raw
+metadata but no interpretation (stock for new parsers) and items without
+creation date.
+- **Re-interpret** — layer-2 parsers retroactively over the whole
+  collection. After new/improved parsers. Unchanged results are skipped —
+  a repeat run over 70,000 items therefore takes seconds; the summary
+  names interpreted items and fields.
+- **Backfill creation dates** — add missing capture/creation dates
   (`media_date`) from metadata/file; also adds the **time of day** to
-  legacy date-only entries (always from metadata, from the file stamp
-  only if it still names the same day). Also runs automatically on
-  startup when needed.
-- **Rebuild search index** — regenerate the FTS5 full-text index from
-  scratch.
+  legacy entries with a bare date. Uses the configured `[import]
+  min_date`. Items without a plausible date honestly stay undated; the
+  summary names their number. Get rid of them: "Import rules on the
+  collection", keep them: lower `min_date`.
+- **Rebuild search index** — recreate the FTS5 full-text index from scratch.
+
+### Move rejected out (its own card)
+
+The **only** way besides import in which fml moves files (ADR 0041). Three
+steps side by side:
+
+1. **Target folder** — type it or pick it via 📁; must be outside the
+   media library.
+2. **Preview** — honest numbers from the server: how many rejected files
+   (block list with remembered paths) still sit **inside the media
+   library**, how many GB, sample paths, paths no longer found. "Refresh
+   preview" fetches them again.
+3. **Run** — first the checkbox "Armed: target and preview checked" (only
+   selectable with a target and hits), then the red button "Move N
+   files". The task runs in the worker; its progress appears in a run box
+   below the steps, in the widget on the left and in the overview.
+
+The files move into a `YYYY/MM/DD/` date structure under the target
+(collisions get `__2` suffixes, like on import). Before anything is
+touched the **hash is verified** — if the file is missing or was replaced,
+that is only reported. Every file is in the import log; the block list
+remembers the new place. External (cataloged in place only) locations are never
+candidates. In read-only mode the card is locked.
+
+### Import rules on the collection (its own card)
+
+Applies the configured import rules (min/max edge, excluded formats,
+creation date from `min_date` — see the [import docs](import.md), ADR 0046
+and ADR 0075) retroactively to the catalog, in three steps:
+
+1. **Rules** — the active rules from the configuration, with a jump there.
+2. **Preview** — how many items would the rules hit, broken down by reason
+   (too small, too large, format, no date). Already computed when the page
+   opens; "Check library" recomputes **and only then enables the
+   checkbox**.
+3. **Reject** — checkbox "Armed: preview checked", then "Reject N hits".
+   Rejecting only marks (block list, reversible); files stay where they
+   are and are moved only via "Move rejected out".
+
+Legacy collections whose RAW files (ARW/NEF/DNG/CR2) are still cataloged
+as TIFF are still hit by the format exclusion (file-extension match).
+Common spellings like `tif` or `jpg` are mapped to the internal names
+(`tiff`, `jpeg`).
+
+### Clean up orphaned locations (its own card)
+
+Removes path entries whose file no longer exists. **Items and metadata
+stay**, media files are never touched — only the path bookkeeping goes.
+The same three steps as the two cards above:
+
+1. **Scope** — "everywhere" or "only under folder" (type a path or pick
+   it via 📁; ADR 0033). Careful with "everywhere" while an external drive
+   or NAS is unmounted — its locations would look orphaned; scope by path
+   then.
+2. **Preview** — "Check locations" counts within the chosen scope (checks
+   every location's file, seconds on large collections) and shows sample
+   paths. Runs only on click, never on page load; "everywhere" is at the
+   same time the new remembered stand of the raw-files card. Any change
+   to the scope invalidates the preview.
+3. **Clean up** — checkbox "Armed: scope and preview checked", then
+   "Clean up N locations"; the result stays in the card and the key
+   figure of the raw-files card is refreshed.
+
+## Issues and block list
+
+At the top the summary ("N open issues in K kinds") with the all button,
+which names the **true total** (ADR 0034). Below it **one card per error
+kind**: counter, the 20 most recent entries ("latest 20 of 2013"),
+"dismiss" per entry, "dismiss all N of this kind" at the bottom.
+Dismissing reports the number of dismissed entries and reloads the cards.
+Kinds: `failed` (not ingested), `warning` (extractor warning), `thumbnail`
+(no preview) and `playback` (video that no or only some browsers play —
+ProRes, 10-bit H.264, HEVC; see
+[interpretation.md](interpretation.md#video-codec-and-playability)).
+
+The **block list** (rejected media, ADR 0041) is its own card and is loaded
+**separately** from the issues — with drives that are only cataloged it holds thousands
+of entries:
+
+- **Paged**, 100 per page, with "Back/Next" and range ("101–200"); the
+  counter comes from the server and is never capped.
+- **Search** over remembered path, hash and reason (typing searches after
+  a short pause, Enter immediately); matches read "n matches of total".
+- **Unblock** per entry allows re-import; "Unblock all N …" asks first.
+  Rejected files sit untouched at their remembered location — rejecting
+  never touched them.
+
+## Rankings
+
+Table of all rankings of the ranking module (ADR 0045): name, expression
+(empty = all media), population (items the expression matches), duels,
+items with score, created. **Delete** lives here and asks in a
+confirmation dialog — it removes the ranking with all duels and scores, for
+good. Below it **Recompute ranking scores** (Elo replay over the duel log
+of all rankings, rescan principle) with an inline result. A ranking is
+created only in the gallery (🏆 in the chip bar, the population is built
+from the chips, see [Rankings](rankings.md)). **Edit** per row jumps to the
+gallery into this ranking's edit mode, the same way as ✎ in the ranking.
+
+## Activity, queue and server log
+
+Long tasks (import, scan, re-scan, re-interpret, search index, creation
+dates, thumbnails, VACUUM …) run **in a separate worker process** next to
+the web server. The interface stays usable meanwhile: browsing, searching,
+rating, tags and notes respond immediately, even while a 70,000-item run
+is computing. Only when the database is briefly locked exclusively (VACUUM,
+integrity check) does a write show "busy" — wait a moment and retry.
+
+- **Activity** (overview, second row): the running task with progress
+  (`Interpreting 12,400/70,000`), duration, throughput and funnel; below
+  it the **queue** with the names of all waiting tasks and the **history**
+  of the most recently finished ones (duration, result; in memory only —
+  after a restart it starts empty, the log has everything). The widget at
+  the bottom of the navigation and the dot in the gallery's top bar show
+  the same in short form (`+2` = two waiting).
+- **Repeated clicks** do not pile up: a task that is already running or
+  waiting is not queued again (hint "already running"). Automatic
+  follow-ups (thumbnails after an import) may queue once behind a running
+  run.
+- **Worker process crashed** (marked red): the running task is reported as
+  aborted, waiting tasks are kept, the next task restarts the process. What
+  happened is in the server log.
+- **Server log**: folder `logs/` next to the database, two rotating files
+  (`fml-web.log` for the web server, `fml-worker.log` for the tasks; at
+  most 5 × 5 MB each). Every task is recorded with start, progress,
+  duration, result and errors (with traceback). The **Logs** page shows
+  both files side by side right away (stacked on narrow windows), per file
+  with size, line count 100/500/2000, **Refresh** and the switch
+  **"WARNING and above only"** (the filter runs on the server, traceback
+  lines stay with their entry); WARNING lines are yellow, ERROR red, the
+  newest line is at the bottom. At the top of the page: **wrap lines**
+  (default on) and **stacked** instead of side by side — the browser
+  remembers both. After every finished task both panes
+  refresh by themselves — the first place to look when asking "is it
+  stuck?". **The log is always in English**, regardless of the interface
+  language: it is what other users paste into bug reports. Tasks appear
+  under their key (`taskScan`, `sumReparse` …), not under the translated
+  name. Requests taking longer than a quarter of a second appear as
+  `slow:` with endpoint, duration, bytes and the number of requests
+  running at the same time (`concurrent`). **Start-up requests are
+  deliberately logged more tolerantly:** key figures, saved searches,
+  rankings and the model list are computed once fresh after the server
+  starts (and after every import) — that takes a few seconds on large
+  collections and is not an error. Such lines appear as `cold:` with the
+  reason (`first computation since server start`, `recomputed after a
+  write`); afterwards the numbers come from memory until the
+  collection changes. The same applies to the sidebar counters of a
+  search: the first click on a saved search computes (`cold:`), every
+  further one comes from memory. Equally tolerant: pairs for the duel that the
+  frontend prefetches in the background while the current duel is on
+  screen — in rankings with many filter criteria every pairing costs one
+  filter run that nobody waits for. Such lines appear as `background:`;
+  only a visible load remains a `slow:` warning. When
+  the browser aborts
+  a media stream (video switched, view closed), the server stops reading
+  immediately and writes `aborted: … (client gone)`; the `concurrent`
+  number therefore counts only live requests.
 
 ## First start (fresh installation)
 
@@ -203,10 +423,28 @@ operation, set a media library and sources in the configuration.
 
 ## Editing the configuration
 
-Media library (import target), **library management** (the read-only-mode
-switch, see above), oldest plausible date, thumbnail size/processes,
-interface options and the **instance** can be edited directly; **Save**
-writes `config.toml`. (Watch folders are **not** managed here but
+Five cards: **Media library** (import target, **library management** as
+the read-only-mode switch, oldest plausible date, import rules),
+**Thumbnails & performance** (size, processes, full power, slow
+threshold), **Interface**, **Instance** and **Modules**. Every setting has
+a label, the input, a short explanation underneath and a badge:
+**immediate** takes effect on save, **restart** only after restarting the
+server. Changes collect in the **save bar** at the bottom, which only
+appears while something is unsaved ("N changes · Save · Discard");
+**Discard** restores the saved state, server errors show right in the
+bar. **Language** and **appearance** (dark/light) in the "Interface" card
+belong to the browser (ADR 0054): they apply immediately, without saving,
+only to this browser, not to the instance, and therefore never count as a
+change in the bar.
+
+**Slow threshold** (card "Thumbnails & performance", `[performance]
+slow_request_ms`, ADR 0076): from this response time on, fml reports a
+request as `slow:` (warning in the log and on the console). The
+default of 250 ms suits a desktop with NVMe; the selection recommends
+profiles (laptop with SATA SSD 600 ms, Chromebook/USB drive/NAS 1,500 ms)
+or a custom value. **Never warn** (0) leaves slow requests from 250 ms on
+as info in the log file only. Cold-start runs (`cold:`) and prefetched
+requests always stay info. Takes effect immediately, no restart. (Watch folders are **not** managed here but
 directly in "Sources & import" — they land as `[[watch]]` entries in the
 same file. There are deliberately no folder lists in the configuration
 anymore.)
@@ -221,10 +459,11 @@ runs (empty = 8765); at startup `--port` wins over `$PORT` over the
 config. `start.bat` automatically opens the browser on the port actually
 used, as soon as the server is reachable.
 
-- Media library, library management, instance name and accent color take
-  effect **immediately**.
-- Port, thumbnail size and DB path take effect **after restarting** the
-  server.
+- Media library, library management, import rules, slow threshold,
+  instance name, accent color and module switches take effect
+  **immediately** (badge).
+- Port, thumbnail size, processes and DB path take effect **after
+  restarting** the server.
 - **Careful:** comments in a hand-maintained `config.toml` do not survive
   saving from the GUI. A backup `config.toml.bak` is created
   automatically beforehand; the commented reference is

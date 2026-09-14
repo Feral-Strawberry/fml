@@ -359,7 +359,8 @@ def test_import_rules_defaults_and_parsing(tmp_path):
     from feral.config import import_rules, load_config
 
     # Ohne Sektion: alles aus.
-    assert import_rules({}) == {"min_kante": 0, "max_kante": 0, "formate": []}
+    assert import_rules({}) == {"min_kante": 0, "max_kante": 0, "formate": [],
+                                "min_date": "2015-01-01"}
     p = tmp_path / "config.toml"
     p.write_text(
         '[import]\nmin_kante = 240\nmax_kante = 8000\n'
@@ -367,7 +368,10 @@ def test_import_rules_defaults_and_parsing(tmp_path):
         encoding="utf-8",
     )
     rules = import_rules(load_config(p))
-    assert rules == {"min_kante": 240, "max_kante": 8000, "formate": ["psd", "arw"]}
+    assert rules == {"min_kante": 240, "max_kante": 8000, "formate": ["psd", "arw"],
+                     "min_date": "2015-01-01"}
+    # Datumsregel (ADR 0075): min_date wandert mit den Regeln — immer aktiv.
+    assert import_rules({"import": {"min_date": "1970-01-01"}})["min_date"] == "1970-01-01"
     # Defensiv: Unsinn zählt als aus.
     assert import_rules({"import": {"min_kante": "abc"}})["min_kante"] == 0
     assert import_rules({"import": {"min_kante": -5}})["min_kante"] == 0
@@ -381,7 +385,8 @@ def test_update_config_file_import_rules_roundtrip(tmp_path):
                        import_max_kante=8000,
                        import_formate_ausschliessen=["psd", "arw"])
     rules = import_rules(load_config(p))
-    assert rules == {"min_kante": 240, "max_kante": 8000, "formate": ["psd", "arw"]}
+    assert rules == {"min_kante": 240, "max_kante": 8000, "formate": ["psd", "arw"],
+                     "min_date": "2015-01-01"}
     # 0/leer räumt die Schlüssel wieder ab (Config bleibt schlank).
     update_config_file(p, thumbnail_size=320, import_min_kante=0,
                        import_max_kante=0, import_formate_ausschliessen=[])
@@ -397,3 +402,26 @@ def test_import_rules_format_aliases():
                                      ["TIF", "jpg", "mp4", "arw", "tiff"]}})
     # Alltagsnamen → interne Container-Namen, Duplikate zusammengelegt.
     assert rules["formate"] == ["tiff", "jpeg", "isobmff", "arw"]
+
+
+def test_slow_request_ms_default_and_roundtrip(tmp_path):
+    """Langsam-Schwelle (#110): Standard 250 ms; [performance] slow_request_ms
+    aus der Datei; GUI-Speichern schreibt sie explizit (0 = nie warnen),
+    None lässt sie unangetastet, Negatives fällt auf den Standard zurück."""
+    from feral.config import slow_request_ms, update_config_file
+
+    assert slow_request_ms({}) == 250.0
+    assert slow_request_ms(load_config(_write(
+        tmp_path, "[performance]\nslow_request_ms = 1500\n"
+    ))) == 1500.0
+    assert slow_request_ms({"performance": {"slow_request_ms": "kaputt"}}) == 250.0
+    assert slow_request_ms({"performance": {"slow_request_ms": -5}}) == 250.0
+
+    p = tmp_path / "config.toml"
+    update_config_file(p, thumbnail_size=320, slow_request_ms=600)
+    assert slow_request_ms(load_config(p)) == 600.0
+    update_config_file(p, thumbnail_size=256)                    # None = unangetastet
+    assert slow_request_ms(load_config(p)) == 600.0
+    update_config_file(p, thumbnail_size=256, slow_request_ms=0)  # 0 = nie warnen
+    assert slow_request_ms(load_config(p)) == 0.0
+    assert "[performance]" in p.read_text(encoding="utf-8")

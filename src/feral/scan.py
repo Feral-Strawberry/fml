@@ -23,15 +23,17 @@ import sqlite3
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Sequence
 
 from .db import connect, store_extraction, store_interpretations
-from .db.store import now_iso
+from .db.store import now_iso, record_issue
 from .extract import container
 from .extract.container import ExtractorNotImplementedError, UnknownContainerError
 from .extract.types import ContainerExtraction
 from .hashing import hash_file
 from .interpret import interpret_items
+from .interpret.types import Interpretation
+from .interpret.video import playback_issue
 from .messages import dump as msg_dump
 
 
@@ -54,18 +56,18 @@ class ScanReport:
 
     def summary(self) -> str:
         lines = [
-            f"  Dateien betrachtet : {self.scanned_files}",
-            f"  davon Medien       : {self.media_files}",
-            f"    neu aufgenommen  : {self.new_items}",
-            f"    bereits bekannt  : {self.known_items}",
-            f"    mit Metadaten    : {self.with_metadata}",
-            f"    interpretiert    : {self.interpreted}",
-            f"    Extraktor folgt  : {self.pending_extractor}",
-            f"  übersprungen (kein Container): {self.skipped_unknown}",
-            f"  ausgefiltert (Import-Regeln) : {self.ausgefiltert}",
-            f"  gesperrt (Sperrliste) : {self.blocked}",
-            f"  mit Warnungen      : {self.files_with_warnings}",
-            f"  fehlgeschlagen     : {len(self.failed)}",
+            f"  files seen         : {self.scanned_files}",
+            f"  of which media     : {self.media_files}",
+            f"    newly added      : {self.new_items}",
+            f"    already known    : {self.known_items}",
+            f"    with metadata    : {self.with_metadata}",
+            f"    interpreted      : {self.interpreted}",
+            f"    extractor pending: {self.pending_extractor}",
+            f"  skipped (no container)   : {self.skipped_unknown}",
+            f"  filtered (import rules)  : {self.ausgefiltert}",
+            f"  blocked (block list)     : {self.blocked}",
+            f"  with warnings      : {self.files_with_warnings}",
+            f"  failed             : {len(self.failed)}",
         ]
         return "\n".join(lines)
 
@@ -119,18 +121,22 @@ def _iter_files(root: Path):
 
 def _record_issue(conn: sqlite3.Connection, path: Path, kind: str, message: str) -> None:
     """Halte ein Scan-Problem fest (idempotent; Re-Scan öffnet quittierte wieder)."""
-    ts = now_iso()
-    with conn:
-        conn.execute(
-            """
-            INSERT INTO scan_issues (path, kind, message, first_seen_at, last_seen_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(path, kind, message) DO UPDATE SET
-                last_seen_at = excluded.last_seen_at,
-                resolved = 0
-            """,
-            (str(path), kind, message, ts, ts),
-        )
+    record_issue(conn, path, kind, message)
+
+
+def note_playability(
+    conn: sqlite3.Connection, path: str | Path, interpretations: Sequence[Interpretation],
+) -> None:
+    """Scan-Problem der Art ``playback`` für Videos, die kein (oder nur mancher)
+    Browser abspielt (Issue #71, ADR 0070): Der Katalog sagt es beim
+    Aufnehmen, nicht erst beim Klick auf den schwarzen Player. Gleiche
+    Regel für Scanner und Importer; die Einschätzung kommt aus den frisch
+    interpretierten Feldern (``interpret.video.playback_issue``)."""
+    issue = playback_issue(interpretations)
+    if issue is None:
+        return
+    key, params = issue
+    record_issue(conn, path, "playback", msg_dump(key, **params))
 
 
 def _resolve_issues(conn: sqlite3.Connection, path: Path) -> None:
@@ -208,9 +214,25 @@ def _process_file(
     # Stat-Gedächtnis (ADR 0042) verhindert Neu-Lesen bei jedem Watcher-Lauf.
     # (Lazy-Import wie determine_date unten — scan bleibt ohne harte
     # importer-Abhängigkeit beim Modul-Laden.)
-    from .importer import filter_reason
+    from .importer import date_reason, determine_date, filter_reason, rule_min_date
 
     reason = filter_reason(extraction, rules)
+    if reason is None:
+        # Datumsregel (ADR 0075, #113): kein plausibles Datum aus Metadaten
+        # oder Dateistempel ⇒ ausgefiltert wie jeder andere Regel-Treffer —
+        # statt katalogisiert mit media_date = NULL (das hielt den Start-
+        # Backfill in Dauerschleife). Untergrenze aus der Config (rules).
+        min_date = rule_min_date(rules)
+        try:
+            stat = path.stat()
+        except OSError as exc:
+            report.failed.append((str(path), f"Stat fehlgeschlagen: {exc}"))
+            _record_issue(conn, path, "failed", msg_dump("issueHashError", error=str(exc)))
+            _remember_outcome(conn, path, "fehlgeschlagen")
+            return
+        when, date_source = determine_date(extraction, stat, min_date=min_date)
+        if when is None:
+            reason = date_reason(min_date)
     if reason is not None:
         report.ausgefiltert += 1
         _remember_outcome(conn, path, "ausgefiltert")
@@ -223,7 +245,6 @@ def _process_file(
     # 2) Hash + Größe bilden (eigener Fehlerpfad — Datei kann zwischenzeitlich weg sein).
     try:
         file_hash = hash_file(path)
-        stat = path.stat()
         file_size = stat.st_size
     except OSError as exc:
         report.failed.append((str(path), f"Hash/Stat fehlgeschlagen: {exc}"))
@@ -264,6 +285,9 @@ def _process_file(
     interpretations = interpret_items(extraction.items)
     if interpretations:
         report.interpreted += 1
+    # Nach _resolve_issues (oben), damit ein weiterhin nicht abspielbares
+    # Video sein Problem behält — wie jede andere Warnung beim Re-Scan.
+    note_playability(conn, path, interpretations)
 
     # 5) Speichern (idempotent, ADR 0010/0011).
     try:
@@ -278,11 +302,11 @@ def _process_file(
         store_interpretations(
             conn, file_hash=file_hash, interpretations=interpretations
         )
-        # Medien-Erstelldatum (ADR 0021) — dieselbe Kaskade wie beim Import;
-        # so füllt „Re-Scan: alle bekannten Fundorte" den Alt-Bestand nach.
-        from .importer import determine_date, set_media_date
+        # Medien-Erstelldatum (ADR 0021) — dieselbe Kaskade wie beim Import,
+        # oben schon gerechnet; so füllt „Re-Scan: alle bekannten Fundorte"
+        # den Alt-Bestand nach.
+        from .importer import set_media_date
 
-        when, date_source = determine_date(extraction, stat)
         set_media_date(conn, file_hash, when, date_source)
         conn.commit()
         _forget_outcome(conn, path)   # katalogisiert ⇒ file_locations übernimmt
@@ -293,29 +317,29 @@ def _process_file(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m feral.scan",
-        description="Scanne einen Ordner rekursiv und nimm alle Medien in die DB auf.",
+        description="Scan a folder recursively and add all media to the database.",
     )
-    parser.add_argument("root", help="Wurzelordner, der rekursiv gescannt wird")
+    parser.add_argument("root", help="root folder to scan recursively")
     parser.add_argument(
         "--db",
         default="./feral.sqlite",
-        help="Pfad zur SQLite-Datei (Standard: ./feral.sqlite)",
+        help="path to the SQLite file (default: ./feral.sqlite)",
     )
     parser.add_argument(
-        "--quiet", action="store_true", help="keine Fortschrittsausgabe"
+        "--quiet", action="store_true", help="no progress output"
     )
     args = parser.parse_args(argv)
 
     root = Path(args.root)
     if not root.is_dir():
-        print(f"Fehler: '{root}' ist kein Verzeichnis.", file=sys.stderr)
+        print(f"Error: '{root}' is not a directory.", file=sys.stderr)
         return 2
 
     conn = connect(args.db)
 
     def progress(report: ScanReport, _path: Path) -> None:
         if not args.quiet and report.scanned_files % 500 == 0:
-            print(f"  … {report.scanned_files} Dateien", file=sys.stderr)
+            print(f"  … {report.scanned_files} files", file=sys.stderr)
 
     # Import-Regeln (ADR 0046) gelten auch im CLI-Scan — gleiche Quelle wie
     # die GUI (./config.toml, falls vorhanden).
@@ -328,14 +352,14 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         conn.close()
 
-    print(f"\nScan abgeschlossen für: {root}")
+    print(f"\nScan finished for: {root}")
     print(report.summary())
     if report.failed:
-        print("\nFehlgeschlagene Dateien (Auszug):")
+        print("\nFailed files (excerpt):")
         for p, err in report.failed[:10]:
             print(f"  - {p}: {err}")
         if len(report.failed) > 10:
-            print(f"  … und {len(report.failed) - 10} weitere")
+            print(f"  … and {len(report.failed) - 10} more")
     return 0
 
 
