@@ -673,8 +673,10 @@ def apply_import_rules(
 
 # -- Laufzeit-Pakete für die Instanz-Kachel (Issue #42, ADR 0080) ----------------
 
-#: Die drei Laufzeit-Abhängigkeiten aus requirements.txt (DEPENDENCIES.md).
-RUNTIME_PACKAGES = ("Pillow", "fastapi", "uvicorn")
+#: Die direkten Laufzeit-Abhängigkeiten aus requirements.txt (Einträge mit
+#: ``# direct``, ohne pip; DEPENDENCIES.md, ADR 0082). tests/test_dependencies.py
+#: hält die Liste gleich mit dem Lock.
+RUNTIME_PACKAGES = ("Pillow", "fastapi", "uvicorn", "starlette", "anyio", "pydantic")
 _PIN_LINE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*==\s*([A-Za-z0-9.*+!-]+)")
 
 

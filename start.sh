@@ -42,11 +42,21 @@ fi
 STAMP=".venv/.deps-stamp"
 if [ ! -f "$STAMP" ] || ! cmp -s requirements.txt "$STAMP"; then
   echo "Installing/updating dependencies ..."
-  .venv/bin/pip install --quiet --upgrade pip
-  .venv/bin/pip install --quiet -r requirements.txt
-  .venv/bin/pip install --quiet -e .
+  # Hash-checking mode: pip installs ONLY the packages and files listed in
+  # requirements.txt (pip itself included) and builds nothing from source.
+  .venv/bin/python -m pip install --quiet --require-hashes --only-binary=:all: -r requirements.txt
+  # Older versions installed fml itself with "pip install -e ."; the .pth
+  # file below replaces that, so the old entry is removed.
+  if .venv/bin/python -m pip show --quiet feral-media-library >/dev/null 2>&1; then
+    .venv/bin/python -m pip uninstall --quiet --yes feral-media-library
+  fi
   cp requirements.txt "$STAMP"
 fi
+
+# Make the fml sources (src/) importable in this environment via a .pth file.
+# Needs no build step and no extra package; rewritten on every start so a
+# moved folder keeps working.
+.venv/bin/python -c "import pathlib, sysconfig; pathlib.Path(sysconfig.get_paths()['purelib'], 'fml-src.pth').write_text(str(pathlib.Path('src').resolve()) + '\n')"
 
 # -- Start the server (opens the browser itself, see header comment) -------------
 exec .venv/bin/python -m feral.web --browser "$@"

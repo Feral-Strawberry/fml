@@ -66,9 +66,9 @@ def pinned_packages(root: Path) -> list[tuple[str, str]]:
     return out
 
 
-# Installer-Werkzeuge des venv: nicht Teil dessen, was fml ausliefert oder
-# voraussetzt (der Nutzer installiert mit SEINEM pip) — sonst blockiert ein
-# altes lokales pip jeden Export.
+# Installer-Werkzeuge beim venv-Scan überspringen: pip steht seit ADR 0082
+# im Lock und wird über die Pins geprüft; setuptools/wheel können aus alten
+# venvs übrig sein, fml installiert sie nicht.
 TOOLING = frozenset({"pip", "setuptools", "wheel"})
 
 

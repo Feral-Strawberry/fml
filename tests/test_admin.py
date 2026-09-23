@@ -451,19 +451,19 @@ def test_package_versions_compare_installed_with_pins(tmp_path, monkeypatch):
         except KeyError:
             raise admin.metadata.PackageNotFoundError(name)
     monkeypatch.setattr(admin.metadata, "version", fake_version)
-    rows = admin.package_versions(req)
+    rows = admin.package_versions(req, names=("Pillow", "fastapi", "uvicorn"))
     assert rows == [
         {"name": "Pillow", "installed": "12.3.0", "pinned": "12.3.0", "ok": True},
         {"name": "fastapi", "installed": "0.136.3", "pinned": "0.141.1", "ok": False},
         {"name": "uvicorn", "installed": None, "pinned": "0.52.4", "ok": False},
     ]
     # Ohne requirements.txt (fremder Aufruf): installiert = ok, kein Pin.
-    assert admin.package_versions(tmp_path / "nope.txt")[0] == {
+    assert admin.package_versions(tmp_path / "nope.txt", names=("Pillow",))[0] == {
         "name": "Pillow", "installed": "12.3.0", "pinned": None, "ok": True}
 
 
 def test_package_versions_real_environment_matches_requirements():
-    """Im Entwicklungs-venv müssen alle drei Laufzeit-Pakete installiert sein
+    """Im Entwicklungs-venv müssen alle direkten Laufzeit-Pakete installiert sein
     und dem Pin entsprechen — sonst testet die Suite gegen einen anderen
     Stand, als ausgeliefert wird."""
     root = Path(__file__).resolve().parents[1]

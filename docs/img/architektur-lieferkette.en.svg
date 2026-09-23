@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="480" viewBox="0 0 1240 480" role="img" aria-label="The direct packages are the source; tools/lock_deps.py generates requirements.txt from them with a fixed version and SHA-256 per file, the hashes come from PyPI. The start script has pip install in hash mode: pip downloads only ready-made wheels from PyPI, compares every file with the lock and aborts on an unlisted package or a wrong hash. Guard tests, advisory check, export gate and Dependabot check and maintain the lock.">
+        <style>
+  svg { --surface: #FFFFFF; --bg-2: #F6F8FA; --ink: #17202B; --ink-2: #4A5665; --ink-3: #7B8794;
+        --line: #D6DCE4; --line-strong: #AEB8C4; --accent: #B02A4C; --l1: #1F7A7E; --l2: #4653B8; --man: #A66A12; }
+  @media (prefers-color-scheme: dark) {
+    svg { --surface: #1C232C; --bg-2: #232B35; --ink: #E8ECF1; --ink-2: #B3BCC7; --ink-3: #7E8894;
+          --line: #2C3641; --line-strong: #46525F; --accent: #E0637F; --l1: #4FB5B9; --l2: #8C97EA; --man: #D9A24A; }
+  }
+  text { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .ground { fill: var(--surface); }
+  .bx { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.2; }
+  .bi { fill: var(--bg-2); stroke: var(--line); stroke-width: 1; }
+  .proc { fill: none; stroke: var(--ink-3); stroke-width: 1.2; stroke-dasharray: 6 5; }
+  .opt { stroke-dasharray: 5 4; }
+  .ln { fill: none; stroke: var(--ink-2); stroke-width: 1.4; }
+  .lw { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .ah { fill: var(--ink-2); }
+  .ahw { fill: var(--accent); }
+  .h { fill: var(--ink); font-family: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif; font-size: 16px; font-weight: 600; }
+  .t { fill: var(--ink); font-size: 13px; font-weight: 600; }
+  .s { fill: var(--ink-3); font-size: 11.5px; }
+  .lbl { fill: var(--ink-2); font-size: 11.5px; }
+  .lblw { fill: var(--accent); font-size: 11.5px; font-weight: 600; }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .l1 { stroke: var(--l1); stroke-width: 1.6; } .tl1 { fill: var(--l1); }
+  .l2 { stroke: var(--l2); stroke-width: 1.6; } .tl2 { fill: var(--l2); }
+  .man { stroke: var(--man); stroke-width: 1.6; } .tman { fill: var(--man); }
+  .acc { stroke: var(--accent); stroke-width: 1.8; } .tacc { fill: var(--accent); }
+</style>
+        <rect class="ground" x="0" y="0" width="1240" height="480" rx="8"/>
+        <defs>
+          <marker id="aD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+          <marker id="wD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahw"/></marker>
+        </defs>
+        <text x="16" y="128" class="lbl">Maintained in the working repo</text>
+        <text x="652" y="128" class="lbl">On the user's machine</text>
+        <rect x="864" y="30" width="152" height="60" rx="6" class="bx"/>
+        <text x="940" y="55" text-anchor="middle" class="t">PyPI</text>
+        <text x="940" y="74" text-anchor="middle" class="s">ready-made wheels only</text>
+        <path d="M864,60 H304 V150" class="ln" marker-end="url(#aD)"/>
+        <text x="584" y="52" text-anchor="middle" class="lbl">hashes of all files</text>
+        <path d="M940,90 V150" class="ln" marker-end="url(#aD)"/>
+        <text x="948" y="124" class="lbl">Wheels</text>
+        <rect x="16" y="150" width="152" height="60" rx="6" class="bx"/>
+        <text x="92" y="175" text-anchor="middle" class="t">Direct packages</text>
+        <text x="92" y="194" text-anchor="middle" class="s mono"># direct: where used</text>
+        <rect x="228" y="150" width="152" height="60" rx="6" class="bx"/>
+        <text x="304" y="175" text-anchor="middle" class="t mono">lock_deps.py</text>
+        <text x="304" y="194" text-anchor="middle" class="s">closure · markers</text>
+        <rect x="440" y="138" width="152" height="84" rx="6" class="bx acc"/>
+        <text x="516" y="166" text-anchor="middle" class="t mono">requirements.txt</text>
+        <text x="516" y="186" text-anchor="middle" class="s">every version fixed</text>
+        <text x="516" y="204" text-anchor="middle" class="s">SHA-256 per file</text>
+        <rect x="652" y="150" width="152" height="60" rx="6" class="bx"/>
+        <text x="728" y="170" text-anchor="middle" class="t">Start script</text>
+        <text x="728" y="187" text-anchor="middle" class="s mono">--require-hashes</text>
+        <text x="728" y="202" text-anchor="middle" class="s mono">--only-binary=:all:</text>
+        <rect x="864" y="150" width="152" height="60" rx="6" class="bx"/>
+        <text x="940" y="170" text-anchor="middle" class="t">pip in hash mode</text>
+        <text x="940" y="187" text-anchor="middle" class="s">compares every file</text>
+        <text x="940" y="202" text-anchor="middle" class="s">with the lock</text>
+        <rect x="1076" y="150" width="152" height="60" rx="6" class="bx"/>
+        <text x="1152" y="170" text-anchor="middle" class="t mono">.venv</text>
+        <text x="1152" y="187" text-anchor="middle" class="s">exactly the lock</text>
+        <text x="1152" y="202" text-anchor="middle" class="s mono">+ fml-src.pth</text>
+        <path d="M168,180 H228" class="ln" marker-end="url(#aD)"/>
+        <text x="198" y="172" text-anchor="middle" class="lbl">reads</text>
+        <path d="M380,180 H440" class="ln" marker-end="url(#aD)"/>
+        <text x="410" y="172" text-anchor="middle" class="lbl">writes</text>
+        <path d="M592,180 H652" class="ln" marker-end="url(#aD)"/>
+        <text x="622" y="172" text-anchor="middle" class="lbl mono">-r</text>
+        <path d="M804,180 H864" class="ln" marker-end="url(#aD)"/>
+        <text x="834" y="172" text-anchor="middle" class="lbl">starts</text>
+        <path d="M1016,180 H1076" class="ln" marker-end="url(#aD)"/>
+        <text x="1046" y="172" text-anchor="middle" class="lbl">installs</text>
+        <path d="M990,210 V250 H1152 V280" class="lw" marker-end="url(#wD)"/>
+        <text x="1071" y="242" text-anchor="middle" class="lblw">otherwise</text>
+        <rect x="1076" y="280" width="152" height="60" rx="6" class="bx acc"/>
+        <text x="1152" y="302" text-anchor="middle" class="t tacc">Abort</text>
+        <text x="1152" y="320" text-anchor="middle" class="s">not listed, wrong</text>
+        <text x="1152" y="334" text-anchor="middle" class="s">hash, no wheel</text>
+        <text x="16" y="372" class="lbl">Guards</text>
+        <rect x="16" y="380" width="240" height="80" rx="6" class="bx"/>
+        <text x="136" y="402" text-anchor="middle" class="t">Guard tests</text>
+        <text x="136" y="421" text-anchor="middle" class="s">import without direct dependency</text>
+        <text x="136" y="438" text-anchor="middle" class="s">entry without hash or docs</text>
+        <text x="136" y="455" text-anchor="middle" class="s">venv differs from the lock</text>
+        <line x1="136" y1="380" x2="136" y2="330" class="ln"/>
+        <rect x="276" y="380" width="240" height="80" rx="6" class="bx"/>
+        <text x="396" y="402" text-anchor="middle" class="t">Advisory-Check</text>
+        <text x="396" y="421" text-anchor="middle" class="s">OSV database</text>
+        <text x="396" y="438" text-anchor="middle" class="s">every locked package</text>
+        <line x1="396" y1="380" x2="396" y2="330" class="ln"/>
+        <rect x="536" y="380" width="240" height="80" rx="6" class="bx"/>
+        <text x="656" y="402" text-anchor="middle" class="t">Export gate</text>
+        <text x="656" y="421" text-anchor="middle" class="s">open advisory:</text>
+        <text x="656" y="438" text-anchor="middle" class="s">no public release</text>
+        <line x1="656" y1="380" x2="656" y2="330" class="ln"/>
+        <rect x="796" y="380" width="240" height="80" rx="6" class="bx"/>
+        <text x="916" y="402" text-anchor="middle" class="t">Dependabot</text>
+        <text x="916" y="421" text-anchor="middle" class="s">security PRs on the lock</text>
+        <text x="916" y="438" text-anchor="middle" class="s">transitive packages too</text>
+        <line x1="916" y1="380" x2="916" y2="330" class="ln"/>
+        <line x1="136" y1="330" x2="916" y2="330" class="ln"/>
+        <path d="M516,330 V222" class="ln" marker-end="url(#aD)"/>
+        <text x="524" y="282" class="lbl">check and maintain the lock</text>
+        </svg>

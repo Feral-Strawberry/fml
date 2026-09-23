@@ -44,8 +44,8 @@
      fml/Python/SQLite version, uptime) — and the paths of database, logs
      and media library. The fml version is the release's date version
      (`2026.09`); a `+dev` suffix means "work in progress after that
-     release", i.e. not a published state. Next to it the three runtime
-     packages **Pillow, fastapi, uvicorn** with their actually installed
+     release", i.e. not a published state. Next to it the direct runtime
+     packages **Pillow, fastapi, uvicorn, starlette, anyio, pydantic** with their actually installed
      version. If it differs from the pin in `requirements.txt` or a
      package is missing, the chip turns yellow, the tile gets the warning
      dot and the command to catch up is shown underneath. Anyone starting

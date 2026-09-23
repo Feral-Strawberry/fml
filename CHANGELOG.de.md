@@ -6,6 +6,56 @@ Was sich zwischen den Snapshot-Releases geändert hat, aus Sicht der
 Nutzer. Versionen sind Datums-Versionen (`JJJJ.MM` oder `JJJJ.MM.N`);
 die laufende Instanz zeigt ihre Version in Admin → Übersicht.
 
+## 2026.09.1 (2026-09-23)
+
+Ein Sicherheits- und Sorgfalts-Release: Jedes Paket, das fml auf deinem
+Rechner installiert, ist jetzt benannt, auf eine feste Version gepinnt und
+per Prüfsumme gesichert.
+
+### Nach dem Update
+
+1. **Wie gewohnt mit `start.sh` bzw. `start.bat` starten.** Die Skripte
+   installieren die Abhängigkeiten neu, diesmal im Prüfsummen-Modus, und
+   räumen die frühere Installationsart von fml selbst auf. Mehr ist nicht
+   zu tun.
+2. **Wer von Hand installiert:** `python -m pip install --require-hashes
+   --only-binary=:all: -r requirements.txt` und die `.pth`-Zeile aus dem
+   README (Abschnitt „Für Entwickler"); `pip install -e .` wird nicht mehr
+   gebraucht.
+
+### Sicherheit
+
+- **Keine unbenannten Pakete mehr.** `requirements.txt` ist ein
+  vollständiger Lock: alle Laufzeit-Pakete, direkte wie indirekte und pip
+  selbst, mit fester Version und SHA-256-Prüfsummen. Die Startskripte
+  installieren im Prüfsummen-Modus: pip verweigert jedes nicht gelistete
+  Paket und jede veränderte Datei.
+- **Nichts wird mehr aus Quellcode gebaut.** Installiert werden nur fertige
+  Pakete; die Startskripte laden weder Build-Werkzeuge noch ein ungepinntes
+  „neuestes" pip nach.
+- **anyio 4.14.2** behebt drei Sicherheitsmeldungen der Vorversion
+  (Prozess-Gruppen, hängende Prozess-Pools, TLS-Hostnamen). fml nutzt diese
+  Funktionen nicht direkt, aktualisiert aber trotzdem.
+- **starlette, anyio und pydantic** sind jetzt als direkte Abhängigkeiten
+  gepinnt und dokumentiert; fml nutzt sie im Code, bisher kamen sie nur
+  indirekt über fastapi.
+- Automatische Prüfungen stellen sicher, dass das so bleibt: Ein Import
+  ohne benannte Abhängigkeit, ein Paket ohne Prüfsumme oder ohne
+  Dokumentation macht die Testsuite rot.
+
+### Doku
+
+- Neue Seite **Architektur** mit vier Diagrammen: Prozesse, Weg einer Datei
+  in den Katalog, Weg einer Suche zur Galerie, Installation und
+  Lieferkette.
+- Die **Sicherheits-Doku** beschreibt alle Prüfungen rund um die
+  Abhängigkeiten, die Test-Doku die neuen Wächter-Tests, das README den
+  geprüften Installationsweg.
+- Neue **Schema-Referenz** der Datenbank mit ER-Diagramm, aus dem echten
+  Schema erzeugt.
+- `DEPENDENCIES.md` listet jedes installierte Paket mit Rolle; die
+  Admin-Übersicht zeigt die sechs direkten Laufzeit-Pakete mit Version.
+
 ## 2026.09 (2026-09-14)
 
 Der größte Sprung seit dem ersten Release: 45 Pull Requests seit

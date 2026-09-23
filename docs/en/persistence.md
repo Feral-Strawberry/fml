@@ -26,22 +26,13 @@ store_extraction(
 
 ## What is stored
 
-| Table | Content |
-|---------|--------|
-| `items` | one row per unique file, identified by the **file hash**. With size, container, media kind, optional image-data hash and timestamps. |
-| `file_locations` | where the same file (same hash) sits on disk — one file can appear at several paths. |
-| `raw_metadata` | the raw metadata (layer 1): per entry the source, keyword, decoded text **and** the byte-exact raw bytes. |
-| `interpreted_metadata` | the structured fields ([layer 2](interpretation.md)): per entry the parser (+ version), field name (`prompt`, `seed`, `model`, …) and value. |
-| `annotations` | the **manual layer** (ADR 0017): rating (1–5, NULL = unrated) and notes — strictly separated from everything extracted. |
-| `tags` / `item_tags` | your own tag vocabulary (case-insensitively unique) and the tag ↔ item assignment, each with timestamps. |
-| `scan_issues` | problems collected while scanning (Admin → Issues). |
-| `smart_folders` | saved searches: name + filter expression (the sort order is part of the expression). |
-| `blocked_hashes` | the **block list** of rejected media (hash, reason, last known paths). |
-| `import_log` | every file touched by import / move-out with outcome, target, hash and date source. |
-| `scan_memory` | size + modification time of files cataloged by watch folders (restarts skip the unchanged). |
-| `rankings` / `ranking_duels` / `ranking_scores` | the ranking module: rankings (name + expression), the append-only **duel log** and the Elo scores derived from it, including the eliminated marker. |
-| `search_index` (FTS5) | the full-text index over interpreted fields, filenames and the manual layer; can be rebuilt at any time (Admin → Maintenance). |
-| `app_state` | small key-value store for remembered admin figures (with the machine's origin stamp). |
+All tables with columns, keys and indexes plus an ER diagram are in the
+[schema reference](schema.md) (generated from the real schema). In short:
+`items` is the hub (one row per file hash); attached to it are locations,
+raw metadata (layer 1), interpreted fields (layer 2), the manual layer
+(rating, tags, notes, saved searches), the ranking module, the full-text
+index and the operational tables (block list, import log, watch memory,
+issues, remembered figures).
 
 Access to the manual layer goes through `feral/db/manual.py`
 (`set_rating`, `set_notes`, `add_tag`, `remove_tag`, `annotations_for`,

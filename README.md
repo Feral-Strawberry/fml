@@ -264,6 +264,12 @@ interface points it out if it is missing.
   **Cmd/Ctrl-click adds** (OR), clicking the active value removes it.
   Before, every click widened to an OR. Details in
   [`docs/en/gui.md`](docs/en/gui.md).
+- **Only named packages get installed:** the start scripts install
+  exclusively the packages from `requirements.txt`, each with an exact
+  version and checksum; a foreign or altered package aborts the
+  installation. Which packages these are and how they are checked:
+  [`DEPENDENCIES.md`](DEPENDENCIES.md) and
+  [`docs/en/security.md`](docs/en/security.md).
 
 ## More documentation
 
@@ -271,7 +277,9 @@ interface points it out if it is missing.
 [`docs/en/import.md`](docs/en/import.md) (import & watch folders) ·
 [`docs/en/instanzen.md`](docs/en/instanzen.md) (multiple instances /
 sub-galleries) · [`docs/en/admin.md`](docs/en/admin.md) (admin &
-maintenance) · [`docs/en/`](docs/en/) (everything else)
+maintenance) · [`docs/en/architektur.md`](docs/en/architektur.md)
+(technical concept) · [`docs/en/security.md`](docs/en/security.md)
+(security and dependencies) · [`docs/en/`](docs/en/) (everything else)
 
 
 ## Contributing
@@ -305,10 +313,14 @@ Prerequisite: **Python 3.12+** (developed/tested on 3.13).
 ```bash
 python3.13 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt        # Pillow, FastAPI + uvicorn
-pip install -r requirements-dev.txt    # pytest
-pip install -e .                       # editable install so `python -m feral.*` works
+python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
+# make the fml sources importable (start.sh/start.bat do the same):
+python -c "import pathlib, sysconfig; pathlib.Path(sysconfig.get_paths()['purelib'], 'fml-src.pth').write_text(str(pathlib.Path('src').resolve()) + '\n')"
 ```
+
+`requirements-dev.txt` contains the complete runtime lock plus pytest, every
+package with an exact version and hash; only what is listed there gets
+installed (see [`DEPENDENCIES.md`](DEPENDENCIES.md)).
 
 ```bash
 python -m feral.web                           # interface (port: --port > $PORT > [web] port > 8765)

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-label="Sidebar, typing and saved searches only create chips. The grammar turns chips into predicates, which become parameterized SQL. The epoch cache asks SQLite for data_version and recomputes only when the epoch has changed. Every commit, including external ones, changes data_version.">
+        <style>
+  svg { --surface: #FFFFFF; --bg-2: #F6F8FA; --ink: #17202B; --ink-2: #4A5665; --ink-3: #7B8794;
+        --line: #D6DCE4; --line-strong: #AEB8C4; --accent: #B02A4C; --l1: #1F7A7E; --l2: #4653B8; --man: #A66A12; }
+  @media (prefers-color-scheme: dark) {
+    svg { --surface: #1C232C; --bg-2: #232B35; --ink: #E8ECF1; --ink-2: #B3BCC7; --ink-3: #7E8894;
+          --line: #2C3641; --line-strong: #46525F; --accent: #E0637F; --l1: #4FB5B9; --l2: #8C97EA; --man: #D9A24A; }
+  }
+  text { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .ground { fill: var(--surface); }
+  .bx { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.2; }
+  .bi { fill: var(--bg-2); stroke: var(--line); stroke-width: 1; }
+  .proc { fill: none; stroke: var(--ink-3); stroke-width: 1.2; stroke-dasharray: 6 5; }
+  .opt { stroke-dasharray: 5 4; }
+  .ln { fill: none; stroke: var(--ink-2); stroke-width: 1.4; }
+  .lw { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .ah { fill: var(--ink-2); }
+  .ahw { fill: var(--accent); }
+  .h { fill: var(--ink); font-family: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif; font-size: 16px; font-weight: 600; }
+  .t { fill: var(--ink); font-size: 13px; font-weight: 600; }
+  .s { fill: var(--ink-3); font-size: 11.5px; }
+  .lbl { fill: var(--ink-2); font-size: 11.5px; }
+  .lblw { fill: var(--accent); font-size: 11.5px; font-weight: 600; }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .l1 { stroke: var(--l1); stroke-width: 1.6; } .tl1 { fill: var(--l1); }
+  .l2 { stroke: var(--l2); stroke-width: 1.6; } .tl2 { fill: var(--l2); }
+  .man { stroke: var(--man); stroke-width: 1.6; } .tman { fill: var(--man); }
+</style>
+        <rect class="ground" x="0" y="0" width="1200" height="400" rx="8"/>
+        <defs>
+          <marker id="aC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+          <marker id="wC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahw"/></marker>
+        </defs>
+
+        <rect x="16" y="40" width="160" height="70" rx="6" class="bx"/>
+        <text x="96" y="64" text-anchor="middle" class="t">Inputs</text>
+        <text x="96" y="83" text-anchor="middle" class="s">sidebar · typing · ☆</text>
+        <text x="96" y="100" text-anchor="middle" class="s">builder · suggestions</text>
+        <line x1="176" y1="75" x2="256" y2="75" class="ln" marker-end="url(#aC)"/>
+        <text x="216" y="67" text-anchor="middle" class="lbl mono">chip-toggle</text>
+
+        <rect x="256" y="40" width="160" height="70" rx="6" class="bx"/>
+        <text x="336" y="68" text-anchor="middle" class="t">Chips</text>
+        <text x="336" y="88" text-anchor="middle" class="s">ONE search state</text>
+        <line x1="416" y1="75" x2="496" y2="75" class="ln" marker-start="url(#aC)" marker-end="url(#aC)"/>
+        <text x="456" y="67" text-anchor="middle" class="lbl">translates</text>
+
+        <rect x="496" y="40" width="160" height="70" rx="6" class="bx"/>
+        <text x="576" y="64" text-anchor="middle" class="t">Grammar</text>
+        <text x="576" y="83" text-anchor="middle" class="s mono">/api/filter/parse</text>
+        <text x="576" y="100" text-anchor="middle" class="s mono">/api/filter/build</text>
+        <line x1="656" y1="75" x2="736" y2="75" class="ln" marker-end="url(#aC)"/>
+        <text x="696" y="67" text-anchor="middle" class="lbl">predicates</text>
+
+        <rect x="736" y="40" width="160" height="70" rx="6" class="bx"/>
+        <text x="816" y="64" text-anchor="middle" class="t">SQL builder</text>
+        <text x="816" y="83" text-anchor="middle" class="s">parameterized</text>
+        <text x="816" y="100" text-anchor="middle" class="s">fields via whitelist</text>
+        <line x1="816" y1="110" x2="816" y2="200" class="ln" marker-end="url(#aC)"/>
+        <text x="824" y="160" class="lbl">query + key</text>
+
+        <rect x="736" y="200" width="160" height="70" rx="6" class="bx"/>
+        <text x="816" y="226" text-anchor="middle" class="t">Epoch cache</text>
+        <text x="816" y="245" text-anchor="middle" class="s">LRU per expression</text>
+        <text x="816" y="262" text-anchor="middle" class="s">in the web process</text>
+
+        <line x1="896" y1="218" x2="1000" y2="218" class="ln" marker-end="url(#aC)"/>
+        <text x="948" y="210" text-anchor="middle" class="lbl mono">data_version?</text>
+        <line x1="896" y1="252" x2="1000" y2="252" class="ln" marker-end="url(#aC)"/>
+        <text x="948" y="244" text-anchor="middle" class="lbl">recomputes if new</text>
+
+        <path d="M1000,208 V270 A90,8 0 0 0 1180,270 V208 Z" class="bx"/>
+        <ellipse cx="1090" cy="208" rx="90" ry="8" class="bx"/>
+        <text x="1090" y="238" text-anchor="middle" class="t mono">feral.sqlite</text>
+        <text x="1090" y="258" text-anchor="middle" class="s">epoch = data_version</text>
+
+        <rect x="1000" y="320" width="180" height="60" rx="6" class="bx"/>
+        <text x="1090" y="344" text-anchor="middle" class="t">Write</text>
+        <text x="1090" y="364" text-anchor="middle" class="s">rating · import · CLI</text>
+        <line x1="1090" y1="320" x2="1090" y2="280" class="lw" marker-end="url(#wC)"/>
+        <text x="1082" y="304" text-anchor="end" class="lblw">commit</text>
+
+        <line x1="736" y1="235" x2="416" y2="235" class="ln" marker-end="url(#aC)"/>
+        <text x="576" y="227" text-anchor="middle" class="lbl">hits · counts</text>
+
+        <rect x="256" y="200" width="160" height="70" rx="6" class="bx"/>
+        <text x="336" y="226" text-anchor="middle" class="t">Gallery + sidebar</text>
+        <text x="336" y="245" text-anchor="middle" class="s">virtualized grid</text>
+        <text x="336" y="262" text-anchor="middle" class="s">pages of 200</text>
+      </svg>

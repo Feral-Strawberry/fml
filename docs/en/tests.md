@@ -13,8 +13,11 @@
 Install the development dependencies once (in the project folder):
 
 ```
-pip install -r requirements-dev.txt
+python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
 ```
+
+This installs exactly the packages from the lock (runtime plus pytest),
+each with its checksum; see [`DEPENDENCIES.md`](../../DEPENDENCIES.md).
 
 Then:
 
@@ -217,6 +220,19 @@ A single file can also be started directly:
 ```
 node --import ./tests/js/setup.mjs tests/js/overlays.test.mjs
 ```
+
+### 10. Dependencies and documentation guards
+
+| Test file | Checks |
+|---|---|
+| `test_dependencies.py` | **No unnamed dependency:** every third-party import in the code is a directly named dependency; every lock entry has an exact version and checksums; every locked package is in `DEPENDENCIES.md`; the installed environment matches the lock exactly; the start scripts install in hash mode only. |
+| `test_lock_deps.py` | The tool that generates the lock: complete closure across Linux, macOS and Windows, platform markers (e.g. Windows only), version bounds, file format. |
+| `test_check_advisories.py` | The vulnerability database query: pins are read, hits are reported, and "offline" is an error, not a silent green. |
+| `test_schema_doc.py` | The schema reference in the docs matches the real database schema. |
+
+**Why this matters:** these tests make sure nothing unnamed creeps in,
+neither into the program nor onto the machine, and that the documentation
+does not silently go stale.
 
 ## Two recurring patterns
 

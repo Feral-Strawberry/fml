@@ -30,6 +30,11 @@ The most important safeguards (full write-up in
   names (line breaks, ANSI, bidi) are made visible instead of written
   raw; the admin log page reads two fixed files only.
 
+- **Every installed package is named and hash-checked**: `requirements.txt`
+  is a complete lock (direct and transitive packages, pip included) with
+  SHA-256 hashes; the start scripts install with `--require-hashes` and
+  `--only-binary=:all:`, so nothing unlisted or altered can be installed.
+
 Operating recommendation: keep the server on `localhost` — there is
 deliberately no login and no tenant separation.
 

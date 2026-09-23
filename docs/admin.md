@@ -46,7 +46,8 @@
      Pfade von Datenbank, Logs und Media Library. Die fml-Version ist die
      Datums-Version des Releases (`2026.09`); ein Anhang `+dev` heißt
      „Arbeitsstand nach diesem Release", also kein veröffentlichter Stand.
-     Daneben stehen die drei Laufzeit-Pakete **Pillow, fastapi, uvicorn**
+     Daneben stehen die direkten Laufzeit-Pakete **Pillow, fastapi, uvicorn,
+     starlette, anyio, pydantic**
      mit ihrer tatsächlich installierten Version. Weicht sie vom Pin in
      `requirements.txt` ab oder fehlt ein Paket, wird der Chip gelb, die
      Kachel bekommt den Warn-Punkt und darunter steht der Befehl zum

@@ -7,6 +7,54 @@ What changed between snapshot releases, from the user's point of view.
 Versions are date versions (`YYYY.MM` or `YYYY.MM.N`); a running
 instance shows its version under Admin → Overview.
 
+## 2026.09.1 (2026-09-23)
+
+A security and diligence release: every package fml installs on your
+machine is now named, pinned to an exact version and secured by checksum.
+
+### After updating
+
+1. **Start as usual with `start.sh` or `start.bat`.** The scripts reinstall
+   the dependencies, this time in checksum mode, and clean up the earlier
+   way fml itself was installed. Nothing else to do.
+2. **Installing by hand:** `python -m pip install --require-hashes
+   --only-binary=:all: -r requirements.txt` plus the `.pth` line from the
+   README (section "For developers"); `pip install -e .` is no longer
+   needed.
+
+### Security
+
+- **No unnamed packages any more.** `requirements.txt` is a complete lock:
+  all runtime packages, direct and indirect, pip itself included, with an
+  exact version and SHA-256 checksums. The start scripts install in
+  checksum mode: pip refuses any package that is not listed and any file
+  that was altered.
+- **Nothing is built from source any more.** Only ready-made packages are
+  installed; the start scripts neither download build tools nor an
+  unpinned "latest" pip.
+- **anyio 4.14.2** fixes three security advisories of the previous version
+  (process groups, hanging process pools, TLS host names). fml does not use
+  these functions directly, but updates anyway.
+- **starlette, anyio and pydantic** are now pinned and documented as direct
+  dependencies; fml uses them in its code, so far they only came in
+  indirectly through fastapi.
+- Automatic checks make sure it stays that way: an import without a named
+  dependency, a package without checksum or without documentation turns
+  the test suite red.
+
+### Documentation
+
+- New **Architecture** page with four diagrams: processes, the path of a
+  file into the catalog, the path of a search to the gallery, installation
+  and supply chain.
+- The **security docs** describe every check around the dependencies, the
+  test docs the new guard tests, the README the checked installation
+  path.
+- New **schema reference** of the database with an ER diagram, generated
+  from the real schema.
+- `DEPENDENCIES.md` lists every installed package with its role; the admin
+  overview shows the six direct runtime packages with their versions.
+
 ## 2026.09 (2026-09-14)
 
 The biggest step since the first release: 45 pull requests since

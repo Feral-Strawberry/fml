@@ -98,8 +98,13 @@ internet: never trust it blindly.
 
 fml deliberately keeps the dependency surface **tiny** (project rule
 "prefer the standard library"; details in
-[`DEPENDENCIES.md`](../../DEPENDENCIES.md)) — three
-runtime packages plus one optional system program. Still: **whoever runs
+[`DEPENDENCIES.md`](../../DEPENDENCIES.md)): six direct runtime packages,
+nine transitive ones, plus pip and one optional system program. **Every one
+of them is named:** `requirements.txt` is a complete lock with an exact
+version and SHA-256 hashes per package, and the start scripts install in
+hash-checking mode from binary wheels only. pip refuses to install a
+package that is not listed or a file that was altered, and nothing is built
+from source. Still: **whoever runs
 the tool should keep these few dependencies up to date**, because they
 take part in processing the untrusted files:
 
@@ -108,22 +113,43 @@ take part in processing the untrusted files:
 | **Pillow** | `12.3.0` | Opens untrusted image files (JPEG/WEBP/TIFF/…). Image parsers are a classic target for security bugs — on a Pillow CVE, **update promptly**. |
 | **fastapi** | `0.141.1` | Web backend of the local interface. |
 | **uvicorn** | `0.52.4` | ASGI server; deliberately without the `[standard]` extras (smaller transitive surface). |
+| **starlette** | `1.6.0` | Foundation of fastapi; delivers the media streams with range requests and abort detection. |
+| **anyio** | `4.14.2` | Thread pool for media streams; 4.14.2 fixes three advisories of the previous version. |
+| **pydantic** | `2.13.4` | Request models of the interface; brings `pydantic-core` (compiled). |
+| transitive packages | in the lock | annotated-doc, annotated-types, click, colorama (Windows only), h11, idna, pydantic-core, typing-extensions, typing-inspection; role of each in `DEPENDENCIES.md`. |
+| **pip** | `26.2.1` | The installer itself is pinned; the start scripts bring the venv's pip to exactly this version. |
 | **ffmpeg/ffprobe** | system (optional) | Reads untrusted video containers. Not a pip package — keep current via the system's package manager. Without ffmpeg, videos are only cataloged. |
-| pytest (development only) | `~=9.1` | Not in the runtime path. |
+| pytest (development only) | `9.1.1` | Not in the runtime path; locked together with its four dependencies. |
 
 Practically: the pinned versions provide reproducible installs; when
-updating a dependency, raise the pin in `requirements.txt` and run the
-tests (`pytest -q`). Watching security advisories is most worthwhile for
+updating a dependency, raise the `# direct` line in `requirements.txt`,
+`python tools/lock_deps.py` regenerates the lock and the hashes, then run
+the tests (`pytest -q`). Watching security advisories is most worthwhile for
 **Pillow** and **ffmpeg**, because both directly touch untrusted binary
 data.
 
-Two guards take the watching off the operator's plate (ADR 0080): the
-GitHub repo has **Dependabot alerts and automatic security updates**
-switched on, and `python tools/check_advisories.py` asks the open
-vulnerability database [OSV](https://osv.dev) about exactly the pinned
-versions (plus everything installed in the venv). Before every public
-snapshot this query runs automatically: with an open advisory, nothing is
-exported.
+These checks run without the operator having to do anything:
+
+- **Installation from the lock only.** The start scripts install with
+  `--require-hashes` and `--only-binary=:all:`: pip compares every
+  downloaded file with its checksum in the lock, refuses any package that
+  is not listed and builds nothing from source. pip itself is brought to
+  the pinned version, not to "the latest".
+- **Guard tests** (`tests/test_dependencies.py`): the test suite turns red
+  when code imports a third-party package that is not a direct dependency,
+  when a lock entry has no exact version or no checksum, when a locked
+  package is missing from `DEPENDENCIES.md`, or when the installed
+  environment differs from the lock.
+- **Advisory check** (`python tools/check_advisories.py`): asks the open
+  vulnerability database [OSV](https://osv.dev) about every locked
+  package, pip included, plus everything installed in the venv.
+- **Export gate:** this check runs automatically before every public
+  snapshot; with an open advisory, nothing is published.
+- **Dependabot** (GitHub): alerts and automatic security updates are
+  switched on. Because every transitive package is in the lock, Dependabot
+  proposes updates for those too.
+- **Instance card** in the admin: shows the installed version of the six
+  direct runtime packages and warns when it differs from the pin.
 
 ## Found a problem?
 

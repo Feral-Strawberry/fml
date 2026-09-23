@@ -16,6 +16,9 @@ GitHub organization).
 
 ## Feature blocks
 
+- [Architecture](architektur.md) — the technical concept in four pictures:
+  processes, intake with two metadata layers, search path, installation and
+  supply chain.
 - [Metadata extraction (layer 1)](extraction.md) — reads all embedded raw
   metadata from a media file. Implemented: PNG, JPEG/WEBP/GIF/BMP/TIFF
   (Pillow) and video (ffprobe).
@@ -26,6 +29,8 @@ GitHub organization).
   [extraction.md](extraction.md)).
 - [Persistence / database](persistence.md) — how extracted data is stored
   and queried again.
+- [Database schema](schema.md) — ER diagram and all tables with columns,
+  keys and indexes, generated from the real schema.
 - [Scanning folders](scanning.md) — recursively ingest a whole folder
   (`python -m feral.scan`). **The first step with real data.**
 - [Import & watch folders](import.md) — sort source folders into the
@@ -48,8 +53,8 @@ GitHub organization).
   of a master library**, without touching any files. Start via
   `start.bat --config name.toml`.
 - [Security](security.md) — how fml handles **untrusted** image files
-  (untrusted metadata), operating recommendations and which dependencies
-  to keep up to date. **Read before passing the tool on to others.**
+  (untrusted metadata), operating recommendations, which dependencies get
+  installed and how they are checked (lock with checksums, advisory check). **Read before passing the tool on to others.**
 - [The test suite](tests.md) — what the 700-odd automated tests (Python
   and Node tests of the interface) guarantee, how to run them (`pytest -q`)
   and how to recognize a correct result.

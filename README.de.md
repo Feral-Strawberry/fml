@@ -274,13 +274,21 @@ Oberfläche weist darauf hin, falls es fehlt.
   derselben Gruppe), **Cmd/Strg-Klick fügt hinzu** (ODER), Klick auf den
   aktiven Wert hebt ihn auf. Vorher erweiterte jeder Klick zum ODER.
   Details in [`docs/gui.md`](docs/gui.md).
+- **Installiert wird nur Benanntes:** Die Startskripte installieren
+  ausschließlich die Pakete aus `requirements.txt`, jedes mit fester
+  Version und Prüfsumme; ein fremdes oder verändertes Paket bricht die
+  Installation ab. Welche Pakete das sind und wie sie geprüft werden:
+  [`DEPENDENCIES.md`](DEPENDENCIES.md) und
+  [`docs/security.md`](docs/security.md).
 
 ## Mehr Doku
 
 [`docs/gui.md`](docs/gui.md) (Bedienung) · [`docs/import.md`](docs/import.md)
 (Import & Watchordner) · [`docs/instanzen.md`](docs/instanzen.md) (mehrere
 Instanzen / Subgalerien) · [`docs/admin.md`](docs/admin.md) (Admin &
-Wartung) · [`docs/`](docs/) (alles Weitere)
+Wartung) · [`docs/architektur.md`](docs/architektur.md) (technisches
+Konzept) · [`docs/security.md`](docs/security.md) (Sicherheit und
+Abhängigkeiten) · [`docs/`](docs/) (alles Weitere)
 
 
 ## Mitmachen
@@ -314,10 +322,14 @@ Voraussetzung: **Python 3.12+** (entwickelt/getestet auf 3.13).
 ```bash
 python3.13 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt        # Pillow, FastAPI + uvicorn
-pip install -r requirements-dev.txt    # pytest
-pip install -e .                       # Paket editierbar, damit `python -m feral.*` läuft
+python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
+# fml-Quellen importierbar machen (dasselbe tun start.sh/start.bat):
+python -c "import pathlib, sysconfig; pathlib.Path(sysconfig.get_paths()['purelib'], 'fml-src.pth').write_text(str(pathlib.Path('src').resolve()) + '\n')"
 ```
+
+`requirements-dev.txt` enthält den vollständigen Laufzeit-Lock plus pytest,
+jedes Paket mit fester Version und Hash; installiert wird nur, was dort
+steht (siehe [`DEPENDENCIES.md`](DEPENDENCIES.md)).
 
 ```bash
 python -m feral.web                           # Oberfläche (Port: --port > $PORT > [web] port > 8765)

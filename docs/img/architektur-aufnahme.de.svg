@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1250" height="420" viewBox="0 0 1250 420" role="img" aria-label="Aufnahme-Kette: Quelle, Erkennen, Import-Regeln, SHA-256, optional Kopie und Prüfung, Katalog, optional Quelle leeren. Katalogisieren schreibt Schicht 1 byte-treu in raw_metadata, Schicht 2 interpretiert daraus Felder, beides landet im Volltextindex. Neu interpretieren läuft ohne Dateizugriff über raw_metadata.">
+        <style>
+  svg { --surface: #FFFFFF; --bg-2: #F6F8FA; --ink: #17202B; --ink-2: #4A5665; --ink-3: #7B8794;
+        --line: #D6DCE4; --line-strong: #AEB8C4; --accent: #B02A4C; --l1: #1F7A7E; --l2: #4653B8; --man: #A66A12; }
+  @media (prefers-color-scheme: dark) {
+    svg { --surface: #1C232C; --bg-2: #232B35; --ink: #E8ECF1; --ink-2: #B3BCC7; --ink-3: #7E8894;
+          --line: #2C3641; --line-strong: #46525F; --accent: #E0637F; --l1: #4FB5B9; --l2: #8C97EA; --man: #D9A24A; }
+  }
+  text { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .ground { fill: var(--surface); }
+  .bx { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.2; }
+  .bi { fill: var(--bg-2); stroke: var(--line); stroke-width: 1; }
+  .proc { fill: none; stroke: var(--ink-3); stroke-width: 1.2; stroke-dasharray: 6 5; }
+  .opt { stroke-dasharray: 5 4; }
+  .ln { fill: none; stroke: var(--ink-2); stroke-width: 1.4; }
+  .lw { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .ah { fill: var(--ink-2); }
+  .ahw { fill: var(--accent); }
+  .h { fill: var(--ink); font-family: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif; font-size: 16px; font-weight: 600; }
+  .t { fill: var(--ink); font-size: 13px; font-weight: 600; }
+  .s { fill: var(--ink-3); font-size: 11.5px; }
+  .lbl { fill: var(--ink-2); font-size: 11.5px; }
+  .lblw { fill: var(--accent); font-size: 11.5px; font-weight: 600; }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .l1 { stroke: var(--l1); stroke-width: 1.6; } .tl1 { fill: var(--l1); }
+  .l2 { stroke: var(--l2); stroke-width: 1.6; } .tl2 { fill: var(--l2); }
+  .man { stroke: var(--man); stroke-width: 1.6; } .tman { fill: var(--man); }
+</style>
+        <rect class="ground" x="0" y="0" width="1250" height="420" rx="8"/>
+        <defs>
+          <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+          <marker id="wB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahw"/></marker>
+        </defs>
+        <text x="16" y="26" class="lbl">Aufnahme, ein Durchlauf je Datei</text>
+
+        <rect x="16" y="40" width="140" height="64" rx="6" class="bx"/>
+        <text x="86" y="66" text-anchor="middle" class="t">Quelle</text>
+        <text x="86" y="85" text-anchor="middle" class="s">Ordner, Watchordner</text>
+        <line x1="156" y1="72" x2="196" y2="72" class="ln" marker-end="url(#aB)"/>
+
+        <rect x="196" y="40" width="140" height="64" rx="6" class="bx"/>
+        <text x="266" y="66" text-anchor="middle" class="t">Erkennen</text>
+        <text x="266" y="85" text-anchor="middle" class="s">Magic Bytes</text>
+        <line x1="336" y1="72" x2="376" y2="72" class="ln" marker-end="url(#aB)"/>
+
+        <rect x="376" y="40" width="140" height="64" rx="6" class="bx"/>
+        <text x="446" y="66" text-anchor="middle" class="t">Import-Regeln</text>
+        <text x="446" y="85" text-anchor="middle" class="s">Maße · Format · Datum</text>
+        <line x1="516" y1="72" x2="556" y2="72" class="ln" marker-end="url(#aB)"/>
+
+        <rect x="556" y="40" width="140" height="64" rx="6" class="bx"/>
+        <text x="626" y="66" text-anchor="middle" class="t">SHA-256</text>
+        <text x="626" y="85" text-anchor="middle" class="s">Identität · Dublette?</text>
+        <line x1="696" y1="72" x2="736" y2="72" class="ln" marker-end="url(#aB)"/>
+
+        <rect x="736" y="40" width="140" height="64" rx="6" class="bx opt"/>
+        <text x="806" y="62" text-anchor="middle" class="t">Kopie + Prüfung</text>
+        <text x="806" y="80" text-anchor="middle" class="s mono">JJJJ/MM/TT · Hash</text>
+        <text x="806" y="96" text-anchor="middle" class="s">kopieren · verschieben</text>
+        <line x1="876" y1="72" x2="916" y2="72" class="ln" marker-end="url(#aB)"/>
+
+        <rect x="916" y="40" width="140" height="64" rx="6" class="bx"/>
+        <text x="986" y="66" text-anchor="middle" class="t">Katalog</text>
+        <text x="986" y="85" text-anchor="middle" class="s">Item + Fundort</text>
+        <line x1="1056" y1="72" x2="1096" y2="72" class="ln" marker-end="url(#aB)"/>
+
+        <rect x="1096" y="40" width="140" height="64" rx="6" class="bx opt"/>
+        <text x="1166" y="62" text-anchor="middle" class="t">Quelle leeren</text>
+        <text x="1166" y="80" text-anchor="middle" class="s">oder Nachschau</text>
+        <text x="1166" y="96" text-anchor="middle" class="s">nur verschieben</text>
+
+        <!-- Katalog aufgeklappt -->
+        <path d="M986,104 V140 H126 V200" class="ln" marker-end="url(#aB)"/>
+        <text x="556" y="132" text-anchor="middle" class="lbl">katalogisieren heißt:</text>
+        <text x="16" y="176" class="lbl">zwei Schichten, getrennt gespeichert</text>
+
+        <rect x="16" y="200" width="220" height="96" rx="6" class="bx l1"/>
+        <text x="126" y="224" text-anchor="middle" class="t tl1">Schicht 1 · Extraktor</text>
+        <text x="126" y="244" text-anchor="middle" class="s">PNG: eigener Chunk-Leser</text>
+        <text x="126" y="262" text-anchor="middle" class="s">JPEG · WEBP · TIFF: Pillow</text>
+        <text x="126" y="280" text-anchor="middle" class="s">PSD · Video: ffprobe</text>
+        <line x1="236" y1="248" x2="296" y2="248" class="ln" marker-end="url(#aB)"/>
+        <text x="266" y="240" text-anchor="middle" class="lbl">speichert</text>
+
+        <path d="M296,208 V288 A90,8 0 0 0 476,288 V208 Z" class="bx"/>
+        <ellipse cx="386" cy="208" rx="90" ry="8" class="bx"/>
+        <text x="386" y="238" text-anchor="middle" class="t mono">raw_metadata</text>
+        <text x="386" y="258" text-anchor="middle" class="s">byte-treu, Quell-Label</text>
+        <text x="386" y="276" text-anchor="middle" class="s">Roh-Blob bleibt</text>
+        <line x1="476" y1="248" x2="536" y2="248" class="ln" marker-end="url(#aB)"/>
+        <text x="506" y="240" text-anchor="middle" class="lbl">liest</text>
+
+        <rect x="536" y="200" width="220" height="96" rx="6" class="bx l2"/>
+        <text x="646" y="224" text-anchor="middle" class="t tl2">Schicht 2 · Parser</text>
+        <text x="646" y="244" text-anchor="middle" class="s mono">a1111 · comfyui · xmp</text>
+        <text x="646" y="262" text-anchor="middle" class="s mono">topaz · provenance · video</text>
+        <text x="646" y="280" text-anchor="middle" class="s">darf unvollständig sein</text>
+        <line x1="756" y1="248" x2="816" y2="248" class="ln" marker-end="url(#aB)"/>
+        <text x="786" y="240" text-anchor="middle" class="lbl">schreibt</text>
+
+        <path d="M816,208 V288 A90,8 0 0 0 996,288 V208 Z" class="bx"/>
+        <ellipse cx="906" cy="208" rx="90" ry="8" class="bx"/>
+        <text x="906" y="238" text-anchor="middle" class="t mono">interpreted_metadata</text>
+        <text x="906" y="258" text-anchor="middle" class="s">Feld = Wert</text>
+        <text x="906" y="276" text-anchor="middle" class="s">je Parser + Version</text>
+        <line x1="996" y1="248" x2="1056" y2="248" class="ln" marker-end="url(#aB)"/>
+        <text x="1026" y="240" text-anchor="middle" class="lbl">indexiert</text>
+
+        <path d="M1056,208 V288 A90,8 0 0 0 1236,288 V208 Z" class="bx"/>
+        <ellipse cx="1146" cy="208" rx="90" ry="8" class="bx"/>
+        <text x="1146" y="238" text-anchor="middle" class="t mono">search_index</text>
+        <text x="1146" y="258" text-anchor="middle" class="s">FTS5, fünf Spalten</text>
+        <text x="1146" y="276" text-anchor="middle" class="s">jederzeit neu aufbaubar</text>
+
+        <!-- Reparse-Schleife -->
+        <path d="M386,297 V344 H646 V298" class="lw" marker-end="url(#wB)"/>
+        <text x="516" y="366" text-anchor="middle" class="lblw">Neu interpretieren: ohne Dateizugriff</text>
+
+        <!-- Manuelle Schicht -->
+        <rect x="1056" y="340" width="180" height="60" rx="6" class="bx man"/>
+        <text x="1146" y="364" text-anchor="middle" class="t tman">Manuelle Schicht</text>
+        <text x="1146" y="384" text-anchor="middle" class="s">nur vom Menschen gesetzt</text>
+        <line x1="1146" y1="340" x2="1146" y2="298" class="ln" marker-end="url(#aB)"/>
+        <text x="1138" y="324" text-anchor="end" class="lbl">indexiert</text>
+      </svg>

@@ -25,22 +25,13 @@ store_extraction(
 
 ## Was gespeichert wird
 
-| Tabelle | Inhalt |
-|---------|--------|
-| `items` | eine Zeile pro einzigartiger Datei, identifiziert über den **Datei-Hash**. Mit Größe, Container, Medienart, optionalem Bilddaten-Hash und Zeitstempeln. |
-| `file_locations` | wo dieselbe Datei (gleicher Hash) auf der Platte liegt — eine Datei kann an mehreren Pfaden auftauchen. |
-| `raw_metadata` | die rohen Metadaten (Schicht 1): pro Eintrag Quelle, Keyword, dekodierter Text **und** byte-exakte Roh-Bytes. |
-| `interpreted_metadata` | die strukturierten Felder ([Schicht 2](interpretation.md)): pro Eintrag Parser (+ Version), Feldname (`prompt`, `seed`, `model`, …) und Wert. |
-| `annotations` | die **manuelle Schicht** (ADR 0017): Rating (1–5, NULL = unbewertet) und Notizen — strikt getrennt von allem Extrahierten. |
-| `tags` / `item_tags` | eigenes Tag-Vokabular (case-insensitiv einmalig) und die Zuordnung Tag ↔ Item, jeweils mit Zeitstempeln. |
-| `scan_issues` | beim Scannen aufgelaufene Probleme (Admin → Probleme). |
-| `smart_folders` | gespeicherte Suchen: Name + Filterausdruck (die Sortierung steckt im Ausdruck). |
-| `blocked_hashes` | die **Sperrliste** abgelehnter Medien (Hash, Grund, zuletzt bekannte Pfade). |
-| `import_log` | jede beim Import/Rausverschieben angefasste Datei mit Ausgang, Ziel, Hash und Datumsquelle. |
-| `scan_memory` | Größe + Änderungszeit der von Watchordnern katalogisierten Dateien (Neustarts überspringen Unverändertes). |
-| `rankings` / `ranking_duels` / `ranking_scores` | das Ranking-Modul: Rankings (Name + Ausdruck), das append-only **Duell-Log** und die daraus abgeleiteten Elo-Scores samt Ausgeschieden-Marker. |
-| `search_index` (FTS5) | der Volltextindex über interpretierte Felder, Dateinamen und manuelle Schicht; jederzeit neu aufbaubar (Admin → Wartung). |
-| `app_state` | kleine Schlüssel-Wert-Ablage für gemerkte Admin-Kennzahlen (mit Herkunftsstempel des Rechners). |
+Alle Tabellen mit Spalten, Schlüsseln und Indexen samt ER-Diagramm stehen
+in der [Schema-Referenz](schema.md) (aus dem echten Schema erzeugt). Kurz:
+`items` ist der Hub (eine Zeile je Datei-Hash), daran hängen Fundorte,
+Roh-Metadaten (Schicht 1), interpretierte Felder (Schicht 2), die manuelle
+Schicht (Bewertung, Tags, Notizen, gespeicherte Suchen), das Ranking-Modul,
+der Volltextindex und die Betriebstabellen (Sperrliste, Import-Log,
+Watch-Gedächtnis, Probleme, gemerkte Kennzahlen).
 
 Zugriff auf die manuelle Schicht läuft über `feral/db/manual.py`
 (`set_rating`, `set_notes`, `add_tag`, `remove_tag`, `annotations_for`,

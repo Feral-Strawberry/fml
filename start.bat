@@ -41,11 +41,19 @@ REM Only reinstall when the pinned dependencies have changed.
 fc /b requirements.txt ".venv\.deps-stamp" >nul 2>&1
 if errorlevel 1 (
   echo Installing/updating dependencies ...
-  ".venv\Scripts\python.exe" -m pip install --quiet --upgrade pip
-  ".venv\Scripts\python.exe" -m pip install --quiet -r requirements.txt || (pause & exit /b 1)
-  ".venv\Scripts\python.exe" -m pip install --quiet -e . || (pause & exit /b 1)
+  REM Hash-checking mode: pip installs ONLY the packages and files listed in
+  REM requirements.txt (pip itself included) and builds nothing from source.
+  ".venv\Scripts\python.exe" -m pip install --quiet --require-hashes --only-binary=:all: -r requirements.txt || (pause & exit /b 1)
+  REM Older versions installed fml itself with "pip install -e ."; the .pth
+  REM file below replaces that, so the old entry is removed.
+  ".venv\Scripts\python.exe" -m pip show --quiet feral-media-library >nul 2>&1 && ".venv\Scripts\python.exe" -m pip uninstall --quiet --yes feral-media-library
   copy /y requirements.txt ".venv\.deps-stamp" >nul
 )
+
+REM Make the fml sources (src\) importable in this environment via a .pth file.
+REM Needs no build step and no extra package; rewritten on every start so a
+REM moved folder keeps working.
+".venv\Scripts\python.exe" -c "import pathlib, sysconfig; pathlib.Path(sysconfig.get_paths()['purelib'], 'fml-src.pth').write_text(str(pathlib.Path('src').resolve()) + '\n')" || (pause & exit /b 1)
 
 REM -- Check ffmpeg/ffprobe (for video metadata and thumbnails) --------------------
 where ffprobe >nul 2>&1

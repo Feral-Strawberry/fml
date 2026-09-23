@@ -13,8 +13,11 @@
 Einmalig die Entwicklungs-Abhängigkeiten installieren (im Projektordner):
 
 ```
-pip install -r requirements-dev.txt
+python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.txt
 ```
+
+Das installiert genau die Pakete aus dem Lock (Laufzeit plus pytest), jedes
+mit Prüfsumme; siehe [`DEPENDENCIES.md`](../DEPENDENCIES.md).
 
 Dann:
 
@@ -218,6 +221,19 @@ Eine einzelne Datei lässt sich auch direkt starten:
 ```
 node --import ./tests/js/setup.mjs tests/js/overlays.test.mjs
 ```
+
+### 10. Abhängigkeiten und Doku-Wächter
+
+| Testdatei | Prüft |
+|---|---|
+| `test_dependencies.py` | **Keine unbenannte Abhängigkeit:** jeder Fremd-Import im Code ist eine direkt benannte Abhängigkeit; jeder Eintrag im Lock hat eine feste Version und Prüfsummen; jedes gelockte Paket steht in `DEPENDENCIES.md`; die installierte Umgebung entspricht exakt dem Lock; die Startskripte installieren nur im Hash-Modus. |
+| `test_lock_deps.py` | Das Werkzeug, das den Lock erzeugt: vollständiger Abschluss über Linux, macOS und Windows, Plattform-Marker (z. B. nur Windows), Versionsgrenzen, Format der Datei. |
+| `test_check_advisories.py` | Die Abfrage der Schwachstellendatenbank: Pins werden gelesen, Treffer gemeldet, und „offline" ist ein Fehler, kein stilles Grün. |
+| `test_schema_doc.py` | Die Schema-Referenz in der Doku entspricht dem echten Datenbank-Schema. |
+
+**Warum das wichtig ist:** Diese Tests sorgen dafür, dass sich nichts
+Unbenanntes einschleicht, weder ins Programm noch auf den Rechner, und dass
+die Doku nicht still veraltet.
 
 ## Zwei Muster, die immer wiederkehren
 
