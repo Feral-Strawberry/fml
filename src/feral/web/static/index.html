@@ -20,6 +20,8 @@
       <div class="mlabel">Media Library</div>
     </div>
   </div>
+  <!-- Ansicht (ADR 0085): Galerie | Audio, nur mit Audio-Modul. -->
+  <div id="viewseg" hidden></div>
   <!-- Suche + Ansichts-Werkzeuge (Sortierung, Dichte) als Gruppe in der
        Topbar — die Leiste unterm Suchfeld gehört den Chips (Feral Strawberry, 2026-07-11). -->
   <div id="qbar">
@@ -63,8 +65,16 @@
         <button type="button" id="filterReset" hidden></button>
         <button type="button" id="bulkBtn" hidden></button>
         <button type="button" id="compareBtn" hidden></button>
+        <!-- Audioansicht: ganze Liste in der aktuellen Sortierung (A5 #162). -->
+        <button type="button" id="playAllBtn" class="accent" hidden></button>
+        <!-- Audioansicht: markierte Songs in der Liste vergleichen (A7 #164). -->
+        <button type="button" id="listCmpBtn" class="accent" hidden></button>
+        <label id="listCmpMatch" class="cmpmatch" hidden><input type="checkbox"> <span></span></label>
+        <button type="button" id="listCmpEnd" hidden></button>
       </div>
     </div>
+    <!-- Spaltenköpfe der Audioliste (nur in der Audioansicht). -->
+    <div id="listhead" hidden></div>
     <div id="gridwrap">
       <div id="gridspacer">
         <div id="grid"></div>
@@ -74,6 +84,9 @@
   <div class="vsplit" id="splitR" title="Ziehen: Breite anpassen · Doppelklick: zurücksetzen"></div>
   <aside id="panel"></aside>
 </div>
+
+<!-- Abspielleiste (A5 #162): läuft über den Ansichtswechsel weiter (player.js). -->
+<div id="pbar" hidden></div>
 
 <!-- Vollbild-Ebenen -->
 <div id="rankings" hidden></div>

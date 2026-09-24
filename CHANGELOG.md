@@ -7,6 +7,121 @@ What changed between snapshot releases, from the user's point of view.
 Versions are date versions (`YYYY.MM` or `YYYY.MM.N`); a running
 instance shows its version under Admin → Overview.
 
+## 2026.09.2 (2026-09-24)
+
+fml now does **music** too: the new **audio module** catalogs songs from
+Suno, from ComfyUI or your own recordings, shows them in a dedicated
+audio view with a waveform, and brings a player built for comparing
+versions. The module is off by default; if you only manage images and
+videos, you get a tidier sidebar, the media type filter and the duration
+of videos.
+
+### After updating
+
+1. **Start as usual with `start.sh` or `start.bat`.** The dependencies
+   are unchanged.
+2. **Database:** migrated automatically to schema 28 on the first start
+   (four new migrations). Make a backup of `feral.sqlite` first, as with
+   every update.
+3. **Optional, once Admin → Maintenance → "Re-scan all locations":**
+   gives videos you already cataloged their duration (for `duration:` and
+   sorting by duration).
+4. **Cataloging music:** switch on Admin → Configuration → Modules →
+   **Audio module**, then run "Re-scan all locations" once for existing
+   scan locations. Watch folders re-check skipped audio files by
+   themselves. Duration, loudness, waveform and playing AIFF/CAF need
+   **ffmpeg** (as for videos).
+
+### Highlights: the audio module
+
+- **Formats:** MP3, FLAC, Ogg/Opus, WAV (also RF64/BW64), AIFF, CAF and
+  M4A or MKA/WEBM with sound only. Every tag and every chunk is stored
+  unchanged, embedded covers are only described. The media type comes
+  from the actual tracks: an MP4 with sound only is audio, no longer
+  wrongly video.
+- **What fml reads from music:** title, lyrics, tempo, key and the
+  technical details of the audio track. **Suno:** song ID, the creation
+  time as media date and the Suno version from the Content Credentials
+  (`Suno v4.5`, `Suno v5` …). **ComfyUI music** (YuE, ACE-Step, MiniMax
+  Music): style prompt, lyrics, seed and model. Logic Pro bounces and
+  iPhone voice memos are recognized. The **lyrics are in the full-text
+  search**: one line finds every version of a song.
+- **Audio view:** switch **▦ Gallery | ♪ Audio** at the top left; both
+  views share the search. Songs appear as a full-width list, every row
+  with a **three-colour waveform** (bass, mids, highs) on a shared time
+  axis, loudness in LUFS, rating and comment count. Shared name
+  beginnings are dimmed so the difference stands out.
+- **Player:** every row has **its own playhead**, exactly one plays at a
+  time: four versions can be heard chorus against chorus. **Loudness
+  matching** to -14 LUFS (on by default) so the louder version does not
+  win; tempo without pitch change, A–B loop, **"Play all"** like a CD, a
+  playback bar that keeps running when you switch to the gallery, and the
+  keyboard's media keys. AIFF, CAF and ALAC get a lossless FLAC copy in
+  the cache on first play, only if the browser cannot play the format
+  itself.
+- **Time comments** like on SoundCloud: **K** puts "Chorus" or "voice
+  cracks" at the playhead position. Pins under the waveform jump exactly
+  there on click, the texts fade in during playback, and the search finds
+  them.
+- **Comparing:** mark 2 to 6 songs, press **C**: the list narrows to
+  them, the waves grow, the comments show as text. Rate and reject as
+  usual, **Esc** returns to the same spot in the full list.
+- **Covers and finished songs:** an image from your own library as cover
+  makes a song "finished". It then also appears **in the gallery**, as a
+  tile with ♪ and duration, with single view and player; playback bar and
+  media keys show the cover too. Nothing is written into the files.
+- **Music playlist on the side:** regular music (no AI generator) shows its
+  embedded album picture in the list, the playback bar and with the media
+  keys; the default pictures from Suno & Co. stay out. A song still only
+  enters the gallery with a chosen cover. Muted preview videos in the
+  detail panel and in rankings no longer pause the music, and the playback
+  bar stays visible in a ranking.
+- **Loudness and waveform** are measured in the background after every
+  import; Admin → Maintenance → "Analyse audio" catches up on anything
+  missing.
+- Rankings stay with images and videos; songs are never part of them.
+
+### Improvements for everyone
+
+- **Tidier sidebar:** new group **Media type** (Image · Video, with the
+  module also Audio). File type, aspect, resolution, input image and
+  location now live in the block **"More criteria"**, collapsed by
+  default; if a value inside is active, the header says "· 1 active". The
+  "+ Criterion" popover follows the same order and knows media type,
+  generator and duration.
+- **New filters:** `type:` (`image`, `video`, `audio`; German `typ:`) and
+  `duration:` (`duration: >120`, `duration: <=3:30`, `duration: 60-180`;
+  German `dauer:`), plus sorting **by duration**. Videos show their
+  duration in the detail panel, the loupe and the single view.
+- **Typing help:** if a word exactly matches a media type ("video"), it
+  comes first, with the full-text search below.
+- **Import rule "Exclude formats/extensions"** also matches the file
+  extension, on import and in the collection tool: `lang` keeps programs' language
+  files out even if their content happens to look like a known format.
+- **"🎲 Find seed variants"** only appears for media that have a seed.
+
+### Bug fixes
+
+- **Admin → Overview** sometimes showed the same disk twice when another
+  process was writing while it was displayed. Drives are now recognized
+  by their device ID.
+
+### Security and docs
+
+- **ffmpeg and ffprobe only open local files now:** a crafted video or
+  audio file can no longer make them access the network, and a file name
+  starting with `-` is never read as an option.
+- The new **audio parser** is capped against truncated files and forged
+  length fields and was tested with tens of thousands of mangled files.
+- **`SECURITY.md`** now names the supply chain right at the start: every
+  installed package named and secured by checksum, automatic checks
+  against the OSV vulnerability database, and how to check yourself
+  (`python tools/check_advisories.py`).
+- New **audio module** page in the docs; README and user docs describe
+  audio, covers and the new sidebar.
+- `config.example.toml` names the log prefixes the way the log writes
+  them (`slow:`, `cold:`).
+
 ## 2026.09.1 (2026-09-23)
 
 A security and diligence release: every package fml installs on your

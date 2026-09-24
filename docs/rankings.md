@@ -27,7 +27,10 @@ Duelle laufen: **Name + Filterausdruck** (dieselbe Grammatik wie das
 Suchfeld, z. B. `tag: porträt` oder `model: "flux"` — leer = ganze
 Bibliothek). Die Population wird **live** ausgewertet, wie bei
 gespeicherten Suchen: Neu Importiertes wächst automatisch hinein,
-Abgelehntes fällt heraus.
+Abgelehntes fällt heraus. **Songs gehören nie dazu**, auch nicht mit
+Cover oder mit `typ: audio` (dann bleibt das Ranking leer): Zum
+Vergleichen und Bewerten von Musik hat das [Audio-Modul](audio.md) eigene
+Werkzeuge.
 
 - **Anlegen:** Population in der Galerie zusammenklicken (Sidebar,
   „+ Kriterium", Chips), dann **🏆 Ranking** neben dem ☆ in der Chip-Leiste.

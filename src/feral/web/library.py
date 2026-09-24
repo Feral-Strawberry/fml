@@ -6,6 +6,7 @@ Suche bereit. Die FastAPI-Routen in `app.py` sind nur dünne Hüllen darum.
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import sys
@@ -331,6 +332,20 @@ def container_counts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     ]
 
 
+def media_kind_counts(
+    conn: sqlite3.Connection, *, hits: str | None = None
+) -> list[dict[str, Any]]:
+    """Sidebar-Gruppe „Medienart" (ADR 0084): Bild · Video · Audio in fester
+    Reihenfolge (``filters.TYPES``), Wert = kanonischer ``typ:``-Wert.
+    Ungefiltert nur die Medienarten, die es gibt (keine dauerhaft toten
+    Zeilen); mit ``hits`` alle drei, der Aufrufer legt sie über die Basis.
+    Andere Arten (``document``, ``unknown``) haben keinen ``typ:``-Wert."""
+    src = hits or "items"
+    counts = dict(conn.execute(f"SELECT media_kind, COUNT(*) FROM {src} GROUP BY media_kind"))
+    return [{"typ": typ, "count": counts.get(kind, 0)}
+            for typ, kind in filters.TYPES.items() if hits or counts.get(kind)]
+
+
 def format_counts(conn: sqlite3.Connection) -> dict[str, int]:
     """Sidebar-Gruppe „Nach Format": grobe Seitenverhältnis-Eimer (Block 4S).
 
@@ -468,7 +483,7 @@ class _FacetHits:
             name = f"facet_hits_{len(self._tables)}"
             self._conn.execute(
                 f"CREATE TEMP TABLE {name} AS "
-                f"SELECT i.file_hash, i.media_date, i.container, i.width, i.height "
+                f"SELECT i.file_hash, i.media_date, i.container, i.media_kind, i.width, i.height "
                 f"FROM items i WHERE ({fragment})",
                 params,
             )
@@ -679,19 +694,29 @@ def tag_counts(
     ]
 
 
-def input_image_counts(
-    conn: sqlite3.Connection, *, hits: str | None = None
+def has_field_counts(
+    conn: sqlite3.Connection, field: str, *, hits: str | None = None
 ) -> dict[str, int]:
-    """Facette „Eingangsbild" (Block S4): Items mit/ohne ``input_image``
-    (img2img/i2v-Erkennung, ADR 0027), optional innerhalb einer Treffermenge."""
+    """Mit/ohne-Facette über die Existenz eines Schicht-2-Felds (dieselbe
+    Bedingung wie ``has: <field>``), optional innerhalb einer Treffermenge.
+    „Eingangsbild" (``input_image``, Block S4/ADR 0027) und „Songtext"
+    (``lyrics``, ADR 0084: Gesang oder Instrumental)."""
     src = hits or "items"
     mit = conn.execute(
         f"""SELECT COUNT(*) FROM {src}
              WHERE file_hash IN (SELECT file_hash FROM interpreted_metadata
-                                  WHERE field = 'input_image' AND value_text != '')"""
+                                  WHERE field = ? AND value_text != '')""",
+        (field,),
     ).fetchone()[0]
     total = conn.execute(f"SELECT COUNT(*) FROM {src}").fetchone()[0]
     return {"mit": mit, "ohne": total - mit}
+
+
+def input_image_counts(
+    conn: sqlite3.Connection, *, hits: str | None = None
+) -> dict[str, int]:
+    """Facette „Eingangsbild" (Block S4): Items mit/ohne ``input_image``."""
+    return has_field_counts(conn, "input_image", hits=hits)
 
 
 def fundort_counts(
@@ -745,6 +770,7 @@ def _facets_base(conn: sqlite3.Connection) -> dict[str, Any]:
     years = year_counts(conn)
     years["undated_total"] = years["undated"]   # Zeile dimmen statt verstecken
     return {
+        "media_kinds": media_kind_counts(conn),
         "containers": container_counts(conn),
         "formats": format_counts(conn),
         "megapixels": megapixel_counts(conn),
@@ -752,6 +778,7 @@ def _facets_base(conn: sqlite3.Connection) -> dict[str, Any]:
         "loras": lora_counts(conn),
         "tools": tool_counts(conn),
         "input_image": input_image_counts(conn),
+        "lyrics": has_field_counts(conn, "lyrics"),
         "fundort": fundort_counts(conn),
         "tags": tag_counts(conn),
     }
@@ -763,6 +790,13 @@ def _facets_context(
 ) -> dict[str, Any]:
     """Zähler je Gruppe im Kontext der ANDEREN Chips über der globalen Basis.
     ``base`` wird nicht verändert (kann aus dem Cache stammen)."""
+    # Medienart (ADR 0084): globale Zeilen, Zähler im Kontext ohne typ:-Chips.
+    hits = hits_mgr.table(_group_predicates(predicates, kinds=("typ",)))
+    media_kinds = base["media_kinds"]
+    if hits is not None:
+        counts = {r["typ"]: r["count"] for r in media_kind_counts(conn, hits=hits)}
+        media_kinds = [{"typ": m["typ"], "count": counts[m["typ"]]} for m in base["media_kinds"]]
+
     # Dateityp: globale Liste bestimmt die Zeilen, Zähler im Kontext.
     hits = hits_mgr.table(_group_predicates(predicates, kinds=("container",)))
     containers = base["containers"]
@@ -806,6 +840,8 @@ def _facets_context(
                  for l in base["loras"]]
     hits = hits_mgr.table(_group_predicates(predicates, field="input_image"))
     input_image = base["input_image"] if hits is None else input_image_counts(conn, hits=hits)
+    hits = hits_mgr.table(_group_predicates(predicates, field="lyrics"))
+    lyrics = base["lyrics"] if hits is None else has_field_counts(conn, "lyrics", hits=hits)
 
     # Generator (ADR 0066): globale Liste bestimmt die Zeilen, Zähler im
     # Kontext der anderen Chips; der eigene tool:-Chip klammert sich aus.
@@ -830,6 +866,7 @@ def _facets_context(
                 for t in base["tags"]]
 
     return {
+        "media_kinds": media_kinds,
         "containers": containers,
         "formats": formats,
         "megapixels": megapixels,
@@ -837,6 +874,7 @@ def _facets_context(
         "loras": loras,
         "tools": tools,
         "input_image": input_image,
+        "lyrics": lyrics,
         "fundort": fundort,
         "tags": tags,
     }
@@ -879,9 +917,14 @@ def sidebar_payload(
     conn: sqlite3.Connection, *, filter_expr: str | None,
     base_models: list[dict[str, Any]], base_unknown: int,
     base_facets: dict[str, Any], base_ratings: list[dict[str, Any]],
+    view_preds: tuple[filters.Predicate, ...] = (),
 ) -> dict[str, Any]:
     """Alle drei Zählergruppen der Sidebar (Modelle, Facetten, Bewertungen)
     für EINEN Suchzustand in EINEM Lauf (#99, ADR 0073).
+
+    ``view_preds`` (ADR 0085) = Grundbereich der Ansicht: steht vor den
+    Chips und damit in JEDER Gruppen-Treffermenge (keine Gruppe klammert
+    ihn aus); die Basen sind dann die der Ansicht (``view_base``).
 
     Vorher holte die Sidebar drei Endpunkte parallel, und jeder
     materialisierte dieselbe Treffermenge erneut (bis zu fünf Filterläufe
@@ -890,7 +933,7 @@ def sidebar_payload(
     Die globalen Basen kommen vom Aufrufer (Epochen-Caches, ADR 0048/0071).
     Wirft ``ValueError`` bei ungültigem Ausdruck.
     """
-    predicates = filters.parse(filter_expr) if filter_expr else []
+    predicates = [*view_preds, *(filters.parse(filter_expr) if filter_expr else [])]
     hits_mgr = _FacetHits(conn)
     try:
         return {
@@ -900,6 +943,54 @@ def sidebar_payload(
         }
     finally:
         hits_mgr.close()
+
+
+def has_audio(conn: sqlite3.Connection) -> bool:
+    """Gibt es Audio im Bestand? Ohne Audio ist der Galerie-Grundbereich
+    „alles" (ADR 0085) — dann entfällt die Bedingung ganz, und Nutzer ohne
+    Audio behalten die ungefilterten Wege (Epochen-Cache im Aufrufer)."""
+    return conn.execute(
+        "SELECT EXISTS (SELECT 1 FROM items WHERE media_kind = 'audio')").fetchone()[0] == 1
+
+
+def has_covers(conn: sqlite3.Connection) -> bool:
+    """Hat irgendein Song ein Cover (ADR 0090)? Ohne bleibt die Galerie bei
+    der schlichten Grundbedingung (Aufrufer cacht je Epoche)."""
+    return conn.execute("SELECT EXISTS (SELECT 1 FROM covers)").fetchone()[0] == 1
+
+
+def view_base(
+    conn: sqlite3.Connection, view_preds: tuple[filters.Predicate, ...], *,
+    base_models: list[dict[str, Any]], base_unknown: int,
+    base_facets: dict[str, Any], base_ratings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Die ungefilterte Sidebar EINER Ansicht (ADR 0084/0085): die Zähler im
+    Grundbereich, und nur die Zeilen, die es dort gibt — „gedimmt statt
+    versteckt" gilt für Werte des Grundbereichs, nicht für solche, die es
+    in dieser Ansicht nie geben kann (MP3 in der Galerie, LoRAs in der
+    Audioansicht). Ergebnis hat die Form von ``sidebar_payload`` und dient
+    gefilterten Aufrufen als Basis; der Aufrufer cacht es je Epoche.
+    """
+    full = sidebar_payload(conn, filter_expr=None, base_models=base_models,
+                           base_unknown=base_unknown, base_facets=base_facets,
+                           base_ratings=base_ratings, view_preds=view_preds)
+    live = lambda rows: [r for r in rows if r["count"]]   # noqa: E731
+    facets = dict(full["facets"])
+    for key in ("media_kinds", "containers", "loras", "tools", "tags"):
+        facets[key] = live(facets[key])
+    years = []
+    for y in facets["years"]:
+        if y["count"]:
+            years.append({**y, "months": live(y["months"])})
+    facets["years"] = years
+    facets["undated_total"] = facets["undated"]
+    models = full["models"]
+    return {
+        "models": {"models": live(models["models"]), "unknown": models["unknown"],
+                   "unknown_total": models["unknown"]},
+        "facets": facets,
+        "ratings": live(full["ratings"]),
+    }
 
 
 # CASE-Ausdrücke der Eimer-Facetten über den Temp-Tabellen-Spalten — dieselben
@@ -944,7 +1035,17 @@ _MIME = {
     "matroska": "video/webm",
     "isobmff": "video/mp4",
     "pdf": "application/pdf",
+    # Audio-Modul (ADR 0083). AIFF/CAF spielt der Browser (außer Safari
+    # bei AIFF) nicht — der Proxy kommt mit A4, bis dahin ehrlicher Player.
+    "mp3": "audio/mpeg",
+    "flac": "audio/flac",
+    "ogg": "audio/ogg",
+    "wav": "audio/wav",
+    "aiff": "audio/aiff",
+    "caf": "audio/x-caf",
 }
+# Tonlose Video-Container (M4A, Matroska nur mit Ton) als Audio ausliefern.
+_AUDIO_MIME = {"isobmff": "audio/mp4", "matroska": "audio/webm"}
 
 
 # Dateiname (Basename) des ``path``-Alias, rein in SQL: erst ``\`` → ``/``
@@ -985,6 +1086,9 @@ _PLAIN_SORTS = {
     "container": "i.container ASC, i.first_seen_at DESC, i.file_hash",
     "container-ab": "i.container DESC, i.first_seen_at ASC, i.file_hash DESC",
     "created": "i.media_date DESC, i.file_hash",
+    # Dauer (ADR 0083, Index aus Migration 0025): NULL (Bilder) steht bei
+    # DESC ohnehin am Ende; aufsteigend ist darum die Sorter-Bauform.
+    "duration": "i.duration DESC, i.file_hash",
     # created-auf ist NICHT plain: ASC stellte die Undatierten nach vorn —
     # sie gehören ans Ende, also Sorter-Bauform (unten).
 }
@@ -1033,6 +1137,12 @@ _PAGED_SORTS = {
         "i.media_date IS NULL, i.media_date ASC, i.file_hash",
         "",
     ),
+    "duration-auf": (
+        "",
+        "i.duration IS NULL, i.duration ASC, i.file_hash",
+        "i.duration IS NULL, i.duration ASC, i.file_hash",
+        "",
+    ),
 }
 
 # Für den Whitelist-Abgleich (?sort=-Parameter und Kopplungs-Test).
@@ -1057,16 +1167,26 @@ def _grid_query_parts(
     rating: int | None,
     filter_expr: str | None,
     dupes: bool,
-) -> tuple[str, list[Any], str]:
+    view_preds: tuple[filters.Predicate, ...] = (),
+) -> tuple[str, list[Any], str, bool]:
     """Gemeinsamer WHERE-/Sortier-Bau der Galerie-Queries.
 
-    Liefert ``(where_sql, params, sort_key)`` — identisch für ``list_items``
-    und ``item_position``, damit beide (inkl. Cache-Schlüssel, ADR 0048)
-    garantiert dieselbe Treffermenge und Reihenfolge meinen.
+    Liefert ``(where_sql, params, sort_key, filtered)`` — identisch für
+    ``list_items`` und ``item_position``, damit beide (inkl. Cache-Schlüssel,
+    ADR 0048) garantiert dieselbe Treffermenge und Reihenfolge meinen.
+    ``view_preds`` ist der Grundbereich der Ansicht (ADR 0085): er steht im
+    WHERE, macht einen Zustand aber nicht zum „gefilterten" — ``filtered``
+    sagt, ob Chips/Quelle filtern (nur dann lohnt der Trefferlisten-Cache;
+    die ungefilterte Galerie bleibt der Index-Spaziergang).
     """
     sort_key = sort if sort in _SORTS else "added"
     where = []
     params: list[Any] = []
+    if view_preds:
+        fragment, vparams = filters.build_where(list(view_preds))
+        where.append(fragment)
+        params.extend(vparams)
+    n_base = len(where)
     if model is not None:
         # Effektives Modell: manuell gesetztes gewinnt (ADR 0022). Von den
         # Treffern aus, nicht vom Gesamtbestand: die IN-Subqueries laufen über
@@ -1102,7 +1222,7 @@ def _grid_query_parts(
             "(SELECT COUNT(*) FROM file_locations l2 WHERE l2.file_hash = i.file_hash) > 1"
         )
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
-    return where_sql, params, sort_key
+    return where_sql, params, sort_key, len(where) > n_base
 
 
 def _sort_join_order(sort_key: str) -> tuple[str, str]:
@@ -1129,6 +1249,7 @@ def count_items(
     *,
     cache: EpochCache | None = None,
     scope: dict | None = None,
+    view_preds: tuple[filters.Predicate, ...] = (),
 ) -> int:
     """Trefferzahl eines Ausdrucks — für Smart-Folder- und Arena-Zähler (#69).
 
@@ -1139,9 +1260,12 @@ def count_items(
     nächsten Schreibvorgang — Schlüssel = WHERE-Fragment + Parameter, die
     ``fundort:``-Library-Root läuft wie bei ``list_items`` als Parameter
     mit; ``scope`` bekommt bei einer Neuberechnung die Kalt-Markierung.
+    ``view_preds`` = Grundbereich der Ansicht (ADR 0085, Sidebar-Zähler je
+    Ansicht); er steckt im WHERE und damit im Cache-Schlüssel.
     """
-    where_sql, params, _sort_key = _grid_query_parts(
-        sort="added", model=None, rating=None, filter_expr=filter_expr or None, dupes=False
+    where_sql, params, _sort_key, _filtered = _grid_query_parts(
+        sort="added", model=None, rating=None, filter_expr=filter_expr or None, dupes=False,
+        view_preds=view_preds,
     )
 
     def compute() -> int:
@@ -1165,6 +1289,8 @@ def list_items(
     with_total: bool = True,
     cache: EpochCache | None = None,
     scope: dict | None = None,
+    view_preds: tuple[filters.Predicate, ...] = (),
+    with_max_duration: bool = False,
 ) -> dict[str, Any]:
     """Eine Seite des Bestands fürs Grid, Sortierung per Whitelist (``_SORTS``).
 
@@ -1184,13 +1310,24 @@ def list_items(
     Schreib-Epoche gebunden; jede Seite ist dann Listen-Slice + eine
     Anzeige-Query. Der ungefilterte Pfad bleibt der Index-Spaziergang.
     ``scope`` (ASGI-Scope) bekommt beim Listenaufbau die Kalt-Markierung
-    (``cache.COLD_KEY``, ADR 0071).
+    (``cache.COLD_KEY``, ADR 0071). ``view_preds`` = Grundbereich der
+    Ansicht (ADR 0085) — gefiltert zählt er nicht als Filter.
+    ``with_max_duration`` legt ``max_duration`` bei: die längste Dauer der
+    Treffermenge, die gemeinsame Zeitachse der Audioliste (ADR 0087).
     """
-    where_sql, params, sort_key = _grid_query_parts(
-        sort=sort, model=model, rating=rating, filter_expr=filter_expr, dupes=dupes
+    where_sql, params, sort_key, filtered = _grid_query_parts(
+        sort=sort, model=model, rating=rating, filter_expr=filter_expr, dupes=dupes,
+        view_preds=view_preds,
     )
     display = _GRID_DISPLAY_SQL
-    if cache is not None and where_sql:
+    extra: dict[str, Any] = {}
+    if with_max_duration:
+        sql = f"SELECT MAX(i.duration) FROM items i{where_sql}"
+        compute = lambda: conn.execute(sql, params).fetchone()[0]  # noqa: E731
+        extra["max_duration"] = (
+            cache.get(("maxdur", where_sql, tuple(params)), compute, scope=scope)
+            if cache is not None and filtered else compute())
+    if cache is not None and filtered:
         # Trefferlisten-Cache (ADR 0048), NUR für gefilterte Zustände: die
         # fertig sortierte Hash-Liste einmal materialisieren, an die
         # Schreib-Epoche binden — jedes Häppchen ist dann Slice + EINE
@@ -1212,7 +1349,7 @@ def list_items(
             # Reihenfolge kommt aus der Liste; zwischen Epochen-Prüfung und
             # Anzeige-Query gelöschte Items fallen still raus.
             rows = [by_hash[h] for h in page_hashes if h in by_hash]
-        return {"total": total, "offset": offset, "items": _item_dicts(rows)}
+        return {"total": total, "offset": offset, "items": _item_dicts(rows), **extra}
 
     # COUNT nur für die erste Seite (Feral Strawberrys Windows-Runde 5): beim Durch-
     # scrollen lädt das Grid viele Folgeseiten — der Filter-COUNT je Seite
@@ -1244,7 +1381,7 @@ def list_items(
             + f" ORDER BY {outer_order}",
             (*params, limit, offset),
         ).fetchall()
-    return {"total": total, "offset": offset, "items": _item_dicts(rows)}
+    return {"total": total, "offset": offset, "items": _item_dicts(rows), **extra}
 
 
 def item_position(
@@ -1257,6 +1394,7 @@ def item_position(
     filter_expr: str | None = None,
     dupes: bool = False,
     cache: EpochCache | None = None,
+    view_preds: tuple[filters.Predicate, ...] = (),
 ) -> int | None:
     """Grid-Position (0-basiert) eines Items in der Treffermenge — oder ``None``.
 
@@ -1268,10 +1406,11 @@ def item_position(
     die Position ist dann ein Listen-Lookup. Ungefiltert zählt eine
     ROW_NUMBER-Query einmal durch (eine Nutzeraktion, kein Scroll-Pfad).
     """
-    where_sql, params, sort_key = _grid_query_parts(
-        sort=sort, model=model, rating=rating, filter_expr=filter_expr, dupes=dupes
+    where_sql, params, sort_key, filtered = _grid_query_parts(
+        sort=sort, model=model, rating=rating, filter_expr=filter_expr, dupes=dupes,
+        view_preds=view_preds,
     )
-    if cache is not None and where_sql:
+    if cache is not None and filtered:
         key = ("items", sort_key, where_sql, tuple(params))
         hashes = cache.get(
             key, lambda: _materialize_hits(conn, sort_key, where_sql, params)
@@ -1301,15 +1440,37 @@ def item_position(
 # unabhängig davon, ob ``sqlite_stat1`` existiert (Test sichert den Plan).
 _GRID_DISPLAY_SQL = """
     SELECT i.file_hash, i.container, i.media_kind, i.file_size, i.first_seen_at,
-           i.width, i.height, i.fps,
+           i.width, i.height, i.fps, i.duration,
            (SELECT rating FROM annotations a
              WHERE a.file_hash = i.file_hash) AS rating,
            (SELECT path FROM file_locations l
              WHERE l.file_hash = i.file_hash ORDER BY l.id LIMIT 1) AS path,
            (SELECT value_text FROM interpreted_metadata m
-             WHERE m.file_hash = i.file_hash AND +m.field = 'tool' LIMIT 1) AS tool
+             WHERE m.file_hash = i.file_hash AND +m.field = 'tool' LIMIT 1) AS tool,
+           COALESCE((SELECT model FROM annotations a
+                      WHERE a.file_hash = i.file_hash AND a.model != ''),
+                    (SELECT value_text FROM interpreted_metadata m
+                      WHERE m.file_hash = i.file_hash AND +m.field = 'model'
+                        AND m.value_text != '' LIMIT 1)) AS model,
+           (SELECT json_group_array(json_array(c.id, c.at_ms, c.text))
+              FROM (SELECT id, at_ms, text FROM time_comments
+                     WHERE file_hash = i.file_hash ORDER BY at_ms, id) c) AS comments,
+           (SELECT cover_hash FROM covers v WHERE v.file_hash = i.file_hash) AS cover,
+           -- Eingebettetes Bild eines Songs (#198): nur für Audio-Zeilen
+           -- gerechnet (CASE), dieselbe Bedingung wie manual.has_embedded_picture.
+           CASE WHEN i.media_kind = 'audio' THEN EXISTS (
+               SELECT 1 FROM raw_metadata r
+                WHERE r.file_hash = i.file_hash
+                  AND (r.value_text LIKE '{"mime": %'
+                       OR (r.keyword = 'codec_type' AND r.value_text = 'video')))
+           END AS embedded
       FROM items i
     """
+
+
+def _shows_artwork(row: sqlite3.Row) -> bool:
+    """Zeigt der Song sein eingebettetes Bild als Anzeigebild (#198)?"""
+    return bool(row["embedded"]) and not row["cover"] and not row["tool"]
 
 
 def _item_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
@@ -1323,10 +1484,25 @@ def _item_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
             "first_seen_at": r["first_seen_at"],
             "name": Path(r["path"]).name if r["path"] else None,
             "tool": r["tool"],
+            # Effektives Modell (ADR 0022) für die Audioliste (ADR 0085).
+            "model": r["model"],
             "rating": r["rating"],
             "width": r["width"],
             "height": r["height"],
             "fps": r["fps"],
+            "duration": r["duration"],
+            # Zeitkommentare (#163): Pins und Zähler der Listenzeile ohne
+            # eigene Anfrage je Zeile; nur, wo es welche gibt.
+            **({"comments": [{"id": c[0], "at_ms": c[1], "text": c[2]}
+                             for c in json.loads(r["comments"])]}
+               if r["comments"] and r["comments"] != "[]" else {}),
+            # Cover eines Songs (#165): Kachel und Listenzeile zeigen sein
+            # Vorschaubild, ohne eigenen Thumbnail-Auftrag.
+            **({"cover": r["cover"]} if r["cover"] else {}),
+            # Anzeigebild (#198): das eingebettete Bild normaler Musik, nur
+            # ohne Cover und ohne erkannten KI-Erzeuger (Sunos Standardbilder
+            # bleiben draußen). Nie Cover: keine Galerie, nicht finalisiert.
+            **({"artwork": True} if _shows_artwork(r) else {}),
         }
         for r in rows
     ]
@@ -1380,11 +1556,28 @@ def item_detail(conn: sqlite3.Connection, file_hash: str) -> dict[str, Any] | No
         "width": item["width"],
         "height": item["height"],
         "fps": item["fps"],
+        "duration": item["duration"],
         "locations": locations,
         "interpreted": interpreted,
         "raw": raw,
         "manual": manual.annotations_for(conn, file_hash),
+        "comments": manual.list_comments(conn, file_hash),
+        # Eingebettetes Bild (Suno-Cover): zählt nicht als Cover (ADR 0090),
+        # das Panel zeigt es klein über /api/thumb.
+        "embedded_picture": (item["media_kind"] == "audio"
+                             and manual.has_embedded_picture(conn, file_hash)),
+        # Das Coverbild als Item (#165): die Anzeige braucht den Container
+        # (Anzeige-URL, ADR 0052), nicht nur den Hash.
+        "cover_item": _cover_item(conn, file_hash),
     }
+
+
+def _cover_item(conn: sqlite3.Connection, file_hash: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        """SELECT i.file_hash, i.container, i.media_kind, i.width, i.height
+             FROM covers c JOIN items i ON i.file_hash = c.cover_hash
+            WHERE c.file_hash = ?""", (file_hash,)).fetchone()
+    return dict(row) if row else None
 
 
 def workflow_json(conn: sqlite3.Connection, file_hash: str) -> str | None:
@@ -1521,6 +1714,21 @@ def match_location(
     return None
 
 
+def audio_facts(conn: sqlite3.Connection, file_hash: str) -> tuple[str, str | None] | None:
+    """(Container, Codec) eines Audio-Items, ``None`` für alles andere — die
+    Grundlage der Proxy-Entscheidung (A4 #161). Der Codec kommt aus Schicht 2
+    (``audio_codec``), weil ALAC und AAC denselben M4A-Container teilen."""
+    row = conn.execute(
+        """SELECT i.container,
+                  (SELECT m.value_text FROM interpreted_metadata m
+                    WHERE m.file_hash = i.file_hash AND m.field = 'audio_codec'
+                    ORDER BY m.id LIMIT 1) AS codec
+             FROM items i WHERE i.file_hash = ? AND i.media_kind = 'audio'""",
+        (file_hash,),
+    ).fetchone()
+    return None if row is None else (row["container"], row["codec"])
+
+
 def resolve_media(
     conn: sqlite3.Connection, file_hash: str, *, verify: bool = False
 ) -> tuple[str, str] | None:
@@ -1560,11 +1768,13 @@ def resolve_media_verified(
     Hash verifiziert wurde (``False`` = nur Größen-Wächter, weil ``verify``
     aus war oder die Datei größer als ``VERIFY_MAX_BYTES`` ist)."""
     item = conn.execute(
-        "SELECT file_size, container FROM items WHERE file_hash = ?", (file_hash,)
+        "SELECT file_size, container, media_kind FROM items WHERE file_hash = ?",
+        (file_hash,),
     ).fetchone()
     if item is None:
         return None
-    mime = _MIME.get(item["container"], "application/octet-stream")
+    mime = ((item["media_kind"] == "audio" and _AUDIO_MIME.get(item["container"]))
+            or _MIME.get(item["container"], "application/octet-stream"))
     for loc in ordered_locations(conn, file_hash, item["file_size"]):
         if not loc["usable"]:
             continue

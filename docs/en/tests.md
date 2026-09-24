@@ -30,14 +30,15 @@ pytest -q
 At the end there is a line like:
 
 ```
-736 passed, 2 skipped in 9.8s
+907 passed in 40s
 ```
 
 - **passed** = passed. The exact number grows with the project; what
   matters is: **0 failed, 0 errors**.
-- **skipped** is fine: two tests need the video tools `ffmpeg`/`ffprobe`
-  and skip themselves if those are not installed on the machine. The app
-  still works, just without video metadata and video thumbnails. Likewise the
+- **skipped** is fine: some tests need the tools `ffmpeg`/`ffprobe` and
+  skip themselves if those are not installed on the machine. The app still
+  works, just without video metadata, video thumbnails and audio
+  loudness/waveform. Likewise the
   user-interface tests (group 9) skip themselves if **Node.js** is not
   installed, and on **Windows** one scan test that needs a symlink (Windows
   only allows that with admin rights or developer mode).

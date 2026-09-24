@@ -43,12 +43,16 @@ def apply_bulk(
     reject: bool = False,
     thumb_cache: str | Path | None = None,
     now: str | None = None,
+    view_preds: tuple[filters.Predicate, ...] = (),
 ) -> dict[str, Any]:
     """Aktionen auf alle Treffer anwenden; liefert eine ehrliche Zusammenfassung.
 
     ``hashes`` gewinnt über ``filter_expr``; ein leerer Ausdruck heißt „alle
     Items". Unbekannte Hashes werden still übersprungen (wie
     ``/api/batch/annotate``). Ungültige Parameter ⇒ ``ValueError``.
+    ``view_preds`` = Grundbereich der Ansicht (ADR 0085): der Ausdruck
+    trifft nur, was die Ansicht zeigt (eine Auswahl per ``hashes`` ist
+    ohnehin sichtbar).
     """
     add_tag = (add_tag or "").strip() or None
     model = (model or "").strip() or None
@@ -65,7 +69,8 @@ def apply_bulk(
 
     ts = now or now_iso()
     with conn:
-        total = _materialize(conn, filter_expr=filter_expr, hashes=hashes)
+        total = _materialize(conn, filter_expr=filter_expr, hashes=hashes,
+                             view_preds=view_preds)
         summary: dict[str, Any] = {"matched": total}
         fts_dirty: set[str] = set()
         try:
@@ -94,7 +99,8 @@ def apply_bulk(
 
 
 def _materialize(
-    conn: sqlite3.Connection, *, filter_expr: str | None, hashes: list[str] | None
+    conn: sqlite3.Connection, *, filter_expr: str | None, hashes: list[str] | None,
+    view_preds: tuple[filters.Predicate, ...] = (),
 ) -> int:
     """Treffermenge als Temp-Tabelle ``bulk_hits`` (nur katalogisierte Items)."""
     conn.execute(f"DROP TABLE IF EXISTS {_HITS}")
@@ -107,9 +113,10 @@ def _materialize(
         )
     else:
         # Leerer Ausdruck = „alle Items" (der Parser lehnt Leeres ehrlich ab).
-        fragment, params = "", []
+        predicates = list(view_preds)
         if filter_expr and filter_expr.strip():
-            fragment, params = filters.build_where(filters.parse(filter_expr))
+            predicates += filters.parse(filter_expr)
+        fragment, params = filters.build_where(predicates)
         where = f"WHERE ({fragment})" if fragment else ""
         conn.execute(
             f"CREATE TEMP TABLE {_HITS} AS SELECT i.file_hash FROM items i {where}",

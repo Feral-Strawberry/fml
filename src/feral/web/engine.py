@@ -477,6 +477,14 @@ class ScanEngine:
                       "retry_failed": bool(retry_failed)},
                      msg("taskThumbWarm"), dedupe="pending" if auto else "all")
 
+    def enqueue_audio_warm(
+        self, cache_dir: str | Path, *, retry_failed: bool = False, auto: bool = False,
+    ) -> None:
+        """„Audio analysieren" (A4 #161) — Dedupe wie ``enqueue_thumb_warm``."""
+        self.enqueue("audio_warm",
+                     {"cache_dir": str(cache_dir), "retry_failed": bool(retry_failed)},
+                     msg("taskAudioWarm"), dedupe="pending" if auto else "all")
+
     def enqueue_media_date_backfill(self, min_date: datetime | None = None) -> None:
         """``min_date`` (konfiguriert, ``[import] min_date``) wandert mit —
         picklebar als ISO-Text (#113)."""

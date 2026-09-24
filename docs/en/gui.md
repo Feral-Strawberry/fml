@@ -29,7 +29,9 @@ DB + port, started via `start.bat --config name.toml`):
 
 ## Layout
 
-**Top bar:** search box (center), right next to it the **sort button** and
+**Top bar:** with the audio module, the switch **▦ Gallery | ♪ Audio** on
+the left (two views, one search, see [Audio](audio.md#audio-view)).
+Search box (center), right next to it the **sort button** and
 the **density S/M/L** (the bar below the search belongs to the chips), activity
 indicator (pulses while a scan/maintenance runs - a link to the admin
 page), **dark/light switch** (moon/sun; the same choice applies in the
@@ -68,7 +70,10 @@ stored language-neutrally and translated on display.
 **Left - sources:** "All media", **Duplicates** (items that sit at
 several paths on disk - the panel shows all locations), your **saved
 searches**, the **Rating** group (exactly n stars - also for finding
-poorly rated media on purpose), **Generator** (the platform the file was
+poorly rated media on purpose), **Media type** (Image · Video - only the
+kinds present in the collection; chip `typ: video`; with the audio module,
+audio has a view of its own, see [Audio](audio.md#audio-view); in the
+gallery "Audio" counts only the finished songs with a cover), **Generator** (the platform the file was
 created on: ComfyUI, A1111, Midjourney, Google, OpenAI, Adobe, Topaz - from
 the embedded metadata or Content Credentials, see
 [interpretation](interpretation.md#generator-detection-gemini-chatgpt-firefly--co-c2paxmp);
@@ -81,7 +86,10 @@ filters on both -, **By year** (creation date; the caret before the year
 unfolds the months - legacy collections get their date via "Re-scan all
 locations"), **By LoRA** (the LoRAs used during generation, most used first;
 in the long lists Generator, Model and LoRA, rows with hits sit on top while
-rows empty in context are dimmed below a divider "no hits with this filter · 106 models" - without an active chip that divider does not appear), **By file type** (PNG, WEBP, video containers, …), **By format**
+rows empty in context are dimmed below a divider "no hits with this filter · 106 models" - without an active chip that divider does not appear).
+Below sits the **"More criteria"** block (collapsed by default, a click on
+its heading unfolds it; fml remembers the state per browser) with
+**By file type** (PNG, WEBP, video containers, …), **By format**
 (rough aspect-ratio classes: portrait / square / landscape / widescreen -
 for troubleshooting after an import), **By resolution** (megapixel
 ranges: under 1 / 1-2 / 2-4 / over 4 MP), **Input image** (with/without -
@@ -90,6 +98,9 @@ library" = at least one copy sits in the media library, "external only" =
 only cataloged in place, e.g. via `catalog` from external drives; the group
 only appears when a media library is configured). A click puts a **chip**
 into the search bar above the gallery (see "Searching").
+Every group collapses via a click on its heading. If a value is active in
+a collapsed group (or in the collapsed block), its heading says so:
+**"· 1 active"** - no filter works invisibly.
 
 **Click rule as in Lightroom (changed in September 2026 - please read if
 you have been using fml for a while):**
@@ -145,7 +156,10 @@ search also restores its sort order. The sort order last chosen in the
 menu is **remembered in the browser**: it keeps applying wherever no
 search brings its own sort chip — including after a restart and after
 "✕ reset filters". Videos carry a VIDEO badge, every
-tile a tool/container chip. **Click** selects a medium (panel on the
+tile a tool/container chip. With the [audio module](audio.md) the gallery
+also holds **finished songs**: songs with a cover, as a tile made from the
+cover image with ♪, duration and ▶ (Space plays, see
+[Cover](audio.md#cover-finished-songs-in-the-gallery)). **Click** selects a medium (panel on the
 right), **Space** opens the loupe (fast browsing), **double-click or
 Enter** the single view (zoom + metadata); **arrow keys** move the
 selection in the overview as well (←/→ one medium, ↑/↓ one row).
@@ -159,7 +173,8 @@ to the prompt is not shown - some workflows leave the two
 indistinguishable for us, and the same text twice would only be noise. At
 the bottom **"🎲 Find seed variants"**: builds an exact chip search for
 the same generation - prompt, negative, model, LoRAs, sampler, scheduler,
-steps, CFG and size of this image, only the seed varies. Ideal for
+steps, CFG and size of this image, only the seed varies (only for media
+with a seed; Suno, Midjourney, ChatGPT & co. write none). Ideal for
 cleaning up and comparing seed series; too strict? Removing individual
 chips loosens the search) · **WORKFLOW** (for ComfyUI media: "View node
 graph" and "load as .json"; for A1111 images with the badge "ComfyUI ·
@@ -220,7 +235,10 @@ operation that is your own.
 in the same order the 📂 button uses. Each row carries an origin tag -
 **Library** (under the library root), **Source** (under a watch source,
 typically "catalogue") or **external** - and the location that "Show in
-file manager" opens is marked with 📂. If the file is gone there, the row
+file manager" opens starts with the **📂 button**: the same as top right
+in the loupe and single view, it shows the file selected in
+Explorer/Finder (for songs without a cover the only way, they have no
+loupe and no single view). If the file is gone there, the row
 says "(missing)"; if a different file now sits at the path (size does not
 match), "(different file at this path)".
 
@@ -460,15 +478,24 @@ show only their icon.
   creates a **new ranking** from the chips (pairwise comparison with
   leaderboard), see [Rankings](rankings.md).
 - **"+ Criterion"** (next to the chips) opens the **builder**: all
-  categories (model, LoRA, tags, rating, text, year, file type, format,
-  resolution, input image, metrics, raw-data search, filename, sort
-  order) with value lists and **counters in the current context**.
+  categories in sidebar order (rating, media type, generator, model,
+  LoRA, year, file type, format, resolution, input image, location),
+  followed by what only exists here (tags, text, **duration** - input like
+  `dauer:`, e.g. `>120` or `1:00-3:00`, applies to audio and video -,
+  metrics, raw-data search, filename, sort order) with value lists and **counters in the current context**.
   Clicking several values = OR chip; "exclude" makes negative criteria;
   the raw-data search is the opt-in for hits in workflow JSONs (`raw:`).
 - **Typing help:** while typing, the search box suggests matching facets
   ("Model: flux.1-dev (1,234)", "Tag: favorite (56)", …). ↑/↓ selects,
   **Enter takes the suggestion as a chip** - Enter without a selection
-  makes text chips as usual. Learning the grammar is thereby optional.
+  makes text chips as usual. Learning the grammar is thereby optional. If
+  the word matches a **media type exactly** ("audio", "image", "video",
+  German "Bild"), that row is already selected: Enter gives `typ: video`.
+  At the very bottom the row **"Full text: video"** then appears - one
+  arrow key there, and Enter searches the full text as usual. If the media
+  type lives in the other view ("audio" in the gallery), the row reads
+  **"View: → Audio view"** instead of a chip: Enter switches the view, the
+  search stays.
 
 The search is **curated**: across the interpreted fields (prompt, model,
 seed, sampler, …), the **filename** (for metadata-poor sources like
@@ -513,7 +540,7 @@ year: 2022 | unbekannt sort: created
 (`rating>=`, `width>=` …) form ranges via `>=`/`<=` pairs. The directive
 **`sort: <key>`** (once per expression) sets the sort order and is stored
 with the search: `added`, `created` (creation date), `size`, `name`,
-`container`, `rating`. A suffix flips the direction: `sort: created-auf`
+`container`, `rating`, `duration` (audio and video). A suffix flips the direction: `sort: created-auf`
 (oldest first), `sort: name-ab` (Z–A) - in English `-asc`/`-desc`
 (`sort: created-asc`). Without a suffix the sensible default direction
 applies (newest/largest/best first, names A–Z); unrated and undated items
@@ -542,8 +569,11 @@ e.g. node names in workflow JSON: `raw: ipadapter`), `datei:` (in
 English `file:`; specifically the **filename** of the locations, without
 directory - substring, exact with `"…"`; handy for metadata-less
 collections like Midjourney exports, and of course usable in ranking
-expressions too) and the media metrics `width`/`height`/`fps` with
-comparison (e.g. `width>=1920 fps>=24`). Saved searches are dynamic:
+expressions too), `type:` (German `typ:`; media type
+`image`/`video`/`audio`), `duration:` (German `dauer:`; seconds or m:ss
+with a comparison or as a range: `duration: >120`, `duration: 60-180`,
+see [Audio module](audio.md)) and the media metrics `width`/`height`/`fps`
+with comparison (e.g. `width>=1920 fps>=24`). Saved searches are dynamic:
 evaluated every time they are opened.
 
 ## Saved searches

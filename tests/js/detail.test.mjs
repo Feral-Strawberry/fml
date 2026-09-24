@@ -6,7 +6,7 @@
 
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
-import { loadShell, flush, item, serveLibrary } from "./harness.mjs";
+import { loadShell, flush, item, serveLibrary, hashOf } from "./harness.mjs";
 import { DomEvent, Element } from "./dom.mjs";
 import { mockApi } from "./apimock.mjs";
 import { emit } from "./bus.mjs";
@@ -53,6 +53,16 @@ test("Fundorte: Reihenfolge vom Server, Badge je Herkunft, 📂 am bevorzugten",
   assert.equal(panel().querySelector(".pname").textContent, "bild.png");
   // Pfad bleibt als Text lesbar (Trenner wie gespeichert).
   assert.equal(rows[0].querySelector(".locpath").textContent, "D:\\fml\\bestand\\2026\\09\\08\\bild.png");
+});
+
+test("📂 am bevorzugten Fundort ist ein Knopf: zeigt die Datei im Dateimanager (#162)", async () => {
+  mockApi.post(/^\/api\/item\/[0-9a-f]+\/reveal$/, () => ({ revealed: "x", verified: true, selected: true }));
+  const btns = panel().querySelectorAll(".locreveal");
+  assert.equal(btns.length, 1, "nur am bevorzugten, vorhandenen Fundort");
+  btns[0].dispatchEvent(new DomEvent("click", { bubbles: true }));
+  await flush();
+  assert.equal(mockApi.calls.filter((c) => c.method === "POST").at(-1).path, `/api/item/${it.file_hash}/reveal`);
+  assert.equal(mockApi.callsTo("/api/item/" + it.file_hash + "/open").length, 0, "nicht der Breadcrumb-Weg");
 });
 
 test("Breadcrumb: Ordner-Segmente öffnen genau diesen Ordner, Dateiname die Datei", () => {
@@ -247,4 +257,22 @@ test("Firefox-Pfad (#71): canPlayType »maybe«, aber Video ohne Bildspur → Po
   assert.equal(video.getAttribute("src"), null, "…und Verbindung freigegeben");
   assert.match(panel().querySelector(".ppreview .nopreview").textContent, /kann ProRes nicht abspielen/);
   assert.ok(panel().querySelector(".ppreview .codecreveal[data-wired]"), "auch im Laufzeit-Netz mit 📂-Knopf");
+});
+
+
+test("Seed-Varianten nur mit Seed: Suno & Co. schreiben keinen (#159)", async () => {
+  const f = (field, value) => ({ parser: "comfyui", parser_version: 1, field, value });
+  let interpreted = [f("prompt", "rainy city"), f("model", "flux1-dev")];
+  mockApi.get(/^\/api\/item\/[0-9a-f]+$/, () => ({
+    ...it, locations, raw: [], interpreted,
+    manual: { rating: null, tags: [], notes: "", model: null },
+  }));
+  emit("selection-changed", { hash: it.file_hash, index: 0 });
+  await flush();
+  assert.equal(panel().querySelector("#pSiblings"), null);
+  assert.ok(panel().textContent.includes("rainy city"), "Generierung wurde gezeichnet");
+  interpreted = [...interpreted, f("seed", "42")];
+  emit("selection-changed", { hash: hashOf(2), index: 1 });   // anderes Item → neu laden
+  await flush();
+  assert.ok(panel().querySelector("#pSiblings"));
 });

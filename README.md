@@ -4,8 +4,9 @@
 > gepflegt — bei Widersprüchen gilt das deutsche Original.
 
 The **Feral Media Library** — **fml** for short — is a local media
-manager for **AI-generated images and videos**. It is built for collections
-that classic photo tools choke on: animated WEBPs, WEBM videos, and tens of
+manager for **AI-generated images and videos**, and optionally for
+**music** (optional audio module). It is built for collections that
+classic photo tools choke on: animated WEBPs, WEBM videos, and tens of
 thousands of files with embedded ComfyUI/A1111 workflows, prompts and seeds.
 Everything runs on your own machine: no cloud service, no account, the
 server is only reachable at `127.0.0.1`.
@@ -167,6 +168,18 @@ apart, including separate size figures.
   in any mode. To undo: remove the entry from the blocklist (Admin) and
   re-ingest - the extracted metadata comes back completely; your own
   ratings/tags of the rejected item, however, are gone.
+- **Audio module (optional, off by default):** music from Suno, from
+  ComfyUI (YuE, ACE-Step, MiniMax) or your own recordings: MP3, FLAC, Ogg,
+  WAV, AIFF, CAF, M4A, with all embedded tags, lyrics in the full-text
+  search and the Suno version from the Content Credentials. A dedicated
+  **audio view** shows the songs as a list with a three-colour waveform
+  (bass, mids, highs) on a shared time axis, every row with its own
+  playhead. The player matches loudness so the louder version does not win
+  the comparison; plus **time comments** at points in a song ("Chorus" at
+  1:40), **comparing** up to six versions, and **covers** from your own
+  library that bring finished songs into the gallery. fml never changes
+  the audio files themselves. All details:
+  [`docs/en/audio.md`](docs/en/audio.md).
 - **Multiple instances:** fml can run several times in parallel - each
   instance with its own database, port, name and accent color. This lets
   you carve **topic-specific sub-galleries** out of one consolidated
@@ -180,7 +193,8 @@ apart, including separate size figures.
 
 ## What fml does not do
 
-- **No image editing, no export:** fml is a catalog and viewing device.
+- **No image or audio editing, no export:** fml is a catalog and viewing
+  device.
   The jump back into generation is the workflow download for ComfyUI.
 - **No deleting of files** - in any mode. The only two places where fml
   touches files at all are the import and "Move rejected out", both only
@@ -220,7 +234,8 @@ kept.
 
 The first start sets up the Python environment; the browser opens as soon
 as the server is ready (default: **http://127.0.0.1:8765**). For **video**
-metadata and thumbnails, install ffmpeg once (Windows:
+metadata and thumbnails (and for duration, loudness and waveform in the
+audio module), install ffmpeg once (Windows:
 `winget install Gyan.FFmpeg`, macOS: `brew install ffmpeg`) - the
 interface points it out if it is missing.
 
@@ -276,7 +291,9 @@ interface points it out if it is missing.
 [`docs/en/gui.md`](docs/en/gui.md) (using the interface) ·
 [`docs/en/import.md`](docs/en/import.md) (import & watch folders) ·
 [`docs/en/instanzen.md`](docs/en/instanzen.md) (multiple instances /
-sub-galleries) · [`docs/en/admin.md`](docs/en/admin.md) (admin &
+sub-galleries) · [`docs/en/audio.md`](docs/en/audio.md) (audio module) ·
+[`docs/en/rankings.md`](docs/en/rankings.md) (rankings) ·
+[`docs/en/admin.md`](docs/en/admin.md) (admin &
 maintenance) · [`docs/en/architektur.md`](docs/en/architektur.md)
 (technical concept) · [`docs/en/security.md`](docs/en/security.md)
 (security and dependencies) · [`docs/en/`](docs/en/) (everything else)

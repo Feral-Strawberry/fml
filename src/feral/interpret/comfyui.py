@@ -34,7 +34,18 @@ from . import loras
 from .types import InterpretedField, Interpretation
 
 NAME = "comfyui"
-VERSION = 11  # v11: Sampling-Einstellungen aus Split-Bauformen und Subgraphen
+VERSION = 12  # v12: Musik-Knoten (Audio-Modul, ADR 0083): Knoten mit
+# ``lyrics``-Eingang (YuE2GenerateABC/-Music, MiniMaxMusic3TextEncode,
+# TextEncodeAceStepAudio/1.5) → Style/Tags/Caption als ``prompt``, Songtext
+# als ``lyrics``, dazu ``bpm`` und ``key`` (ACE-Step 1.5 ``keyscale``);
+# Texte hinter Links (PrimitiveStringMultiline) werden aufgelöst. Auch der
+# workflow-Rückfall liest jetzt Modell (Checkpoint-/UNet-Loader) und
+# Stil/Songtext der Musik-Knoten, inklusive der am Subgraph-Knoten
+# promoteten Werte (Vorlagen YuE2/MiniMax Music 3 kapseln alles im Subgraphen).
+# Custom-Loader mit Modellnamen als Text im Eingang ``model`` (ComfyUI-Olm-
+# YuE2: OlmYuE2ModelLoader, Kette Plan → Semantic → Synthesize → Decode ohne
+# KSampler) zählen als Modell-Loader.
+# (v11: Sampling-Einstellungen aus Split-Bauformen und Subgraphen
 # (Issue #29, ADR 0068): BasicScheduler/LTXVScheduler/KSamplerSelect/CFGGuider
 # tragen steps/scheduler/sampler/cfg ohne seed; ManualSigmas → steps aus der
 # Sigma-Liste; Sampler-Knoten ohne sampler_name → Name aus der Klasse;
@@ -74,6 +85,17 @@ _SAMPLER_INPUTS = {
 # Rückfall-Suche, wenn die Modell-Rückverfolgung vom Sampler nichts findet).
 _MODEL_INPUTS = ("ckpt_name", "unet_name")
 
+
+def _loader_model(node: dict[str, Any]) -> str | None:
+    """Modellname eines Custom-Loaders (v12): Klassenname mit „loader" und
+    ein TEXT im Eingang ``model`` — Durchreicher tragen dort einen Link,
+    Generator-/API-Knoten heißen nicht „…Loader"."""
+    value = node["inputs"].get("model")
+    if isinstance(value, str) and value.strip() and "loader" in _class_key(
+            str(node.get("class_type", ""))):
+        return value.strip()
+    return None
+
 # Knoten, die Sampling-Einstellungen tragen, ohne selbst Sampler mit Seed zu
 # sein (v11): Split-Bauformen moderner Templates — BasicScheduler/
 # LTXVScheduler (steps, scheduler, denoise), KSamplerSelect (sampler_name),
@@ -109,6 +131,18 @@ _WIDGET_LAYOUTS: dict[str, tuple[str | None, ...]] = {
     "samplercustom": (None, "noise_seed", None, "cfg"),
     "ltxvscheduler": ("steps",),
     "manualsigmas": ("sigmas",),
+}
+# workflow-Rückfall (v12): Modell-Loader und Musik-Knoten, Widget-Positionen
+# wie im Frontend (Comfy-Org/workflow_templates, audio_yue2_*, audio_minimax_*).
+_MODEL_WIDGETS = {"checkpointloadersimple": ("ckpt_name",), "unetloader": ("unet_name",),
+                  "olmyue2modelloader": ("model",)}
+_MUSIC_WIDGETS = {
+    "yue2generateabc": ("style", "lyrics"),
+    "yue2generatemusic": ("style", "lyrics"),
+    "olmyue2request": ("style", "lyrics"),
+    "minimaxmusic3textencode": ("caption", "lyrics"),
+    "textencodeacestepaudio": ("tags", "lyrics"),
+    "textencodeacestepaudio1.5": ("tags", "lyrics"),
 }
 # Subgraph-Pseudoknoten im workflow-Blob: -10 = Eingänge des Subgraphen.
 _SUBGRAPH_INPUT_NODE = -10
@@ -176,6 +210,17 @@ _GENERATOR_PROMPT_INPUTS = (
     ("caption", "prompt"),
     ("negative_prompt", "negative_prompt"),
 )
+
+
+# Musik-Knoten (v12): strukturell erkannt am ``lyrics``-Eingang, klassen-
+# namen-unabhängig. Der Stil heißt je Modell anders: YuE2 ``style``,
+# ACE-Step ``tags``, MiniMax Music 3 ``caption``.
+_MUSIC_STYLE_KEYS = ("style", "tags", "caption")
+_MUSIC_SCALARS = (("bpm", "bpm"), ("keyscale", "key"))
+
+
+def _is_music_node(node: dict[str, Any]) -> bool:
+    return "lyrics" in node["inputs"]
 
 
 def _is_switch(node: dict[str, Any]) -> bool:
@@ -326,6 +371,8 @@ def _fields_from_graph(graph: dict[str, Any]) -> list[InterpretedField]:
     }
 
     resolved_text_nodes: set[str] = set()  # über Positiv/Negativ-Pfade erreicht
+    positive_nodes: set[str] = set()       # davon je Polarität (v12: Songtext
+    negative_nodes: set[str] = set()       # eines reinen Negativ-Encoders nie)
     # Sampling-Durchgänge und vom Sampler aus zurückverfolgte Checkpoints,
     # jeweils als (Rang, Reihenfolge, Wert) — Hauptpass zuerst (_pass_rank).
     passes: list[tuple[int, int, dict[str, Any]]] = []
@@ -351,9 +398,10 @@ def _fields_from_graph(graph: dict[str, Any]) -> list[InterpretedField]:
         # (Sampler, CFGGuider, Conditioning-Zwischenknoten, …).
         for link_name, canonical in (("positive", "prompt"), ("negative", "negative_prompt")):
             if link_name in inputs:
-                text = _resolve_prompt(
-                    nodes, inputs[link_name], link_name, set(), resolved_text_nodes
-                )
+                reached: set[str] = set()
+                text = _resolve_prompt(nodes, inputs[link_name], link_name, set(), reached)
+                resolved_text_nodes |= reached
+                (negative_nodes if link_name == "negative" else positive_nodes).update(reached)
                 if text is not None:
                     add(canonical, text)
 
@@ -452,6 +500,7 @@ def _fields_from_graph(graph: dict[str, Any]) -> list[InterpretedField]:
                 value = node["inputs"].get(input_name)
                 if isinstance(value, str):
                     add("model", value)
+            add("model", _loader_model(node) or "")
 
     # Text-Knoten, die KEIN Positiv/Negativ-Pfad zuordnen konnte: als
     # unklare Prompt-Kandidaten führen (nie als negative_prompt raten).
@@ -464,7 +513,40 @@ def _fields_from_graph(graph: dict[str, Any]) -> list[InterpretedField]:
             if text is not None:
                 add("prompt", text)
 
+    # Musik-Knoten (v12): Encoder (ACE-Step, MiniMax) liefern ihren Stil
+    # schon über die Polaritäts-Pfade bzw. den Kandidaten-Pass oben
+    # (``_node_string`` kennt die Stil-Schlüssel); Generator-Knoten ohne
+    # Conditioning-Ausgang (YuE2) hier. Songtext, BPM und Tonart von allen,
+    # außer von Encodern, die NUR am Negativ-Pfad hängen.
+    for node_id, node in nodes.items():
+        if not _is_music_node(node):
+            continue
+        if node_id in negative_nodes and node_id not in positive_nodes:
+            continue
+        inputs = node["inputs"]
+        if not _is_text_encoder(node):
+            add("prompt", _music_text(nodes, inputs, _MUSIC_STYLE_KEYS))
+        add("lyrics", _music_text(nodes, inputs, ("lyrics",)))
+        for input_name, canonical in _MUSIC_SCALARS:
+            value = inputs.get(input_name)
+            if isinstance(value, list):
+                value = _resolve_scalar(nodes, value, set())
+            if _is_scalar(value):
+                add(canonical, value)
+
     return fields
+
+
+def _music_text(nodes: dict[str, Any], inputs: dict[str, Any], keys: tuple[str, ...]) -> str:
+    """Erster nicht-leere Text unter ``keys`` — Literal oder Link-Kette
+    (``PrimitiveStringMultiline``); leer = nichts (``add`` verwirft es)."""
+    for key in keys:
+        value = inputs.get(key)
+        if isinstance(value, list):
+            value = _resolve_string(nodes, value, set())
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
 
 
 def _collect_loras(
@@ -788,15 +870,43 @@ def _fields_from_workflow(workflow: Any) -> list[InterpretedField]:
                         break
             if any(_looks_like_bboxes(w) for w in widget_list):
                 features.append("bbox")
+    models, lyrics = _model_and_music_from_workflow(graphs, prompts)
     for name in loras.dedup_normalized(raw_loras):
         fields.append(InterpretedField("lora", name))
     seen: set[tuple[str, str]] = set()
-    for kind, values in (("prompt", prompts), ("feature", features), ("input_image", images)):
+    for kind, values in (("model", models), ("prompt", prompts), ("lyrics", lyrics),
+                         ("feature", features), ("input_image", images)):
         for value in values:
             if (kind, value) not in seen:
                 seen.add((kind, value))
                 fields.append(InterpretedField(kind, value))
     return fields
+
+
+def _model_and_music_from_workflow(
+    graphs: list[dict[str, Any]], prompts: list[str],
+) -> tuple[list[str], list[str]]:
+    """Modell-Loader und Musik-Knoten im UI-Graphen (v12): Modellnamen, dazu
+    Stil (an ``prompts`` angehängt) und Songtext. Werte über ``_widget_value``,
+    also auch verlinkt (PrimitiveStringMultiline) und promotet."""
+    models: list[str] = []
+    lyrics: list[str] = []
+    for graph in graphs:
+        for node in graph["nodes"]:
+            if not isinstance(node, dict) or node.get("mode") in _INACTIVE_MODES:
+                continue
+            key = _class_key(str(node.get("type", "")))
+            for position, name in enumerate(_MODEL_WIDGETS.get(key, ())):
+                value = _widget_value(graphs, graph, node, name, position, 0)
+                if isinstance(value, str) and value.strip():
+                    models.append(value.strip())
+            layout = _MUSIC_WIDGETS.get(key)
+            if layout:
+                for target, name, position in ((prompts, layout[0], 0), (lyrics, layout[1], 1)):
+                    value = _widget_value(graphs, graph, node, name, position, 0)
+                    if isinstance(value, str) and value.strip():
+                        target.append(value.strip())
+    return models, lyrics
 
 
 def _workflow_graphs(workflow: Any) -> list[dict[str, Any]]:
@@ -921,8 +1031,12 @@ def _resolve_workflow_link(
     )
     if origin is None or not str(origin.get("type", "")).lower().startswith("primitive"):
         return None
-    widgets = origin.get("widgets_values")
-    return widgets[0] if isinstance(widgets, list) and widgets and _is_scalar(widgets[0]) else None
+    # Der Primitive-Wert kann selbst promotet sein (v12: PrimitiveStringMultiline
+    # am Subgraph-Eingang der Musik-Vorlagen) — dann gilt der verlinkte Wert.
+    entries = [e for e in origin.get("inputs") or [] if isinstance(e, dict)]
+    name = entries[0].get("name", "value") if entries else "value"
+    value = _widget_value(graphs, graph, origin, name, 0, depth + 1)
+    return value if _is_scalar(value) else None
 
 
 def _workflow_link_origin(graph: dict[str, Any], link_id: Any) -> tuple[Any, int]:
@@ -956,6 +1070,8 @@ def _resolve_model(nodes: dict[str, Any], link: Any, visited: set[str]) -> str |
         value = inputs.get(input_name)
         if isinstance(value, str) and value.strip():
             return value.strip()
+    if _loader_model(node) is not None:
+        return _loader_model(node)
     if _is_switch(node):
         # Modell-Switch (Krea-2-Template: enable_lora?): gewählter Zweig
         # zuerst, der andere als Rückfall — beide enden am selben Loader.
@@ -1051,7 +1167,10 @@ def _node_string(nodes: dict[str, Any], node: dict[str, Any], visited: set[str])
                     if text is not None:
                         return text
         return None
-    for key in _STRING_KEYS:
+    # Musik-Encoder (v12): der Stil steht unter tags/caption, NICHT unter
+    # lyrics — der Songtext ist kein Prompt.
+    keys = (*_MUSIC_STYLE_KEYS, *_STRING_KEYS) if _is_music_node(node) else _STRING_KEYS
+    for key in keys:
         value = inputs.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()

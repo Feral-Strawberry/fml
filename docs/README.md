@@ -19,8 +19,9 @@ Strawberry** (zugleich der Name der GitHub-Organisation).
   Prozesse, Aufnahme mit zwei Metadaten-Schichten, Suchpfad, Installation und
   Lieferkette.
 - [Metadaten-Extraktion (Schicht 1)](extraction.md) — liest alle eingebetteten
-  Roh-Metadaten aus einer Mediendatei. PNG, JPEG/WEBP/GIF/BMP/TIFF (Pillow) und
-  Video (ffprobe) umgesetzt.
+  Roh-Metadaten aus einer Mediendatei: PNG, JPEG/WEBP/GIF/BMP/TIFF/PSD
+  (Pillow), Video (ffprobe) und mit Audio-Modul MP3, FLAC, Ogg, WAV, AIFF,
+  CAF und M4A.
 - [Metadaten-Interpretation (Schicht 2)](interpretation.md) — macht aus den
   Roh-Metadaten durchsuchbare Felder (Prompt, Modell, Seed, …); läuft beim Scan
   mit und rückwirkend per `python -m feral.interpret`.
@@ -48,6 +49,10 @@ Strawberry** (zugleich der Name der GitHub-Organisation).
   Problemen mit Sperrliste, Rankings und Serverlog.
 - [Rankings](rankings.md) — das optionale Ranking-Modul: Paarvergleich mit
   Elo-Bestenliste über eine gespeicherte Suche.
+- [Audio-Modul](audio.md) — optional: Musik und andere Audiodateien mit
+  allen eingebetteten Metadaten, eigene Audioansicht mit Wellenform, Player
+  mit Lautheitsangleich, Zeitkommentare, Vergleichen und Cover für fertige
+  Songs in der Galerie.
 - [Mehrere Instanzen](instanzen.md) — parallele, unabhängige Galerien aus
   einem Programmordner (eigene DB + Port je Instanz): **Subgalerien einer
   Gesamt-Library**, ohne Dateien zu berühren. Start per
@@ -55,7 +60,7 @@ Strawberry** (zugleich der Name der GitHub-Organisation).
 - [Sicherheit](security.md) — wie fml mit **fremden** Bilddateien umgeht
   (untrusted Metadaten), Betriebsempfehlung, welche Abhängigkeiten installiert
   werden und wie sie geprüft werden (Lock mit Prüfsummen, Advisory-Check). **Vor der Weitergabe an andere lesen.**
-- [Die Testsuite](tests.md) — was die gut 700 automatischen Tests (Python und
+- [Die Testsuite](tests.md) — was die gut 900 automatischen Tests (Python und
   Node-Tests der Oberfläche) absichern, wie man sie startet (`pytest -q`) und
   woran man das korrekte Ergebnis erkennt.
   **Nützlich als Installations-Check auf einem neuen Rechner.**

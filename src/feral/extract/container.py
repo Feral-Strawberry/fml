@@ -9,6 +9,8 @@ Container = ein neues Extraktor-Modul + ein Registry-Eintrag (ADR 0008/0011):
 - WEBM/MKV, MP4/MOV      → ffprobe-System-Binary (`video_ffprobe.py`)
 - PSD/PSB    → Stdlib-Eigenbau (`psd.py`, ADR 0052)
 - PDF        → erkannt, kein Extraktor (gestrichen, ADR 0051)
+- MP3/FLAC/Ogg/WAV/AIFF/CAF → Stdlib-Walker + ffprobe-Fakten (`audio.py`,
+  ADR 0083) — NUR bei eingeschaltetem Audio-Modul; aus = unbekanntes Format.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from functools import partial
 from pathlib import Path
 from typing import Callable
 
-from . import image_pillow, png, psd, video_ffprobe
+from . import audio, image_pillow, png, psd, video_ffprobe
 from .types import ContainerExtraction
 
 
@@ -48,6 +50,7 @@ _EXTRACTORS: dict[str, Callable[[str | Path], ContainerExtraction]] = {
     "psd": psd.extract,
     **{c: partial(image_pillow.extract, container=c) for c in image_pillow.CONTAINERS},
     **{c: partial(video_ffprobe.extract, container=c) for c in video_ffprobe.CONTAINERS},
+    **{c: partial(audio.extract, container=c) for c in audio.CONTAINERS},
 }
 
 # Wie viele Bytes vom Dateianfang fürs Sniffing genügen (MP4-'ftyp' liegt bei 4..8,
@@ -94,14 +97,20 @@ def sniff_container(head: bytes) -> str | None:
         return "psd"
     if head.startswith(b"%PDF"):
         return "pdf"
-    return None
+    # Audio zuletzt (ADR 0083): die MPEG-Frame-Sync-Prüfung ist die
+    # schwächste Signatur und darf keinen der obigen Container überdecken.
+    return audio.sniff(head)
 
 
-def extract(source: str | Path) -> ContainerExtraction:
+def extract(source: str | Path, *, audio_enabled: bool = False) -> ContainerExtraction:
     """Erkenne den Container einer Datei und extrahiere ihre Roh-Metadaten.
 
     Snifft den Typ über Magic Bytes und delegiert an den zuständigen Extraktor
     aus der Registry.
+
+    ``audio_enabled`` (Audio-Modul, ADR 0083): aus = heutiges Verhalten —
+    Audio-Container sind unbekanntes Format, und ein ISOBMFF/Matroska ohne
+    Videospur (M4A, tonloses MKV) ebenso statt fälschlich „Video".
 
     Erhebt:
         UnknownContainerError       — Magic Bytes passen zu keinem bekannten Format.
@@ -113,6 +122,12 @@ def extract(source: str | Path) -> ContainerExtraction:
     container = sniff_container(head)
     if container is None:
         raise UnknownContainerError(f"Unbekannter Container: {path}")
+    if container in audio.CONTAINERS:
+        if not audio_enabled:
+            raise UnknownContainerError(f"Audio (Modul aus): {path}")
+        container = audio.refine(path, container)
+        if container is None:
+            raise UnknownContainerError(f"Unbekannter Container: {path}")
     if container == "tiff":
         # RAW-Verfeinerung (s. _TIFF_RAW_SUFFIXES): kein Extraktor registriert
         # ⇒ „erkannt, Extraktor folgt" — katalogisierbar und filterbar.
@@ -120,4 +135,7 @@ def extract(source: str | Path) -> ContainerExtraction:
     extractor = _EXTRACTORS.get(container)
     if extractor is None:
         raise ExtractorNotImplementedError(container)
-    return extractor(path)
+    extraction = extractor(path)
+    if extraction.media_kind == "audio" and not audio_enabled:
+        raise UnknownContainerError(f"Audio (Modul aus): {path}")
+    return extraction

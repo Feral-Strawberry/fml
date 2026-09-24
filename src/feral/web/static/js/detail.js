@@ -7,8 +7,9 @@
 // Loupe. Rating/Tags bekommen ihren Platz im Kopf erst mit Block 3.1.
 
 import { STRINGS } from "./strings.js";
-import { displayUrl, getItem, getTags, getModels, mediaUrl, openLocation, releaseVideos, wireMediaFallback, workflowUrl, thumbUrl, canPlayVideo, unplayableHtml, wireUnplayable, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
+import { wireReveal, removeCover, loadThumb, getAudioAnalysis, fmtLoudness, getItem, getTags, getModels, mediaUrl, openLocation, releaseVideos, wireMediaFallback, workflowUrl, thumbUrl, canPlay, mediaHtml, kindLabel as mediaKindLabel, fmtDuration, wireUnplayable, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
 import { applyModel, applyRating, applyTag, note, tagRemove } from "./curate.js";
+import { mountCommentSection } from "./comments.js";
 import { emit, on } from "./main.js";
 
 const esc = (s) =>
@@ -16,7 +17,7 @@ const esc = (s) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 // Kanonische Felder (interpret/types.py) → Darstellung im GENERATION-Block.
-const BLOCK_FIELDS = ["prompt", "negative_prompt", "description"]; // mehrzeilig
+const BLOCK_FIELDS = ["prompt", "negative_prompt", "description", "lyrics"]; // mehrzeilig
 const CHIP_FIELDS = ["steps", "sampler", "cfg_scale", "scheduler", "size", "denoise", "model_hash"]; // Steps zuerst (Issue #29)
 const FIELD_LABELS = {
   prompt: "PROMPT", negative_prompt: "NEGATIVE", description: "BESCHREIBUNG",
@@ -31,7 +32,8 @@ const FIELD_LABELS = {
   claim_generator: "CLAIM GENERATOR", software_agent: "SOFTWARE AGENT",
   video_codec: "VIDEO CODEC", video_profile: "CODEC PROFILE", pixel_format: "PIXEL FORMAT",
 };
-const label = (f) => FIELD_LABELS[f] || f.toUpperCase();
+// Neuere Felder (Audio, #160) mehrsprachig aus den Strings.
+const label = (f) => STRINGS.panelFieldLabels?.[f] || FIELD_LABELS[f] || f.toUpperCase();
 
 function fmtBytes(n) {
   if (n >= 1e9) return (n / 1e9).toFixed(2) + " GB";
@@ -131,8 +133,10 @@ function generationHtml(d) {
         <div class="vmono">${esc(by.get(f).join(" · "))}</div></div>`).join("")}</div>`;
   }
   // Seed-Varianten (Feral Strawberry, 2026-07-16): nur anbieten, wenn es etwas
-  // Exaktes zu suchen gibt — sonst wäre die Suche beliebig.
-  if (by.has("prompt") || by.has("model")) {
+  // Exaktes zu suchen gibt — sonst wäre die Suche beliebig — UND einen Seed:
+  // ohne ihn gibt es keine Seed-Serie (Suno, Midjourney, ChatGPT, Gemini …
+  // schreiben keinen; Befund beim Test von #159).
+  if (by.has("seed") && (by.has("prompt") || by.has("model"))) {
     html += `<button type="button" class="accentbtn" id="pSiblings"
       title="${STRINGS.siblingsTitle}">🎲 ${STRINGS.siblingsBtn}</button>`;
   }
@@ -175,11 +179,13 @@ export function initDetail() {
   const panel = document.getElementById("panel");
   let seq = 0;
   let curHash = null;   // Hash des angezeigten Items (für annotation-changed)
+  let curManual = null;   // letzter Stand der manuellen Schicht (Tags für den Cover-Dialog)
   let curRating = null; // aktueller Stand fürs Toggle (gleiche Zahl löscht)
   let selCount = 1;     // Größe der aktuellen Auswahl (Multiselect-Hinweis)
   let curModel = "";    // angezeigtes manuelles Modell (Doppel-Submit vermeiden)
 
   function renderManual(manual) {
+    curManual = manual;
     curRating = manual.rating;
     const dots = panel.querySelector("#pRate");
     if (dots) dots.innerHTML = dotsHtml(manual.rating);
@@ -222,6 +228,58 @@ export function initDetail() {
       <div class="pe-hint">${STRINGS.emptySelectionHint}</div></div>`;
   }
 
+  // Lautheit (A4 #161): kommt aus der Analyse im Hintergrund — erzeugt der
+  // Server sie gerade, fragt getAudioAnalysis nach, bis sie da ist oder das
+  // Panel längst ein anderes Item zeigt.
+  async function showLoudness(hash, mySeq) {
+    const stale = () => mySeq !== seq;
+    let text;
+    try {
+      const a = await getAudioAnalysis(hash, { isStale: stale });
+      if (!a) return;
+      text = fmtLoudness(a.loudness);
+    } catch (err) {
+      text = `${STRINGS.loudnessFailed} (${err.message})`;
+    }
+    const el = stale() ? null : panel.querySelector("#pLoud");
+    if (el) el.textContent = text;
+  }
+
+  // Cover (Audio A8, #165, ADR 0090): Das Cover ist das Gesicht des Songs und
+  // steht oben wie das Vorschaubild eines Bildes (in .ppreview, aus
+  // api.mediaHtml); direkt darunter diese Zeile zum Wählen/Ändern/Entfernen.
+  // Das eingebettete Bild (Suno) ist eine Eigenschaft der Datei und steht
+  // klein im Abschnitt „Datei" — es zählt nicht als Cover.
+  function coverBarHtml(d) {
+    return d.cover_item
+      ? `<div class="pcoverbar has" id="pCover"><span class="cvstate" title="${esc(STRINGS.coverFinalHint)}">✓ ${STRINGS.coverFinal}</span>
+          <button type="button" data-cover="pick">${STRINGS.coverChange}</button>
+          <button type="button" data-cover="remove">${STRINGS.coverRemove}</button></div>`
+      : `<div class="pcoverbar" id="pCover"><button type="button" class="accentbtn" data-cover="pick">🖼 ${STRINGS.coverPick}</button>
+          <span class="cvhint">${STRINGS.coverNoneShort}</span></div>`;
+  }
+
+  function wireCover(d, name) {
+    const sec = panel.querySelector("#pCover");
+    if (!sec) return;
+    const emb = panel.querySelector(".cvemb img");
+    if (emb) loadThumb(emb, d.file_hash);   // Vorschaubild aus dem eingebetteten Bild
+    sec.addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-cover]");
+      if (!b) return;
+      if (b.dataset.cover === "pick") {
+        emit("cover-pick", { hash: d.file_hash, name, tags: (curManual || d.manual).tags,
+                             cover: (curManual || d.manual).cover });
+        return;
+      }
+      b.disabled = true;
+      try {
+        const r = await removeCover(d.file_hash);
+        emit("cover-changed", { hash: d.file_hash, manual: r.manual });
+      } catch (err) { b.disabled = false; console.warn(err); }
+    });
+  }
+
   async function show(hash) {
     const mySeq = ++seq;
     let d;
@@ -242,13 +300,12 @@ export function initDetail() {
     const singleOpen = !document.getElementById("single")?.hidden;
     // Codec, den dieser Browser nicht dekodiert (#71): Poster + Hinweis, kein
     // Player, kein Stream — auch nicht später beim Rückbau aus der Einzelansicht.
-    const media = d.media_kind === "video"
-      ? (!canPlayVideo(d)
-        ? unplayableHtml(d)
-        : singleOpen
-          ? `<img class="pposter" src="${thumbUrl(d.file_hash)}" data-video="${mediaUrl(d.file_hash)}" alt="">`
-          : `<video src="${mediaUrl(d.file_hash)}" muted loop autoplay playsinline></video>`)
-      : `<img src="${displayUrl(d)}" alt="">`;
+    // Medien-Weiche über den gemeinsamen Helfer (#158); nur der Video-
+    // Poster bei offener Einzelansicht ist panel-eigen. Audio bekommt den
+    // eigenen Player (A5 #162); er spielt nie von selbst.
+    const media = d.media_kind === "video" && singleOpen && canPlay(d)
+      ? `<img class="pposter" src="${thumbUrl(d.file_hash)}" data-video="${mediaUrl(d.file_hash)}" alt="">`
+      : mediaHtml(d, { video: "muted loop autoplay playsinline" });
     const codec = d.media_kind === "video" ? codecLabel(videoCodecFacts(d)) : "";
     const wfEmbedded = d.raw.some((r) => (r.keyword || "").toLowerCase() === "workflow" && r.text !== null);
     // A1111-Items bekommen den Graphen serverseitig aus dem Infotext erzeugt
@@ -268,7 +325,8 @@ export function initDetail() {
         : (l.usable === false ? STRINGS.panelLocationForeign : "");
       return `
       <div class="locrowv${l.exists && l.usable !== false ? "" : " warn"}${l.preferred ? " preferred" : ""}"${l.preferred ? ` title="${STRINGS.panelLocationPreferredTitle}"` : ""}>` +
-        `<span class="lockind">${l.preferred ? "📂 " : ""}${esc(kindLabel[l.kind] || "")}</span>${breadcrumbHtml(l)}${state ? ` <span class="locstate">${state}</span>` : ""}</div>`;
+        (l.preferred && l.exists && l.usable !== false ? `<button type="button" class="locreveal" title="${esc(STRINGS.revealTitle)}">📂</button>` : "") +
+        `<span class="lockind">${esc(kindLabel[l.kind] || "")}</span>${breadcrumbHtml(l)}${state ? ` <span class="locstate">${state}</span>` : ""}</div>`;
     }).join("");
 
     // Das vorige Panel-Video AUSDRÜCKLICH freigeben, bevor innerHTML es
@@ -278,18 +336,20 @@ export function initDetail() {
     // sechs davon hatte der Browser keine Verbindung mehr frei (#23, #89).
     releaseVideos(panel);
     panel.innerHTML = `
-      <div class="ppreview" title="${STRINGS.panelOpenLoupe}">${media}</div>
+      <div class="ppreview"${d.media_kind === "audio" ? "" : ` title="${STRINGS.panelOpenLoupe}"`}>${media}</div>
+      ${d.media_kind === "audio" ? coverBarHtml(d) : ""}
       <div class="phead">
         <div class="pname">${esc(name)}</div>
         <div class="pmeta">
-          <span class="badgechip origin-interpretiert">${d.media_kind === "video" ? "VIDEO" : "IMAGE"}</span>
-          <span class="vmono">${d.width ? `${d.width}×${d.height} · ` : ""}${d.fps ? `${d.fps} fps · ` : ""}${esc(d.container.toUpperCase())}${codec ? ` · ${esc(codec)}` : ""} · ${fmtBytes(d.file_size)}</span>
+          <span class="badgechip origin-interpretiert">${mediaKindLabel(d) || "IMAGE"}</span>
+          <span class="vmono">${d.width ? `${d.width}×${d.height} · ` : ""}${d.fps ? `${d.fps} fps · ` : ""}${d.duration != null ? `${fmtDuration(d.duration)} · ` : ""}${esc(d.container.toUpperCase())}${codec ? ` · ${esc(codec)}` : ""} · ${fmtBytes(d.file_size)}</span>
           <span class="ratedots" id="pRate" title="${STRINGS.curateRateTitle}">${dotsHtml(d.manual.rating)}</span>
         </div>
       </div>
       ${selCount > 1 ? `<div class="callout multihint">
         <b>${selCount} ${STRINGS.multiSelected}</b>
         <div>${STRINGS.multiSelectedHint}</div></div>` : ""}
+      ${d.media_kind === "audio" ? `<div class="section" id="pComs"></div>` : ""}
       <div class="section" id="pCurate">${sechead(STRINGS.sectionCurate)}
         <div class="chiprow" id="pTags"></div>
         <input id="pTagInput" list="tagVocab" placeholder="${STRINGS.curateTagPlaceholder}">
@@ -314,6 +374,8 @@ export function initDetail() {
         <div class="filerows">
           <div><span>${STRINGS.fileFormat}</span><span class="vmono">${esc(d.container)}</span></div>
           <div><span>${STRINGS.fileSize}</span><span class="vmono">${fmtBytes(d.file_size)}</span></div>
+          ${d.media_kind === "audio" ? `<div><span>${STRINGS.fileLoudness}</span><span class="vmono" id="pLoud">${STRINGS.loudnessPending}</span></div>` : ""}
+          ${d.embedded_picture ? `<div class="embrow"><span>${STRINGS.fileEmbeddedPicture}</span><span class="cvemb" title="${esc(STRINGS.coverEmbedded)}"><img alt=""></span></div>` : ""}
           <div><span>${STRINGS.fileCreated}</span><span class="vmono">${esc(d.media_date || STRINGS.fileCreatedUnknown)}</span></div>
           <div><span>${STRINGS.fileAdded}</span><span class="vmono">${esc((d.first_seen_at || "").slice(0, 19).replace("T", " "))}</span></div>
           <div><span>SHA-256</span><span class="vmono" title="${esc(d.file_hash)}">${esc(d.file_hash.slice(0, 16))}…</span></div>
@@ -326,6 +388,9 @@ export function initDetail() {
     wireMediaFallback(panel.querySelector(".ppreview"), mediaFallbackLabel(d), d);
     wireUnplayable(panel.querySelector(".ppreview"), d);   // 📂 im Codec-Hinweis (#71)
     emit("annotation-loaded", { hash: d.file_hash, rating: d.manual.rating });
+    if (d.media_kind === "audio") showLoudness(d.file_hash, mySeq);
+    if (d.media_kind === "audio") mountCommentSection(panel.querySelector("#pComs"), d, sechead);
+    if (d.media_kind === "audio") wireCover(d, name);
 
     // Rating/Tag/Modell wirken auf die AUSWAHL (Einzel oder Multiselect) —
     // curate.js entscheidet zwischen Einzel-Endpunkt und Sammel-Aktion.
@@ -360,6 +425,11 @@ export function initDetail() {
       if (notesEl.value !== (d.manual.notes || "")) note(d.file_hash, notesEl.value);
     });
 
+    // 📂 am bevorzugten Fundort = derselbe Knopf wie in Lupe/Einzelansicht
+    // (Datei markiert im Explorer/Finder) — für Songs der einzige, denn sie
+    // haben keine Lupe und keine Einzelansicht (#162).
+    const revealBtn = panel.querySelector(".locreveal");
+    if (revealBtn) wireReveal(revealBtn, () => d.file_hash);
     panel.querySelector(".locs").addEventListener("click", async (e) => {
       const a = e.target.closest("a.seg");
       if (!a) return;
@@ -377,8 +447,11 @@ export function initDetail() {
         setTimeout(() => { st.textContent = before; if (!before) st.remove(); }, 4000);
       }
     });
-    panel.querySelector(".ppreview").addEventListener("click", () =>
-      emit("loupe-open", { hash: d.file_hash }));
+    panel.querySelector(".ppreview").addEventListener("click", (e) => {
+      // Audio hat keine Lupe (#162): die Liste mit Player kann mehr.
+      if (d.media_kind === "audio") return;
+      emit("loupe-open", { hash: d.file_hash });
+    });
     panel.querySelector("#pWfOpen")?.addEventListener("click", () =>
       emit("loupe-open", { hash: d.file_hash, mode: "workflow" }));
     // Seed-Varianten: ersetzt den Suchzustand durch die exakte Generierung —
@@ -420,6 +493,8 @@ export function initDetail() {
   on("annotation-changed", (d) => {
     if (d.hash === curHash) renderManual(d.manual);
   });
+  // Cover gesetzt/entfernt: Vorschau und Abschnitt hängen am Coverbild — neu laden.
+  on("cover-changed", (d) => { if (d.hash === curHash) show(d.hash); });
 
   showEmpty();
 }

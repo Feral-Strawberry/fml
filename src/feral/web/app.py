@@ -38,6 +38,7 @@ from ..config import (
     instance_accent as cfg_instance_accent,
     instance_name as cfg_instance_name,
     rankings_enabled as cfg_rankings_enabled,
+    audio_enabled as cfg_audio_enabled,
     web_port as cfg_web_port,
     load_config,
     thumbnail_size,
@@ -48,6 +49,7 @@ from ..db import rankings as rankings_db
 from ..interpret import a1111_graph
 from .. import reveal
 from ..thumbs import DEFAULT_SIZE, ThumbPool, fail_reason, render_preview, thumb_path
+from .. import audio_analysis
 from . import admin as admin_lib
 from . import bulk as bulk_lib
 from . import filters, library
@@ -152,6 +154,8 @@ class ConfigUpdate(BaseModel):
     akzentfarbe: str | None = None
     # Ranking-Modul (ADR 0045): None = Eintrag unangetastet lassen.
     rankings_enabled: bool | None = None
+    # Audio-Modul (ADR 0083): None = Eintrag unangetastet lassen.
+    audio_enabled: bool | None = None
     # Langsam-Schwelle in ms (#110): 0 = nie warnen; None = unangetastet.
     slow_request_ms: int | None = None
 
@@ -162,6 +166,20 @@ class RatingUpdate(BaseModel):
 
 class NotesUpdate(BaseModel):
     notes: str | None = None
+
+
+class CoverRequest(BaseModel):
+    cover: str
+
+
+class CommentCreate(BaseModel):
+    at_ms: int
+    text: str
+
+
+class CommentUpdate(BaseModel):
+    text: str | None = None
+    at_ms: int | None = None
 
 
 class TagRequest(BaseModel):
@@ -231,6 +249,9 @@ class BulkApplyRequest(BaseModel):
     model: str | None = None
     note: str | None = None
     reject: bool = False
+    # Grundbereich der Ansicht (ADR 0085): „das Suchergebnis" ist das, was
+    # die Ansicht zeigt — in der Galerie nie die unsichtbaren Songs.
+    view: str | None = None
 
 
 # -- Host-Wächter (ADR 0058) ---------------------------------------------------
@@ -283,8 +304,8 @@ class _SlowRequestLog:
 
     Trägt der Scope die Kalt-Markierung des Epochen-Caches (``COLD_KEY``,
     Issue #95/ADR 0071), war die Dauer eine Erstberechnung nach Start oder
-    Schreibvorgang — echte DB-Arbeit, kein Fehler: dann INFO ``kalt:`` mit
-    dem Grund statt WARNING ``langsam:``. Andere Nutzer sollen beim Blick
+    Schreibvorgang — echte DB-Arbeit, kein Fehler: dann INFO ``cold:`` mit
+    dem Grund statt WARNING ``slow:``. Andere Nutzer sollen beim Blick
     ins Log nicht denken, beim Serverstart stimme etwas nicht.
 
     Trägt der Scope die Hintergrund-Markierung (``BACKGROUND_KEY``,
@@ -392,6 +413,7 @@ def create_app(
     db_path: str | Path,
     *,
     thumb_cache: str | Path | None = None,
+    audio_cache: str | Path | None = None,
     thumb_size: int = DEFAULT_SIZE,
     thumb_workers: int | None = None,
     thumb_low_priority: bool = True,
@@ -411,6 +433,9 @@ def create_app(
     engine = ScanEngine(db_path, log_dir=log_dir, pool_workers=thumb_workers,
                         thumb_workers=thumb_workers, thumb_low_priority=thumb_low_priority)
     thumb_cache = Path(thumb_cache) if thumb_cache else Path(db_path).resolve().parent / "cache" / "thumbnails"
+    # Abgeleitete Audio-Daten (A4 #161): Analyse + Wiedergabe-Proxy, eigener
+    # Ordner neben dem Thumbnail-Cache ([cache] audio).
+    audio_cache = Path(audio_cache) if audio_cache else Path(db_path).resolve().parent / "cache" / "audio"
     # Ein Prozess-Pool für ALLE Thumbnail-Generierung (ADR 0020) — On-Demand
     # aus /api/thumb und der Warmer teilen ihn sich; entsteht lazy.
     thumb_pool = ThumbPool(workers=thumb_workers, low_priority=thumb_low_priority)
@@ -458,6 +483,16 @@ def create_app(
         if config_path is not None:
             return cfg_import_rules(load_config(config_path))
         return None
+
+    def audio_on() -> bool:
+        # Modul-Schalter je Aufruf frisch (ADR 0083) — wirkt ohne Neustart.
+        return config_path is not None and cfg_audio_enabled(load_config(config_path))
+
+    def warm_audio_auto() -> None:
+        # Nachläufer nach Import/Watch/Einschalten (A4 #161): nur mit Modul;
+        # ohne neue Audio-Items ist der Lauf ein schneller Leerlauf.
+        if audio_on():
+            engine.enqueue_audio_warm(audio_cache, auto=True)
 
     def configured_min_date() -> datetime:
         # Untergrenze der Datumsregel (ADR 0019/0075) als UTC-datetime — für
@@ -598,7 +633,7 @@ def create_app(
     # mit passender Größe: Zähler sind viele kleine Einträge.
     # stats_cache trägt auch die UNGEFILTERTEN Facetten/Bewertungen (der
     # Boot-Schwung; filterunabhängig wie die Kennzahlen).
-    stats_cache = EpochCache(db_path, maxsize=8)   # library_stats + overview_stats je Library-Root
+    stats_cache = EpochCache(db_path, maxsize=12)  # library_stats + overview_stats je Library-Root, Ansichts-Basen (ADR 0085)
     counts_cache = EpochCache(db_path, maxsize=256)
     # Issue #99 (ADR 0073): die Sidebar-Zähler EINES Suchzustands (Modelle,
     # Facetten, Bewertungen aus einem Lauf) je Ausdruck — der Wiederholklick
@@ -614,6 +649,27 @@ def create_app(
     def ratings_base(conn, scope):
         return stats_cache.get(("ratings",), lambda: library.ratings_facet(conn),
                                scope=scope)
+
+    def view_preds(conn, view: str | None, scope) -> tuple:
+        """Grundbereich der Ansicht als internes Prädikat (ADR 0084/0085).
+        Ohne ``view`` (Admin, Altaufrufer; Arenen haben ihren eigenen,
+        ``rankings.ARENA_VIEW``) und in der Galerie eines
+        Bestands ohne Audio: keins — dann laufen die bisherigen Wege
+        unverändert. Songs mit Cover gehören zur Galerie (ADR 0090), aber
+        nur mit Modul an: aus = alles Audio ausgeblendet (ADR 0083 Punkt 1).
+        Unbekannte Werte sind ein Aufruffehler."""
+        if view is None:
+            return ()
+        if view not in filters.VIEW_NAMES:
+            raise HTTPException(status_code=400, detail=msg("errUnknownView", view=view))
+        if view == "galerie":
+            if not stats_cache.get(("has_audio",), lambda: library.has_audio(conn),
+                                   scope=scope):
+                return ()
+            if audio_on() and stats_cache.get(
+                    ("has_covers",), lambda: library.has_covers(conn), scope=scope):
+                return (filters.view_predicate("galerie+cover"),)
+        return (filters.view_predicate(view),)
 
     # Shell-Module/CSS: immer revalidieren (ETag/304). Ohne das klebt der
     # Browser nach Updates an alten Modulen — bei einer lokalen App fatal,
@@ -693,6 +749,9 @@ def create_app(
         # Modul-Schalter Rankings (ADR 0045): steuert NUR die Sidebar-Gruppe —
         # inaktiv stellt die UI keine Ranking-Queries.
         payload["rankings"] = cfg_rankings_enabled(cfg)
+        # Modul-Schalter Audio (ADR 0083): die UI blendet Audio-Oberfläche
+        # (Zähler, typ:-Wert) nur mit Modul ein.
+        payload["audio"] = cfg_audio_enabled(cfg)
         return payload
 
     @app.get("/api/models")
@@ -738,35 +797,45 @@ def create_app(
         filter: str | None = Query(None),
         dupes: bool = Query(False),
         total: bool = Query(True),
+        view: str | None = Query(None),
     ) -> dict:
         with read_conn() as conn:
+            vp = view_preds(conn, view, request.scope)
             try:
                 return library.list_items(
                     conn, limit=limit, offset=offset, sort=sort,
                     model=model, rating=rating, filter_expr=filter, dupes=dupes,
                     with_total=total, cache=hits_cache, scope=request.scope,
+                    view_preds=vp,
+                    # Gemeinsame Zeitachse der Audioliste (ADR 0087): mit
+                    # der ersten Seite, nur in der Audioansicht.
+                    with_max_duration=total and view == "audio",
                 )
             except ValueError as exc:   # ungültiger Filterausdruck (ADR 0018)
                 raise HTTPException(status_code=400, detail=_err(exc))
 
     @app.get("/api/items/position")
     def items_position(
+        request: Request,
         hash: str = Query(...),
         sort: str = Query("added"),
         model: str | None = Query(None),
         rating: int | None = Query(None, ge=1, le=5),
         filter: str | None = Query(None),
         dupes: bool = Query(False),
+        view: str | None = Query(None),
     ) -> dict:
         # Galerie-Rücksprung (ADR 0060): Position eines Items in der
         # aktuellen Treffermenge — Parameter spiegeln /api/items, gefilterte
         # Zustände laufen über denselben Trefferlisten-Cache (ADR 0048).
         _require_hash(hash)
         with read_conn() as conn:
+            vp = view_preds(conn, view, request.scope)
             try:
                 index = library.item_position(
                     conn, hash, sort=sort, model=model, rating=rating,
                     filter_expr=filter, dupes=dupes, cache=hits_cache,
+                    view_preds=vp,
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=_err(exc))
@@ -785,7 +854,8 @@ def create_app(
                 raise HTTPException(status_code=400, detail=_err(exc))
 
     @app.get("/api/sidebar")
-    def sidebar(request: Request, filter: str | None = Query(None)) -> dict:
+    def sidebar(request: Request, filter: str | None = Query(None),
+                view: str | None = Query(None)) -> dict:
         # Alle Zählergruppen der Sidebar in EINEM Request (#99, ADR 0073):
         # Modelle, Facetten und Bewertungen teilen sich die Treffermengen
         # (ein Filterlauf je effektivem Ausdruck statt je Endpunkt), und
@@ -793,9 +863,12 @@ def create_app(
         # Klick auf dieselbe gespeicherte Suche ist ein Speichergriff. Die
         # Erstberechnung trägt die Kalt-Markierung (ADR 0071). Ungefiltert
         # setzt sich die Antwort aus den bestehenden Caches zusammen.
+        # Grundbereich der Ansicht (ADR 0085): eigene Basis je Ansicht
+        # (nur Zeilen, die es dort gibt), einmal je Schreib-Epoche.
         with read_conn() as conn:
             order = (cfg_model_sort(load_config(config_path))
                      if config_path is not None else "zuletzt")
+            vp = view_preds(conn, view, request.scope)
             try:
                 predicates = filters.parse(filter) if filter else []
                 where_sql, params = filters.build_where(predicates)
@@ -804,13 +877,30 @@ def create_app(
                 base_ratings = ratings_base(conn, request.scope)
                 base_models, base_unknown = library.model_base(
                     conn, order=order, cache=models_cache, scope=request.scope)
+                total = None
+                if vp:
+                    vbase = stats_cache.get(
+                        ("view_base", view, order, prefix),
+                        lambda: library.view_base(
+                            conn, vp, base_models=base_models, base_unknown=base_unknown,
+                            base_facets=base_facets, base_ratings=base_ratings),
+                        scope=request.scope,
+                    )
+                    base_models = vbase["models"]["models"]
+                    base_unknown = vbase["models"]["unknown_total"]
+                    base_facets = vbase["facets"]
+                    base_ratings = vbase["ratings"]
+                    # „Alle Medien" zählt den Grundbereich, nicht den Bestand.
+                    total = library.count_items(conn, None, cache=counts_cache,
+                                                scope=request.scope, view_preds=vp)
                 if where_sql:
                     payload = sidebar_cache.get(
-                        ("sidebar", order, prefix, where_sql, tuple(params)),
+                        ("sidebar", view if vp else None, order, prefix, where_sql,
+                         tuple(params)),
                         lambda: library.sidebar_payload(
                             conn, filter_expr=filter, base_models=base_models,
                             base_unknown=base_unknown, base_facets=base_facets,
-                            base_ratings=base_ratings),
+                            base_ratings=base_ratings, view_preds=vp),
                         scope=request.scope,
                     )
                 else:
@@ -828,6 +918,7 @@ def create_app(
                 "models": payload["models"],
                 "facets": {**payload["facets"], "show_dupes": show_dupes},
                 "ratings": {"ratings": payload["ratings"]},
+                "total": total,
             }
 
     @app.get("/api/item/{file_hash}")
@@ -930,7 +1021,7 @@ def create_app(
     # -- Smart Folders (Stufe 3.3, ADR 0018) ----------------------------------
 
     def _with_counts(conn, rows: list[dict], key: str, counts: bool, scope: dict,
-                     *, empty_is_all: bool = False) -> list[dict]:
+                     *, empty_is_all: bool = False, vp: tuple = ()) -> list[dict]:
         # Zähler zu Smart Foldern/Arenen (#69, ADR 0071): aus dem Epochen-
         # Cache — je Ausdruck EIN COUNT bis zum nächsten Schreibvorgang.
         # ``counts=False`` = „Liste vor Zahlen": nur die Liste, der Zähler
@@ -950,7 +1041,7 @@ def create_app(
                 expression = None
             try:
                 entry[key] = library.count_items(
-                    conn, expression, cache=counts_cache, scope=scope)
+                    conn, expression, cache=counts_cache, scope=scope, view_preds=vp)
                 entry["error"] = None
             except ValueError as exc:
                 entry[key] = None
@@ -959,10 +1050,15 @@ def create_app(
         return result
 
     @app.get("/api/folders")
-    def folders_endpoint(request: Request, counts: bool = Query(True)) -> dict:
+    def folders_endpoint(request: Request, counts: bool = Query(True),
+                         view: str | None = Query(None)) -> dict:
+        # Zähler je Ansicht (ADR 0085): dieselbe Suche zählt in der
+        # Audioansicht die Songs, in der Galerie Bilder und Videos.
         with read_conn() as conn:
+            vp = view_preds(conn, view, request.scope)
             rows = folders_db.list_folders(conn)
-            return {"folders": _with_counts(conn, rows, "count", counts, request.scope)}
+            return {"folders": _with_counts(conn, rows, "count", counts, request.scope,
+                                            vp=vp)}
 
     @app.post("/api/folders")
     def create_folder(req: FolderRequest) -> dict:
@@ -1035,8 +1131,11 @@ def create_app(
         # „Liste vor Zahlen" (#69).
         with read_conn() as conn:
             rows = rankings_db.list_rankings(conn)
+            # Grundbereich ohne Audio (#175): derselbe Cache-Schlüssel wie
+            # der Populationszähler der Paarung.
             return {"rankings": _with_counts(conn, rows, "population", counts,
-                                             request.scope, empty_is_all=True)}
+                                             request.scope, empty_is_all=True,
+                                             vp=rankings_lib.ARENA_VIEW)}
 
     @app.post("/api/rankings")
     def create_ranking(req: RankingRequest) -> dict:
@@ -1202,6 +1301,93 @@ def create_app(
         )
         return _manual_state(file_hash)
 
+    # -- Cover (Audio A8, #165, ADR 0090) ------------------------------------------------
+
+    @app.post("/api/item/{file_hash}/cover")
+    def set_cover_endpoint(file_hash: str, req: CoverRequest) -> dict:
+        # Prüfen VOR dem Schreibgriff (run_write meldet Fehler nur als
+        # Zusammenfassung): Song = Audio, Cover = Bild der Bibliothek.
+        _require_item(file_hash)
+        _require_item(req.cover)
+        with read_conn() as conn:
+            kinds = dict(conn.execute(
+                "SELECT file_hash, media_kind FROM items WHERE file_hash IN (?, ?)",
+                (file_hash, req.cover)).fetchall())
+        if kinds[file_hash] != "audio":
+            raise HTTPException(status_code=400, detail=msg("coverNotSong"))
+        if kinds[req.cover] != "image":
+            raise HTTPException(status_code=400, detail=msg("coverNotImage"))
+        engine.run_write(
+            msg("taskCoverSet"),
+            lambda conn, _p: (manual.set_cover(conn, file_hash, req.cover), {})[1],
+        )
+        return _manual_state(file_hash)
+
+    @app.delete("/api/item/{file_hash}/cover")
+    def remove_cover_endpoint(file_hash: str) -> dict:
+        _require_item(file_hash)
+        engine.run_write(
+            msg("taskCoverRemove"),
+            lambda conn, _p: {"removed": manual.remove_cover(conn, file_hash)},
+        )
+        return _manual_state(file_hash)
+
+    # -- Zeitkommentare (Audio A6, #163, ADR 0088) -------------------------------------
+
+    def _comments_state(file_hash: str) -> dict:
+        with read_conn() as conn:
+            return {"comments": manual.list_comments(conn, file_hash)}
+
+    # Eingaben VOR dem Schreibgriff prüfen: run_write fängt Fehler und
+    # meldet sie nur als Zusammenfassung (Muster tagEmpty).
+    def _check_comment(text: str | None, at_ms: int | None) -> None:
+        if text is not None and not text.strip():
+            raise HTTPException(status_code=400, detail=msg("commentEmpty"))
+        if at_ms is not None and at_ms < 0:
+            raise HTTPException(status_code=400, detail=msg("commentTime", value=str(at_ms)))
+
+    def _require_comment(file_hash: str, comment_id: int) -> None:
+        with read_conn() as conn:
+            if not any(c["id"] == comment_id for c in manual.list_comments(conn, file_hash)):
+                raise HTTPException(status_code=404, detail=msg("commentUnknown", id=comment_id))
+
+    @app.get("/api/item/{file_hash}/comments")
+    def list_comments_endpoint(file_hash: str) -> dict:
+        _require_item(file_hash)
+        return _comments_state(file_hash)
+
+    @app.post("/api/item/{file_hash}/comments")
+    def add_comment_endpoint(file_hash: str, req: CommentCreate) -> dict:
+        _require_item(file_hash)
+        _check_comment(req.text, req.at_ms)
+        result = engine.run_write(
+            msg("taskCommentAdd"),
+            lambda conn, _p: {"id": manual.add_comment(conn, file_hash, req.at_ms, req.text)},
+        )
+        return {**_comments_state(file_hash), "id": result.get("id")}
+
+    @app.put("/api/item/{file_hash}/comments/{comment_id}")
+    def update_comment_endpoint(file_hash: str, comment_id: int, req: CommentUpdate) -> dict:
+        _require_item(file_hash)
+        _check_comment(req.text, req.at_ms)
+        _require_comment(file_hash, comment_id)
+        engine.run_write(
+            msg("taskCommentEdit"),
+            lambda conn, _p: (manual.update_comment(conn, file_hash, comment_id,
+                                                    text=req.text, at_ms=req.at_ms), {})[1],
+        )
+        return _comments_state(file_hash)
+
+    @app.delete("/api/item/{file_hash}/comments/{comment_id}")
+    def delete_comment_endpoint(file_hash: str, comment_id: int) -> dict:
+        _require_item(file_hash)
+        _require_comment(file_hash, comment_id)
+        engine.run_write(
+            msg("taskCommentDelete"),
+            lambda conn, _p: {"removed": manual.delete_comment(conn, file_hash, comment_id)},
+        )
+        return _comments_state(file_hash)
+
     @app.post("/api/batch/annotate")
     def batch_annotate(req: BatchAnnotateRequest) -> dict:
         # Multiselect-Sammelaktion (ADR 0022): EIN Durchlauf durch den einen
@@ -1264,11 +1450,14 @@ def create_app(
                 filters.parse(req.filter)
         except ValueError as err:
             raise HTTPException(status_code=400, detail=_err(err))
+        with read_conn() as conn:
+            vp = view_preds(conn, req.view, None)
 
         def fn(conn, _p):
             return bulk_lib.apply_bulk(
                 conn,
                 filter_expr=req.filter,
+                view_preds=vp,
                 hashes=req.hashes,
                 rating=req.rating,
                 add_tag=req.add_tag,
@@ -1370,6 +1559,11 @@ def create_app(
                 # Hash dauerhaft im Cache kleben.
                 resolved = library.resolve_media(conn, file_hash)
                 source = resolved[0] if resolved else None
+                # Audio nur mit eingebettetem Bild (#165) — sonst gäbe es
+                # für jeden Song einen Fehlschlag-Marker.
+                if row["media_kind"] == "audio" and not manual.has_embedded_picture(
+                        conn, file_hash):
+                    source = None
         if row is None or source is None:
             raise HTTPException(status_code=404, detail=msg("errNoThumb"))
         thumb_pool.submit(file_hash, source, cached,
@@ -1411,7 +1605,7 @@ def create_app(
                                  cache_control="public, max-age=31536000, immutable")
 
     @app.get("/api/preview/{file_hash}")
-    def preview(file_hash: str) -> Response:
+    def preview(file_hash: str, native: str | None = Query(None)) -> Response:
         """Gerenderte JPEG-Ansicht für Container ohne Browser-Unterstützung
         (TIFF/PSD, ADR 0052). /api/media bleibt die Originalbytes; hier wird
         on-the-fly über Pillow gerendert — hash-adressiert und damit genauso
@@ -1420,8 +1614,14 @@ def create_app(
         _require_hash(file_hash)
         with read_conn() as conn:
             resolved = library.resolve_media(conn, file_hash)
+            audio = library.audio_facts(conn, file_hash)
         if resolved is None:
             raise HTTPException(status_code=404, detail=msg("errNoLocation"))
+        if audio is not None:
+            # ?native=aiff,alac: Formate, die der abspielende Browser selbst
+            # kann (Safari) — dann das Original, keine Kopie (ADR 0086).
+            spielt = frozenset(f.strip().lower() for f in (native or "").split(",") if f.strip())
+            return _audio_preview(file_hash, resolved, *audio, native=spielt)
         data, reason = render_preview(resolved[0])
         if data is None:
             # reason kann Meldungs-JSON sein (PSD ohne Composite) — als
@@ -1431,6 +1631,64 @@ def create_app(
                                            reason=msg_load(reason)))
         return Response(content=data, media_type="image/jpeg",
                         headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+    # Wie lange /api/preview auf einen noch fehlenden Wiedergabe-Proxy
+    # wartet: ein <audio>-Element kann ein 202 nicht wiederholen, darum
+    # wartet der Endpunkt (ADR 0086). Der Proxy entsteht beim ersten
+    # Abspielen (3-min-Song ≈ 0,2 s, auf dem Heimserver ≈ 1 s).
+    _PROXY_WAIT = 120
+
+    def _audio_preview(file_hash: str, resolved: tuple[str, str],
+                       container: str, codec: str | None, *,
+                       native: frozenset[str] = frozenset()) -> Response:
+        """Abspielbare Fassung eines Audio-Items (A4 #161, Muster ADR 0052):
+        was der Browser kann als Original, sonst (AIFF/ALAC/CAF) der
+        verlustfreie FLAC-Proxy — beim ersten Abspielen erzeugt."""
+        immutable = "public, max-age=31536000, immutable"
+        path, mime = resolved
+        if not audio_analysis.needs_proxy(container, codec, native):
+            return MediaFileResponse(path, media_type=mime, cache_control=immutable)
+        proxy = audio_analysis.proxy_path(audio_cache, file_hash)
+        if not proxy.is_file():
+            reason = audio_analysis.fail_reason(proxy)
+            if reason is None:
+                future = thumb_pool.submit_call(f".flac:{file_hash}", audio_analysis.generate_proxy,
+                                                path, proxy)
+                try:
+                    future.result(timeout=_PROXY_WAIT)
+                except TimeoutError:
+                    return Response(status_code=503, headers={"Cache-Control": "no-store",
+                                                              "Retry-After": "5"})
+                reason = audio_analysis.fail_reason(proxy)
+            if not proxy.is_file():
+                raise HTTPException(status_code=404, detail=msg(
+                    "errPreviewFailed", reason=msg_load(reason or "")))
+        return MediaFileResponse(proxy, media_type="audio/flac", cache_control=immutable)
+
+    @app.get("/api/audio/analysis/{file_hash}")
+    def audio_analysis_json(file_hash: str) -> Response:
+        """Lautheit + dreibandige Wellenform (A4 #161). Muster /api/thumb:
+        vorhanden → sofort (ohne DB); fehlt → Erzeugung einreihen, 202 mit
+        Retry-After; endgültiger Fehlschlag → 404 mit Grund."""
+        _require_hash(file_hash)
+        dest = audio_analysis.analysis_path(audio_cache, file_hash)
+        data = audio_analysis.read_analysis(dest)
+        if data is not None:
+            # Keine Unveränderlichkeit wie bei /api/thumb: eine neue
+            # Analyse-Version ersetzt die Datei unter derselben Adresse.
+            return JSONResponse(content=data, headers={"Cache-Control": "no-cache"})
+        reason = audio_analysis.fail_reason(dest)
+        if reason is not None:
+            raise HTTPException(status_code=404, detail=msg(
+                "errAudioAnalysisFailed", reason=msg_load(reason)))
+        with read_conn() as conn:
+            audio = library.audio_facts(conn, file_hash)
+            resolved = library.resolve_media(conn, file_hash) if audio is not None else None
+        if resolved is None:
+            raise HTTPException(status_code=404, detail=msg("errNoAudioAnalysis"))
+        thumb_pool.submit_call(f".json:{file_hash}", audio_analysis.generate_analysis,
+                               resolved[0], dest)
+        return Response(status_code=202, headers={"Cache-Control": "no-store", "Retry-After": "1"})
 
     # -- Chip-Suche (Block S3, ADR 0035) -----------------------------------
     #
@@ -1494,6 +1752,7 @@ def create_app(
         # zehntausenden On-Demand-Generierungen.
         if thumb_cache is not None:
             engine.enqueue_thumb_warm(thumb_cache, thumb_size, auto=True)
+        warm_audio_auto()
         return {"queued_files": count, "target": str(target)}
 
     @app.post("/api/scan")
@@ -1549,6 +1808,7 @@ def create_app(
                                      rules=configured_rules())
                 if thumb_cache is not None:
                     engine.enqueue_thumb_warm(thumb_cache, thumb_size, auto=True)
+                warm_audio_auto()
 
             engine.start_watch_source(source, on_scan_ready)
             return
@@ -1574,6 +1834,7 @@ def create_app(
             )
             if thumb_cache is not None:
                 engine.enqueue_thumb_warm(thumb_cache, thumb_size, auto=True)
+            warm_audio_auto()
 
         engine.start_watch_source(source, on_ready)
 
@@ -1841,6 +2102,15 @@ def create_app(
         engine.enqueue_thumb_warm(thumb_cache, thumb_size, retry_failed=True)
         return {"queued": "Thumbnails vorwärmen"}
 
+    @app.post("/api/admin/audiowarm")
+    def admin_audiowarm() -> dict:
+        # „Audio analysieren" (A4 #161): Neuberechnung per Klick — Fehlende,
+        # Fehlgeschlagene und veraltete Analyse-Versionen.
+        if not audio_on():
+            raise HTTPException(status_code=400, detail=msg("errAudioOff"))
+        engine.enqueue_audio_warm(audio_cache, retry_failed=True)
+        return {"queued": True}
+
     @app.get("/api/admin/thumbcache")
     def admin_thumbcache() -> dict:
         # „Cache zählen" (#118): Verzeichnislauf über den ganzen Thumbnail-
@@ -1880,6 +2150,7 @@ def create_app(
             "instanz_name": cfg_instance_name(config),
             "akzentfarbe": cfg_instance_accent(config),
             "rankings_enabled": cfg_rankings_enabled(config),
+            "audio_enabled": cfg_audio_enabled(config),
             "slow_request_ms": int(cfg_slow_request_ms(config)),
             "raw": p.read_text(encoding="utf-8") if p.is_file() else "",
         }
@@ -1927,6 +2198,7 @@ def create_app(
         watch_payload = (
             _validate_watch_payload(update.watch) if update.watch is not None else None
         )
+        audio_was = cfg_audio_enabled(load_config(config_path))
         update_config_file(
             config_path,
             locations=(
@@ -1949,10 +2221,21 @@ def create_app(
             instance_name=update.instanz_name,
             instance_accent=update.akzentfarbe,
             rankings_enabled=update.rankings_enabled,
+            audio_enabled=update.audio_enabled,
             slow_request_ms=update.slow_request_ms,
         )
         if update.slow_request_ms is not None:
             app.state.slow_request_ms = float(update.slow_request_ms)   # sofort (#110)
+        if update.audio_enabled and not audio_was:
+            # Audio-Modul eingeschaltet (ADR 0083): das Stat-Gedächtnis hält
+            # Audiodateien als „unbekannt" (ADR 0042) — vergessen, damit der
+            # Watcher sie beim Neuaufsetzen gleich aufnimmt.
+            engine.run_write(msg("taskAudioForget"), lambda conn, _p: {
+                "forgotten": conn.execute(
+                    "DELETE FROM scan_memory WHERE outcome = 'unbekannt'").rowcount})
+            # Schon katalogisierte Audio-Items (Modul war früher an) gleich
+            # analysieren; neu aufgenommene folgen über die Watch-Nachläufer.
+            engine.enqueue_audio_warm(audio_cache, auto=True)
         # Watch-Quellen übernehmen Änderungen sofort: alle neu aufsetzen
         # (entfernte Quellen fallen dabei weg). Fehler hier ≠ Speicher-Fehler.
         _start_all_watches()

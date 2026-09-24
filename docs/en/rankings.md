@@ -27,7 +27,10 @@ A **ranking** is a named subset of the library that duels run over: **name +
 filter expression** (the same grammar as the search box, e.g.
 `tag: portrait` or `model: "flux"` — empty = whole library). The
 population is evaluated **live**, like saved searches: newly imported
-media grow into it automatically, rejected media fall out.
+media grow into it automatically, rejected media fall out. **Songs never
+belong to it**, not even with a cover or with `typ: audio` (the ranking
+then stays empty): for comparing and rating music the
+[audio module](audio.md) has its own tools.
 
 - **Create:** click the population together in the gallery (sidebar,
   "+ Criterion", chips), then **🏆 Ranking** next to the ☆ in the chip bar.

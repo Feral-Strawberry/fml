@@ -85,6 +85,15 @@ function withQuery(path, params) {
   return s ? `${path}?${s}` : path;
 }
 
+// -- Ansicht (ADR 0084/0085) -----------------------------------------------------
+// Grundbereich der aktiven Ansicht: „galerie" (alles außer Audio) oder
+// „audio". KEIN Suchzustand — er reist als ?view= mit den Anfragen, deren
+// Antwort von der Ansicht abhängt (Grid, Rücksprung, Sidebar-Zähler,
+// Ordner-Zähler, Sammel-Aktion). Gesetzt nur von libview.js.
+let _view = "galerie";
+export const setLibraryView = (view) => { _view = view; };
+export const libraryView = () => _view;
+
 // -- Bestand (lesend) ---------------------------------------------------------
 
 /** Kennzahlen: total_items, total_bytes, total_locations, items_with_metadata, items_interpreted, by_container. */
@@ -93,12 +102,17 @@ export const getStats = () => api("/api/stats");
 /** Eine Grid-Seite: {total, offset, items}. sort ∈ added|name|size|container|rating;
     optional gefiltert nach model (Schicht 2) und rating (manuelle Schicht, exakt). */
 export const getItems = ({ limit, offset, sort, model, rating, filter, dupes, total } = {}) =>
-  api(withQuery("/api/items", { limit, offset, sort, model, rating, filter, dupes, total }));
+  api(withQuery("/api/items", { limit, offset, sort, model, rating, filter, dupes, total, view: _view }));
+
+/** Kandidaten im Cover-Dialog (#165): wie getItems, aber immer im
+ *  Galerie-Grundbereich — auch aus der Audioansicht heraus. */
+export const getCoverCandidates = ({ filter, offset = 0, limit = 120 } = {}) =>
+  api(withQuery("/api/items", { limit, offset, sort: "added", filter, total: 1, view: "galerie" }));
 
 /** Grid-Position eines Items in der aktuellen Treffermenge (ADR 0060) —
  *  Parameter wie getItems; Antwort {index} (0-basiert, null = nicht drin). */
 export const getItemPosition = ({ hash, sort, model, rating, filter, dupes } = {}) =>
-  api(withQuery("/api/items/position", { hash, sort, model, rating, filter, dupes }));
+  api(withQuery("/api/items/position", { hash, sort, model, rating, filter, dupes, view: _view }));
 
 // -- Smart Folders (Stufe 3.3, ADR 0018) ----------------------------------------
 
@@ -107,7 +121,7 @@ export const getItemPosition = ({ hash, sort, model, rating, filter, dupes } = {
  *  Issue #69) — der Zähler fehlt dann im Eintrag (undefined), null = Ausdruck
  *  ungültig. Mit Zählern kommt die Zahl aus dem Epochen-Cache (ADR 0071). */
 export const getFolders = ({ counts = true } = {}) =>
-  api(withQuery("/api/folders", { counts: counts ? undefined : 0 }));
+  api(withQuery("/api/folders", { counts: counts ? undefined : 0, view: _view }));
 
 /** Smart Folder anlegen (validiert die Grammatik): {id}. */
 export const createFolder = (name, expression) =>
@@ -128,7 +142,7 @@ export const deleteFolder = (id) => api(`/api/folders/${id}`, { method: "DELETE"
     {models, facets, ratings} — dieselben Nutzlasten wie /api/models,
     /api/facets und /api/ratings, aber aus einem Filterlauf und je Ausdruck
     serverseitig gemerkt (eigene Chips klammert der Server je Gruppe aus). */
-export const getSidebar = (filter) => api(withQuery("/api/sidebar", { filter }));
+export const getSidebar = (filter) => api(withQuery("/api/sidebar", { filter, view: _view }));
 
 /** Detail zu einem Item (404 → Error "Unbekanntes Item."). */
 export const getItem = (hash, opts) => api(`/api/item/${hash}`, opts);
@@ -237,7 +251,8 @@ export const batchAnnotate = (hashes, fields) =>
  *  fields: {rating?, add_tag?, model?, note?, reject?} — rating füllt nur
  *  Unbewertete, note hängt an, reject läuft allein (ADR 0041). Antwort:
  *  {matched, rating_set?, tagged?, model_set?, noted?, rejected?}. */
-export const bulkApply = (scope, fields) => postJSON("/api/batch/apply", { ...scope, ...fields });
+export const bulkApply = (scope, fields) =>
+  postJSON("/api/batch/apply", { ...scope, ...fields, view: _view });
 
 /** Ablehnen (ADR 0041, ersetzt Löschen): Items + Metadaten raus, Hashes
  *  gesperrt — die Dateien bleiben unangetastet. */
@@ -263,6 +278,24 @@ export const startMoveout = (target) => postJSON("/api/admin/moveout", { target 
 
 /** Tag-Vokabular mit Zählern: {tags}. */
 export const getTags = () => api("/api/tags");
+
+// -- Zeitkommentare (Audio A6, #163) ------------------------------------------------
+// Jede Antwort liefert die vollständige, zeitlich sortierte Liste des Items:
+// {comments: [{id, at_ms, text, created_at, updated_at}]}.
+/** Cover eines Songs (#165, ADR 0090): Bild der Bibliothek setzen bzw.
+ *  entfernen → {manual} (mit `cover`). */
+export const setCover = (hash, cover) => postJSON(`/api/item/${hash}/cover`, { cover });
+export const removeCover = (hash) => api(`/api/item/${hash}/cover`, { method: "DELETE" });
+
+export const getComments = (hash) => api(`/api/item/${hash}/comments`);
+export const addComment = (hash, atMs, text) =>
+  postJSON(`/api/item/${hash}/comments`, { at_ms: atMs, text });
+export const editComment = (hash, id, fields) =>
+  api(`/api/item/${hash}/comments/${id}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields),
+  });
+export const deleteComment = (hash, id) =>
+  api(`/api/item/${hash}/comments/${id}`, { method: "DELETE" });
 
 // -- Ranking-Modul (Großbaustelle R, ADR 0045) ----------------------------------
 // Arena = Name + Filterausdruck (leer = ganze Bibliothek). Die Endpunkte
@@ -414,6 +447,8 @@ export const startVacuum = () => postJSON("/api/admin/vacuum", {});
 
 /** Fehlende Thumbnails im Hintergrund vorwärmen (Engine-Warteschlange). */
 export const startThumbWarm = () => postJSON("/api/admin/thumbwarm", {});
+/** „Audio analysieren" (A4 #161): Lautheit, Wellenform, Wiedergabe-Proxy. */
+export const startAudioWarm = () => postJSON("/api/admin/audiowarm", {});
 
 /** Thumbnail-Platten-Cache leeren: {deleted}. */
 export const clearThumbCache = () => postJSON("/api/admin/thumbcache/clear", {});
@@ -502,13 +537,64 @@ export const mediaUrl = (hash) => `/api/media/${hash}`;
  *  serverseitig gerenderte JPEG statt der Originalbytes (ADR 0052). */
 const RENDERED_CONTAINERS = new Set(["tiff", "psd"]);
 
-/** Anzeige-URL eines Items ({file_hash, container}): das Original — oder für
- *  TIFF/PSD die gerenderte /api/preview-Ansicht. Überall verwenden, wo ein
- *  <img src> aus einem Item entsteht (Loupe, Panel, Einzelbild, Arena). */
-export const displayUrl = (item) =>
-  RENDERED_CONTAINERS.has(item.container)
+// Formate mit Wiedergabe-Proxy, die manche Browser selbst spielen (Safari:
+// AIFF und ALAC; CAF spielt keiner — Recherche §10). Name = das, was der
+// Server in ?native= erwartet (ADR 0086).
+const NATIVE_PROBES = {
+  aiff: ["audio/aiff", "audio/x-aiff"],
+  alac: ['audio/mp4; codecs="alac"', 'audio/x-m4a; codecs="alac"'],
+};
+let _probe = null;
+
+/** Spielt DIESER Browser das Proxy-Format selbst? */
+function playsNatively(fmt) {
+  _probe ??= document.createElement("audio");
+  if (typeof _probe.canPlayType !== "function") return false;
+  return NATIVE_PROBES[fmt].some((t) => _probe.canPlayType(t) !== "");
+}
+
+/** Anzeige-URL eines Items ({file_hash, container, media_kind}): das
+ *  Original — oder für TIFF/PSD die gerenderte /api/preview-Ansicht. Audio
+ *  spielt IMMER über /api/preview (A4 #161): der Server liefert das
+ *  Original, wo der Browser es kann, sonst den FLAC-Proxy (AIFF/ALAC/CAF),
+ *  erzeugt beim ersten Abspielen. Ob ALAC im M4A steckt, weiß nur der
+ *  Server; ob der Browser AIFF/ALAC selbst kann, sagt ihm ?native=.
+ *  Überall verwenden, wo ein <img>/<audio src> aus einem Item entsteht
+ *  (Loupe, Panel, Einzelbild, Arena, Audioliste). */
+export function displayUrl(item) {
+  if (item.media_kind === "audio") {
+    const fmt = item.container === "aiff" ? "aiff" : item.container === "isobmff" ? "alac" : null;
+    const native = fmt && playsNatively(fmt) ? `?native=${fmt}` : "";
+    return `/api/preview/${item.file_hash}${native}`;
+  }
+  return RENDERED_CONTAINERS.has(item.container)
     ? `/api/preview/${item.file_hash}`
     : mediaUrl(item.file_hash);
+}
+
+/** Lautheit + dreibandige Wellenform eines Audio-Items (A4 #161):
+ *  {version, duration, loudness: {integrated, lra, true_peak},
+ *   waveform: {buckets, seconds_per_bucket, bands, low|mid|high: {min, max}}}.
+ *  Der Server erzeugt fehlende Analysen im Hintergrund und antwortet so lange
+ *  mit 202 — hier wird mit wachsendem Abstand nachgefragt. `isStale()` bricht
+ *  ab (Panel längst weitergeblättert); null = nicht (mehr) gewollt. */
+export async function getAudioAnalysis(hash, { isStale = () => false, tries = 20 } = {}) {
+  let wait = 500;
+  for (let i = 0; i < tries; i++) {
+    if (isStale()) return null;
+    const r = await fetch(`/api/audio/analysis/${hash}`);
+    if (r.status !== 202) {
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({ detail: r.statusText }));
+        throw new Error(serverMsg(e.detail) || r.statusText);
+      }
+      return r.json();
+    }
+    await new Promise((res) => setTimeout(res, wait));
+    wait = Math.min(wait * 1.5, 4000);
+  }
+  return null;
+}
 
 /** Video-Element AUSDRÜCKLICH freigeben (#87/#89): ein verworfenes <video>
  *  hält seine Range-Verbindung offen, bis der Garbage Collector es einsammelt;
@@ -524,10 +610,92 @@ export function releaseVideo(v) {
   try { v.load?.(); } catch { /* egal */ }
 }
 
-/** Alle <video> unterhalb von `scope` freigeben (vor jedem innerHTML-Ersatz). */
+/** Alle Medien-Elemente (<video> UND <audio>, #158) unterhalb von `scope`
+ *  freigeben (vor jedem innerHTML-Ersatz) — ein verworfenes <audio> hält
+ *  seine Verbindung genauso offen und spielt sogar hörbar weiter. */
 export function releaseVideos(scope) {
   if (!scope) return;
-  for (const v of scope.querySelectorAll("video")) releaseVideo(v);
+  for (const v of scope.querySelectorAll("video, audio")) releaseVideo(v);
+}
+
+// -- Medien-Weiche (#158, ADR 0083) --------------------------
+// EIN Helfer statt „video, sonst <img>" an jeder Stelle: Panel, Lupe,
+// Einzelansicht, Arena, Vergleich und Galerie fragen hier, WAS ein Item ist
+// und WIE es auf die Bühne kommt.
+
+/** Zeitbasiertes Medium (hat eine Dauer, spielt ab)? */
+export const isTimed = (d) => d?.media_kind === "video" || d?.media_kind === "audio";
+
+/** Kurzlabel der Medienart für Meta-Zeilen („VIDEO"/„AUDIO", Bilder ""). */
+export const kindLabel = (d) =>
+  d?.media_kind === "video" ? STRINGS.badgeVideo
+    : d?.media_kind === "audio" ? STRINGS.badgeAudio : "";
+
+/** Dauer in Sekunden → „3:07" bzw. „1:02:03"; leer ohne Dauer. */
+export function fmtDuration(sec) {
+  if (sec == null || !(sec >= 0)) return "";
+  const s = Math.round(sec);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(r)}` : `${m}:${pad(r)}`;
+}
+
+/** Lautheit (A4 #161) als eine Zeile: „-14,2 LUFS · LRA 5,3 LU · True Peak
+ *  -0,1 dBTP" — Einheiten sind international, nur das Dezimalzeichen folgt
+ *  der Sprache. Stille (-inf) kommt als null und wird „–". */
+export function fmtLoudness(l) {
+  const f = (v) => (v == null ? "–" : v.toLocaleString(STRINGS.locale,
+    { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
+  return STRINGS.loudnessValue
+    .replace("{i}", f(l?.integrated)).replace("{lra}", f(l?.lra)).replace("{tp}", f(l?.true_peak));
+}
+
+/** Kann DIESER Browser das Item zeigen/abspielen? Bilder immer; Audio
+ *  auch (A4 #161): was der Browser nicht kann (AIFF/ALAC/CAF), liefert
+ *  /api/preview als FLAC-Proxy. Scheitert selbst der, fängt
+ *  wireMediaFallback den Ladefehler ehrlich auf (ADR 0070). */
+export function canPlay(d) {
+  if (d?.media_kind === "video") return canPlayVideo(d);
+  return true;
+}
+
+/** Das Medien-Element eines Items als HTML: <img>, <video> oder der
+ *  eigene Audio-Player (bzw. der ehrliche Hinweis, wenn der Browser es nicht
+ *  abspielt). `attrs` je Art: { image, video } — z. B. `video: "controls
+ *  autoplay"`. Audio (A5 #162, ADR 0087): ein .aplayer ohne eigenes
+ *  <audio> — player.js spielt alles über EIN Element und malt Wellenform,
+ *  Abspielkopf und Angleich in jeden eingebetteten Player; nie Autoplay. */
+export function mediaHtml(d, { image = "", video = "" } = {}) {
+  if (!canPlay(d)) return unplayableHtml(d);
+  if (d.media_kind === "video") return `<video src="${mediaUrl(d.file_hash)}" ${video}></video>`;
+  if (d.media_kind === "audio") return audioPlayerHtml(d);
+  return `<img src="${displayUrl(d)}" ${image} alt="">`;
+}
+
+/** Eingebetteter Player eines Songs (Detailpanel, Lupe, Einzelansicht,
+ *  Arena): Wellenform, ▶, Stelle/Dauer, Angleich. Die Daten für die
+ *  Wiedergabe reisen als data-Attribute mit (player.js). */
+export function audioPlayerHtml(d) {
+  const e = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const loc = d.locations?.[0]?.path || "";
+  const name = d.name || loc.split("/").pop().split("\\").pop();
+  const field = (f) => d.interpreted?.find((x) => x.field === f)?.value;
+  const who = d.model || field("model") || d.tool || field("tool") || "";
+  // Mit Cover (#165) steht das Bild statt des ♪ über dem Player — als
+  // Hintergrund, nicht als <img>: der Medien-Fehlerfang (wireMediaFallback)
+  // hielte ein fehlendes Coverbild sonst für einen kaputten Song.
+  const top = d.cover_item
+    ? `<div class="audiocover" style="background-image:url('${displayUrl(d.cover_item)}')"></div>`
+    : `<span class="audioglyph" aria-hidden="true">♪</span>`;
+  return `<div class="audiostage${d.cover_item ? " hascover" : ""}">${top}`
+    + `<div class="aplayer" data-hash="${e(d.file_hash)}" data-container="${e(d.container)}"`
+    + ` data-dur="${d.duration ?? ""}" data-name="${e(name)}" data-tool="${e(who)}"`
+    + ` data-cover="${e(d.cover_item?.file_hash || "")}">`
+    + `<div class="wv" title="${e(STRINGS.audioSeek)}"><canvas></canvas><span class="loopr" hidden></span><span class="ph" hidden></span></div>`
+    + `<div class="pwrow"><button type="button" class="pbtn" title="${e(STRINGS.audioPlay)}">▶</button>`
+    + `<span class="ptime">0:00 / ${fmtDuration(d.duration)}</span><span class="pgain"></span></div>`
+    + `<div class="pnote" hidden>${e(STRINGS.audioPlayFailed)}</div></div></div>`;
 }
 
 /** Medien-Ladefehler dezent auffangen (fehlender Fundort, PSD ohne Composite,
@@ -536,16 +704,16 @@ export function releaseVideos(scope) {
  *  Video seit ADR 0069/#25). `scope` ist das umschließende Element, `label`
  *  der Hinweistext. Ein Video gibt dabei seine Verbindung frei. */
 export function wireMediaFallback(scope, label, d = null) {
-  const media = scope.querySelector("img, video");
+  const media = scope.querySelector("img, video, audio");
   if (!media) return;
   const fail = () => {
     if (!media.isConnected) return;   // längst ersetzt (Blättern) — nichts überschreiben
-    if (media.tagName === "VIDEO") releaseVideo(media);
+    if (media.tagName !== "IMG") releaseVideo(media);
     // `label` darf eine Funktion sein (#71): erst im Fehlerfall steht fest,
     // ob ein MediaError-Code vorliegt, den die Codec-Meldung nennt.
     const text = typeof label === "function" ? label(media) : label;
     // Mit Item-Wissen (Video): Poster + Hinweis + 📂-Knopf, wie beim Vorabtest.
-    if (d && media.tagName === "VIDEO") mountUnplayable(scope, d, text);
+    if (d && media.tagName !== "IMG") mountUnplayable(scope, d, text);
     else scope.innerHTML = `<div class="nopreview">${escHtml(text)}</div>`;
   };
   media.addEventListener("error", fail, { once: true });
@@ -641,8 +809,14 @@ export function canPlayVideo(d) {
  *  das Panel sonst keins hat) — nach dem Einhängen `wireUnplayable(scope, d)`
  *  rufen, oder gleich `mountUnplayable()`. */
 export function unplayableHtml(d, text = null) {
-  const note = text ?? STRINGS.videoUnplayable.replace("{codec}", codecLabel(videoCodecFacts(d)));
-  return `<div class="nopreview codecnote"><img src="${thumbUrl(d.file_hash)}" alt="">`
+  const audio = d?.media_kind === "audio";
+  const note = text ?? (audio
+    ? STRINGS.audioUnplayable.replace("{format}", String(d.container || "").toUpperCase())
+    : STRINGS.videoUnplayable.replace("{codec}", codecLabel(videoCodecFacts(d))));
+  // Audio hat (noch) kein Vorschaubild — ♪ statt Poster-Frame.
+  const poster = audio ? `<span class="audioglyph" aria-hidden="true">♪</span>`
+    : `<img src="${thumbUrl(d.file_hash)}" alt="">`;
+  return `<div class="nopreview codecnote">${poster}`
     + `<span>${escHtml(note)}</span>`
     + `<button type="button" class="codecreveal" title="${escHtml(STRINGS.revealTitle)}">${escHtml(STRINGS.videoOpenElsewhere)}</button></div>`;
 }
@@ -664,6 +838,9 @@ export function mountUnplayable(scope, d, text = null) {
 /** Hinweistext für wireMediaFallback: mit Codec-Wissen die Codec-Meldung
  *  samt Fehlercode, sonst das allgemeine „Keine Vorschau verfügbar". */
 export function mediaFallbackLabel(d) {
+  if (d?.media_kind === "audio") {
+    return STRINGS.audioUnplayable.replace("{format}", String(d.container || "").toUpperCase());
+  }
   const facts = d?.media_kind === "video" ? videoCodecFacts(d) : null;
   if (!facts) return STRINGS.noPreview;
   return (media) => (media?.error
@@ -677,8 +854,8 @@ export function mediaFallbackLabel(d) {
  *  ein Video, das dieser Browser nicht dekodiert, wird es freigegeben und
  *  durch Poster + Hinweis ersetzt. Liefert true, wenn getauscht wurde. */
 export function swapUnplayable(scope, d) {
-  if (!scope || d?.media_kind !== "video" || canPlayVideo(d)) return false;
-  if (!scope.querySelector("video")) return false;
+  if (!scope || !isTimed(d) || canPlay(d)) return false;
+  if (!scope.querySelector("video, audio")) return false;
   releaseVideos(scope);
   mountUnplayable(scope, d);
   return true;

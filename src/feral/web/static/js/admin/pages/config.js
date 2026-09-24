@@ -129,6 +129,7 @@ function markup(c) {
   ].join(""));
   const modules = card(STRINGS.cfgModule, "", [
     line(STRINGS.cfgRankings, true, check("rankings_enabled", c.rankings_enabled, STRINGS.cfgRankingsOn), STRINGS.cfgRankingsHint),
+    line(STRINGS.cfgAudio, true, check("audio_enabled", c.audio_enabled, STRINGS.cfgAudioOn), STRINGS.cfgAudioHint),
   ].join(""));
   return `
     <div class="row c2">${library}${perf}</div>
@@ -208,6 +209,9 @@ function payload(v) {
     akzentfarbe: v.akzent_on ? v.akzentfarbe : "",
     // Modul-Schalter Rankings (ADR 0045): wirkt sofort in der Galerie.
     rankings_enabled: v.rankings_enabled,
+    // Modul-Schalter Audio (ADR 0083): wirkt ab dem nächsten Scan/Import;
+    // Einschalten lässt die Watcher übersprungene Audiodateien neu prüfen.
+    audio_enabled: v.audio_enabled,
     // Langsam-Schwelle (#110): wirkt sofort, 0 = nie warnen.
     slow_request_ms: Math.max(0, parseInt(v.slow_request_ms, 10) || 0),
   };

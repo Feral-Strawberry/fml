@@ -37,30 +37,48 @@ def _store(db, file_hash, path):
 def test_overview_stats_kinds_years_growth_and_disks(db, db_path, tmp_path):
     from datetime import datetime, timedelta, timezone
 
+    now = datetime.now(timezone.utc)      # EIN Zeitpunkt für Test und Statistik (#180)
     _store(db, "h1", "/a.png")
     _store(db, "h2", "/b.png")
     _store(db, "h3", "/c.png")
     db.execute("UPDATE items SET media_kind = 'video', file_size = 500 WHERE file_hash = 'h3'")
     db.execute("UPDATE items SET media_date = '2024-05-01 10:00:00' WHERE file_hash = 'h1'")
     db.execute("UPDATE items SET media_date = '2026-01-02 10:00:00' WHERE file_hash = 'h2'")
-    old = (datetime.now(timezone.utc) - timedelta(days=40)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    old = (now - timedelta(days=40)).strftime("%Y-%m-%dT%H:%M:%SZ")
     db.execute("UPDATE items SET first_seen_at = ? WHERE file_hash = 'h3'", (old,))
     db.commit()
 
-    o = admin.overview_stats(db, db_path=db_path, library_root=tmp_path)
+    o = admin.overview_stats(db, db_path=db_path, library_root=tmp_path, now=now)
     kinds = {k["kind"]: k for k in o["by_kind"]}
     assert kinds["image"]["count"] == 2 and kinds["video"] == {"kind": "video", "count": 1, "bytes": 500}
     years = {y["year"]: y["count"] for y in o["by_year"]}
     assert years == {"2024": 1, "2026": 1, None: 1}          # None = ohne Datum
     assert len(o["growth"]) == 30
     assert sum(g["count"] for g in o["growth"]) == 2          # h3 liegt außerhalb der 30 Tage
-    assert o["growth"][-1]["day"] == datetime.now(timezone.utc).date().isoformat()
+    assert o["growth"][-1]["day"] == now.date().isoformat()
     assert o["growth"][-1]["count"] == 2
     # DB und Library liegen hier auf demselben Laufwerk → nur EINE Platte
     assert len(o["disks"]) == 1 and o["disks"][0]["for"] == "db"
     assert o["disks"][0]["total"] > 0 and o["disks"][0]["free"] >= 0
     # ohne Library: nur die DB-Platte, keine Ausnahme
     assert len(admin.overview_stats(db, db_path=db_path, library_root=None)["disks"]) == 1
+
+
+def test_overview_disks_same_drive_even_while_another_process_writes(db, db_path, tmp_path, monkeypatch):
+    """#180: Schreibt ein anderer Prozess zwischen den beiden Abfragen, ändert
+    sich der freie Platz — dieselbe Platte darf trotzdem nur EINMAL erscheinen."""
+    import itertools
+    import shutil
+
+    real, tick = shutil.disk_usage, itertools.count()
+
+    def busy(path):
+        u = real(path)
+        return type(u)(u.total, u.used, u.free - next(tick) * 4096)
+
+    monkeypatch.setattr(admin.shutil, "disk_usage", busy)
+    disks = admin.overview_stats(db, db_path=db_path, library_root=tmp_path)["disks"]
+    assert [d["for"] for d in disks] == ["db"]
 
 
 # --- admin_info ---------------------------------------------------------------
@@ -344,6 +362,19 @@ def test_import_rules_hit_legacy_tiff_raws(db):
     left = {r[0] for r in db.execute("SELECT file_hash FROM items")}
     assert left == {"b2" * 32}
 
+
+
+def test_import_rules_match_file_extension_too(db):
+    # #159: Windows-Sprachdateien standen als »mp3« im Katalog — der Eintrag
+    # »lang« trifft sie über die Endung eines Fundorts, echte MP3s nicht.
+    _store_sized(db, "a1" * 32, "C:\\Programme\\Tool\\de.LANG", width=None, height=None,
+                 container="mp3")
+    _store_sized(db, "b2" * 32, "/musik/song.mp3", width=None, height=None,
+                 container="mp3")
+    rules = {"min_kante": 0, "max_kante": 0, "formate": ["lang"]}
+    assert admin.import_rules_overview(db, rules)["counts"] == {"formate": 1}
+    assert admin.apply_import_rules(db, rules, thumb_cache=None) == 1
+    assert {r[0] for r in db.execute("SELECT file_hash FROM items")} == {"b2" * 32}
 
 # --- Sperrliste seitenweise + Suche (A3 #107, schließt #66) -----------------------
 

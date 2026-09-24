@@ -21,7 +21,7 @@
 //   Mausrad/+/− zoomen · Doppelklick = Anpassen ↔ 100 % · Esc/Enter schließen
 
 import { STRINGS } from "./strings.js";
-import { displayUrl, getItem, scopeSignal, abortScope, isAbort } from "./api.js";
+import { displayUrl, getItem, scopeSignal, abortScope, isAbort, isTimed, libraryView } from "./api.js";
 import { dotsHtml, rate, openRejectDialog } from "./curate.js";
 import { emit, on } from "./main.js";
 
@@ -251,7 +251,7 @@ export function initCompare() {
 
   function renderImages() {
     const [a, b] = items;
-    if (items.some((d) => d.media_kind === "video")) { showNote(STRINGS.cmpVideoUnsupported); return; }
+    if (items.some(isTimed)) { showNote(STRINGS.cmpVideoUnsupported); return; }
     stage.querySelector(".nopreview")?.remove();
     frame.hidden = false;
     imgA.src = displayUrl(a);
@@ -336,7 +336,9 @@ export function initCompare() {
   on("compare-open", (d) => openView(d.hashes));
   on("selection-changed", (d) => {
     selection = d.hashes ?? (d.hash ? [d.hash] : []);
-    compareBtn.hidden = selection.length !== 2;
+    // Audioansicht: der Bildvergleich passt nicht, dort vergleicht die
+    // Liste selbst (A7, ADR 0083 Punkt 6).
+    compareBtn.hidden = selection.length !== 2 || libraryView() === "audio";
   });
   on("items-reloaded", () => { selection = []; compareBtn.hidden = true; close(); });
   on("items-rejected", () => close());     // eine Seite ist weg - Vergleich beendet
@@ -392,6 +394,7 @@ export function initCompare() {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     const typing = e.target instanceof Element && e.target.matches("input, textarea, select");
     if (typing || overlayOpen() || selection.length !== 2) return;
+    if (libraryView() === "audio") return;
     e.preventDefault();
     emit("compare-open", { hashes: selection });
   });

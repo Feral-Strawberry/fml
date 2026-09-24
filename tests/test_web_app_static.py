@@ -483,19 +483,19 @@ def test_folders_and_rankings_counts_cached_and_optional(tmp_path) -> None:
         conn.close()
 
         # Liste vor Zahlen: ohne Zähler kommt kein count-Schlüssel.
-        bare = ep["/api/folders"](_req(), counts=False)["folders"]
+        bare = ep["/api/folders"](_req(), counts=False, view=None)["folders"]
         assert [f["name"] for f in bare] == ["Kaputt", "PNGs"]   # Liste sortiert nach Name
         assert all("count" not in f and "error" not in f for f in bare)
 
         # Mit Zählern: erste Anfrage rechnet (kalt, Grund "start"), die
         # zweite kommt aus dem Cache (keine Markierung).
         req = _req()
-        full = ep["/api/folders"](req, counts=True)["folders"]
+        full = ep["/api/folders"](req, counts=True, view=None)["folders"]
         assert (full[1]["count"], full[1]["error"]) == (0, None)
         assert full[0]["count"] is None and full[0]["error"]["key"]
         assert req.scope[COLD_KEY] == "start"
         req = _req()
-        assert ep["/api/folders"](req, counts=True)["folders"] == full
+        assert ep["/api/folders"](req, counts=True, view=None)["folders"] == full
         assert COLD_KEY not in req.scope
 
         # Arenen: leerer Ausdruck = ganze Bibliothek, gleicher Zähl-Pfad.
@@ -543,28 +543,28 @@ def test_sidebar_endpoint_cached_per_filter_and_cold_marked(tmp_path) -> None:
 
         # Ungefiltert: aus den bestehenden Caches zusammengesetzt (Boot-Schwung).
         req = _req()
-        plain = sidebar(req, filter=None)
-        assert set(plain) == {"models", "facets", "ratings"}
+        plain = sidebar(req, filter=None, view=None)
+        assert set(plain) == {"models", "facets", "ratings", "total"}   # total: je Ansicht (ADR 0085)
         assert req.scope[COLD_KEY] == "start"
         assert plain["facets"]["show_dupes"] is True
         assert plain["ratings"] == ep["/api/ratings"](_req(), filter=None)
         req = _req()
-        assert sidebar(req, filter=None) == plain and COLD_KEY not in req.scope
+        assert sidebar(req, filter=None, view=None) == plain and COLD_KEY not in req.scope
 
         # Gefiltert: erste Anfrage rechnet (kalt), die zweite mit demselben
         # Ausdruck ist ein Speichergriff; Inhalt = die drei Einzelendpunkte.
         req = _req()
-        first = sidebar(req, filter="container: png")
+        first = sidebar(req, filter="container: png", view=None)
         assert req.scope[COLD_KEY] == "start"
         assert first["models"] == ep["/api/models"](_req(), filter="container: png")
         assert first["facets"] == ep["/api/facets"](_req(), filter="container: png")
         assert first["ratings"] == ep["/api/ratings"](_req(), filter="container: png")
         req = _req()
-        assert sidebar(req, filter="container: png") == first
+        assert sidebar(req, filter="container: png", view=None) == first
         assert COLD_KEY not in req.scope
         # Nur die Sortier-Direktive = kein Filter: derselbe Weg wie ungefiltert.
         req = _req()
-        assert sidebar(req, filter="sort: name") == plain and COLD_KEY not in req.scope
+        assert sidebar(req, filter="sort: name", view=None) == plain and COLD_KEY not in req.scope
 
         # Ein Schreibvorgang irgendeiner Verbindung entwertet den Eintrag.
         conn = connect(db_path)
@@ -572,7 +572,7 @@ def test_sidebar_endpoint_cached_per_filter_and_cold_marked(tmp_path) -> None:
             conn.execute("INSERT INTO tags (name, created_at) VALUES ('neu', '2026-01-01T00:00:00Z')")
         conn.close()
         req = _req()
-        again = sidebar(req, filter="container: png")
+        again = sidebar(req, filter="container: png", view=None)
         assert req.scope[COLD_KEY] == "write"
         assert again["facets"] == ep["/api/facets"](_req(), filter="container: png")
 
@@ -666,6 +666,33 @@ def test_slow_counts_endpoints_remember_stand(tmp_path) -> None:
         info = _get_ep(app, "/api/admin/info")()
         assert info["orphans"]["count"] == 0 and info["cache"]["count"] == 0
         assert "stamp" not in info["cache"]
+    finally:
+        app.state.engine.shutdown()
+        app.state.thumb_pool.shutdown()
+
+
+def test_rankings_sidebar_count_excludes_songs(tmp_path) -> None:
+    # #175: Arena-Zähler der Sidebar ohne Audio — derselbe Grundbereich wie
+    # die Paarung, sonst stünde dort eine andere Zahl als im Duell.
+    from feral.db import rankings as rankings_db
+    from feral.db import store_extraction
+    from feral.extract.types import ContainerExtraction
+
+    db_path = tmp_path / "t.sqlite"
+    app = create_app(db_path)
+    try:
+        endpoint = _get_ep(app, "/api/rankings")
+        conn = connect(db_path)
+        with conn:
+            for h, container in (("aa" * 32, "png"), ("bb" * 32, "mp3")):
+                store_extraction(conn, file_hash=h, file_size=1, path=f"/lib/{h[:4]}.{container}",
+                                 extraction=ContainerExtraction(container=container),
+                                 now="2026-01-01T00:00:00+00:00")
+            rankings_db.create(conn, "Alle", "")
+            rankings_db.create(conn, "Songs", "typ: audio")
+        conn.close()
+        counts = {r["name"]: r["population"] for r in endpoint(_req(), counts=True)["rankings"]}
+        assert counts == {"Alle": 1, "Songs": 0}
     finally:
         app.state.engine.shutdown()
         app.state.thumb_pool.shutdown()

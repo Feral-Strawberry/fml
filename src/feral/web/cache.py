@@ -19,7 +19,7 @@ laufenden Anfrage mitgibt, bekommt bei einer Neuberechnung ``scope[COLD_KEY]``
 gesetzt — mit dem Grund (``"start"``: dieser Schlüssel wurde seit
 Prozessstart noch nie gerechnet, ``"write"``: Eintrag da, aber Epoche
 veraltet, ``"new"``: schon einmal gerechnet, aber aus dem LRU verdrängt). Die Anfragen-Middleware (``app._SlowRequestLog``) schreibt eine
-so markierte langsame Anfrage als INFO ``kalt:`` statt WARNING ``langsam:``
+so markierte langsame Anfrage als INFO ``cold:`` statt WARNING ``slow:``
 — die Erstberechnung nach Start oder Schreibvorgang ist echte DB-Arbeit
 und kein Fehler.
 """

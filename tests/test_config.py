@@ -360,7 +360,7 @@ def test_import_rules_defaults_and_parsing(tmp_path):
 
     # Ohne Sektion: alles aus.
     assert import_rules({}) == {"min_kante": 0, "max_kante": 0, "formate": [],
-                                "min_date": "2015-01-01"}
+                                "min_date": "2015-01-01", "audio": False}
     p = tmp_path / "config.toml"
     p.write_text(
         '[import]\nmin_kante = 240\nmax_kante = 8000\n'
@@ -369,7 +369,7 @@ def test_import_rules_defaults_and_parsing(tmp_path):
     )
     rules = import_rules(load_config(p))
     assert rules == {"min_kante": 240, "max_kante": 8000, "formate": ["psd", "arw"],
-                     "min_date": "2015-01-01"}
+                     "min_date": "2015-01-01", "audio": False}
     # Datumsregel (ADR 0075): min_date wandert mit den Regeln — immer aktiv.
     assert import_rules({"import": {"min_date": "1970-01-01"}})["min_date"] == "1970-01-01"
     # Defensiv: Unsinn zählt als aus.
@@ -386,7 +386,7 @@ def test_update_config_file_import_rules_roundtrip(tmp_path):
                        import_formate_ausschliessen=["psd", "arw"])
     rules = import_rules(load_config(p))
     assert rules == {"min_kante": 240, "max_kante": 8000, "formate": ["psd", "arw"],
-                     "min_date": "2015-01-01"}
+                     "min_date": "2015-01-01", "audio": False}
     # 0/leer räumt die Schlüssel wieder ab (Config bleibt schlank).
     update_config_file(p, thumbnail_size=320, import_min_kante=0,
                        import_max_kante=0, import_formate_ausschliessen=[])
@@ -425,3 +425,12 @@ def test_slow_request_ms_default_and_roundtrip(tmp_path):
     update_config_file(p, thumbnail_size=256, slow_request_ms=0)  # 0 = nie warnen
     assert slow_request_ms(load_config(p)) == 0.0
     assert "[performance]" in p.read_text(encoding="utf-8")
+
+
+
+def test_import_rules_strip_leading_dot():
+    # #159: ».lang« und »lang« meinen dieselbe Endung.
+    from feral.config import import_rules
+
+    rules = import_rules({"import": {"formate_ausschliessen": [".LANG", "lang", ".tif"]}})
+    assert rules["formate"] == ["lang", "tiff"]

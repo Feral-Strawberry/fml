@@ -46,7 +46,7 @@ In der [Web-GUI](gui.md) versteht die Suche zwei Formen:
 
 | Feld | Bedeutung |
 |------|-----------|
-| `tool` | Erzeuger-**Plattform**: `comfyui`, `a1111`, `midjourney`, `google`, `openai`, `azure-openai`, `adobe`, `flux`, `topaz`; `c2pa` = Manifest erkannt, nicht zugeordnet. Das Produkt darunter (Gemini, GPT-4o, Topaz Gigapixel, Midjourney V7) steht in `model` (siehe [Generator-Erkennung](#generator-erkennung-gemini-chatgpt-firefly--co-c2paxmp)) |
+| `tool` | Erzeuger-**Plattform**: `comfyui`, `a1111`, `midjourney`, `google`, `openai`, `azure-openai`, `adobe`, `flux`, `topaz`, `suno`; `c2pa` = Manifest erkannt, nicht zugeordnet. Das Produkt darunter (Gemini, GPT-4o, Topaz Gigapixel, Midjourney V7) steht in `model` (siehe [Generator-Erkennung](#generator-erkennung-gemini-chatgpt-firefly--co-c2paxmp)) |
 | `prompt` / `negative_prompt` | die Prompts |
 | `model` / `model_hash` | Checkpoint-Name / -Hash |
 | `seed`, `sampler`, `scheduler`, `steps`, `cfg_scale`, `denoise`, `size` | Sampling-Parameter |
@@ -62,6 +62,10 @@ In der [Web-GUI](gui.md) versteht die Suche zwei Formen:
 | `topaz_version`, `topaz_model`, `upscale_factor`, `source_size`, `topaz_settings` | Topaz-Nachbearbeitung (siehe unten); `model` trägt dann `Topaz Photo AI` / `Topaz Gigapixel` / `Topaz Video AI` |
 | `claim_generator`, `software_agent` | exakte Rohstrings aus dem C2PA-Manifest (z. B. `DALL-E/3.0 c2pa-rs/0.28.4`, `GPT-4o`, `Adobe Firefly 1.0`) - damit lassen sich Engines unterscheiden, sobald die Metadaten es hergeben |
 | `video_codec`, `video_profile`, `pixel_format` | Codec, Profil und Pixelformat des ersten Video-Streams, wie ffprobe sie nennt (`prores` / `HQ` / `yuv422p10le`; `hevc` / `Main 10`; `h264` / `High` / `yuv420p`); Kurzform im Suchfeld: `codec: prores` (siehe [unten](#video-codec-und-abspielbarkeit)) |
+| `lyrics`, `title` | Songtext und Titel-Tag einer Musikdatei (der Songtext ist in der Volltextsuche) |
+| `song_id`, `parent_id`, `relation` | Song-ID beim Dienst (Suno), Eltern-Song und Beziehung (`extend`, `cover`, `remaster`, `edit` …), soweit die Datei sie nennt |
+| `bpm`, `key` | Tempo und Tonart |
+| `audio_codec`, `sample_rate`, `channels`, `bit_depth` | Technik der ersten Tonspur, wie ffprobe sie nennt (`flac` / `48000` / `2` / `24`) |
 
 Ein Feld kann mehrfach vorkommen (z. B. mehrere Prompt-Kandidaten in einem
 ComfyUI-Graphen mit mehreren Text-Knoten).
@@ -261,6 +265,7 @@ und, wo das Manifest es hergibt, das Modell:
 | `azure-openai` | `Azure OpenAI DALL-E` / `Azure OpenAI ImageGen` | keins |
 | `adobe` | `Adobe_Firefly`, `Adobe Photoshop/…`, `Adobe Firefly` im Manifest | `Adobe Firefly` (auch bei Generative Fill in Photoshop) |
 | `flux` | `Black Forest Labs`, `Flux.1` im Manifest (z. B. LMArena-Downloads) | der Produkt-Rohstring, z. B. `Flux.1`, `FLUX.1 Kontext [pro]` |
+| `suno` | Sunos eigene Angaben im Manifest (`Suno, Inc.`); Songs, siehe [Audio](audio.md#was-fml-aus-musik-liest) | `Suno v4.5`, `Suno v5` … (Parser `suno`, aus dem Modell-Codenamen) |
 | `c2pa` | Manifest vorhanden, aber kein bekannter Erzeuger | keins - die Rohstrings stehen daneben |
 
 Dazu aus anderen Parsern: `midjourney` (Parser `xmp`, Web-Downloads; das Modell

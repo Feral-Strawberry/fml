@@ -11,7 +11,7 @@
 // betrachteten Bild zurück.
 
 import { STRINGS } from "./strings.js";
-import { displayUrl, getItem, mediaUrl, thumbUrl, wireMediaFallback, wireReveal, releaseVideo, releaseVideos, scopeSignal, abortScope, isAbort, canPlayVideo, mountUnplayable, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
+import { libraryView, displayUrl, getItem, mediaUrl, thumbUrl, wireMediaFallback, wireReveal, releaseVideo, releaseVideos, scopeSignal, abortScope, isAbort, canPlay, mediaHtml, wireUnplayable, kindLabel, fmtDuration, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
 import { galleryItemAt, galleryTotal } from "./gallery.js";
 import { emit, on } from "./main.js";
 
@@ -89,7 +89,7 @@ export function initSingleView() {
   // Seit #89 nicht nur pausieren, sondern freigeben (Verbindung zurück):
   // pausiert hielte ein 4-GB-Video seinen Stream weiter offen.
   const stopPanelVideos = () =>
-    panelSlot.querySelectorAll("video").forEach((v) => releaseVideo(v));
+    panelSlot.querySelectorAll("video, audio").forEach((v) => releaseVideo(v));
 
   function adoptPanel() {
     const panel = document.getElementById("panel");
@@ -270,8 +270,9 @@ export function initSingleView() {
       : d.file_hash.slice(0, 16) + "…";
     root.querySelector("#svTitle").textContent = name;
     root.querySelector("#svMeta").textContent =
-      `${d.width ? `${d.width}×${d.height} · ` : ""}${d.container.toUpperCase()}`
-      + `${d.media_kind === "video" ? " · VIDEO" : ""}`
+      `${d.width ? `${d.width}×${d.height} · ` : ""}`
+      + `${d.duration != null ? `${fmtDuration(d.duration)} · ` : ""}${d.container.toUpperCase()}`
+      + `${kindLabel(d) ? ` · ${kindLabel(d)}` : ""}`
       + `${d.media_kind === "video" && videoCodecFacts(d) ? ` · ${codecLabel(videoCodecFacts(d))}` : ""}`;
     renderCounter();
 
@@ -281,15 +282,26 @@ export function initSingleView() {
     // pause(), das Original würde im Navigator mitanimieren): Thumbnail
     // als statischer Poster-Frame.
     const animatable = d.media_kind === "video" || ["webp", "gif"].includes(d.container);
-    navImg.src = animatable ? thumbUrl(hash) : displayUrl(d);
+    // Song (#165): Cover + Player, nichts zu zoomen — Zoom-Knöpfe und
+    // -Hinweis weg, sonst stünden sie ohne Funktion da (Befund A5, #162).
+    root.classList.toggle("song", d.media_kind === "audio");
+    root.querySelector(".lpfoot div").textContent =
+      d.media_kind === "audio" ? STRINGS.svHintSong : STRINGS.svHint;
+    // Audio hat keinen Navigator (kein Bild) — und displayUrl wäre die
+    // Tondatei selbst, als <img> geladen (#158).
+    if (d.media_kind === "audio") navImg.removeAttribute("src");
+    else navImg.src = animatable ? thumbUrl(hash) : displayUrl(d);
     navImg.onload = updateNavigator;
     releaseVideos(stage);   // #89: das vorige Video gibt seine Verbindung zurück
     stage.innerHTML = "";
-    if (d.media_kind === "video" && !canPlayVideo(d)) {
-      // Codec, den dieser Browser nicht dekodiert (#71): Poster + Hinweis,
-      // kein Player, kein Stream. Ohne `media` gibt es keinen Zoom/Navigator.
+    if (!canPlay(d) || d.media_kind === "audio") {
+      // Codec/Format, den dieser Browser nicht dekodiert (#71): Poster +
+      // Hinweis, kein Player, kein Stream. Audio (#158, #162): ♪-Bühne mit
+      // dem eigenen Player aus der gemeinsamen Weiche. Ohne `media` gibt es keinen Zoom/Navigator.
       media = null;
-      mountUnplayable(stage, d);
+      stage.innerHTML = mediaHtml(d);
+      wireUnplayable(stage, d);
+      wireMediaFallback(stage, mediaFallbackLabel(d), d);
       stage.classList.add("fit");
       applyZoom();
       return;
@@ -363,6 +375,12 @@ export function initSingleView() {
   });
   on("items-reloaded", () => { if (open) close(); else cur = null; });
   on("items-rejected", () => { if (open) close(); });
+  // Cover (#165): ein neues Cover zeichnet die Bühne neu; ohne Cover verlässt
+  // der Song die Galerie — wie beim Ablehnen zurück in die Übersicht.
+  on("cover-changed", (d) => {
+    if (!open || !cur || cur.hash !== d.hash) return;
+    if (d.manual?.cover) show(cur.hash, cur.index); else close();
+  });
 
   document.addEventListener("keydown", (e) => {
     const typing = e.target instanceof Element && e.target.matches("input, textarea, select");
@@ -379,8 +397,10 @@ export function initSingleView() {
     }
     // Enter in der Galerie öffnet die Auswahl in der Einzelbildansicht
     // (nur wenn weder Lupe noch Arena offen sind — in der Arena
-    // gehört Enter dem Durchsehen; rankings.js öffnet dort selbst).
-    if (e.key === "Enter" && cur
+    // gehört Enter dem Durchsehen; rankings.js öffnet dort selbst). Songs
+    // öffnen sie nur aus der Galerie, wo nur Songs mit Cover stehen (#165):
+    // in der Audioansicht tut Enter nichts (#162).
+    if (e.key === "Enter" && cur && libraryView() !== "audio"
         && document.getElementById("loupe").hidden
         && document.getElementById("rankings").hidden) {
       e.preventDefault();

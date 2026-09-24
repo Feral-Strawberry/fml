@@ -236,6 +236,14 @@ Cache-Ordner neu.
   Ruhe.
 - **Cache leeren** — alle Vorschaubilder inkl. Fehler-Marker löschen; sie
   regenerieren sich beim Ansehen.
+- **Audio analysieren** (nur mit Audio-Modul) — Lautheit und Wellenform
+  für alle Audio-Items: Fehlende erzeugen, Fehlgeschlagene erneut
+  versuchen, nach einem Update veraltete Messungen neu rechnen.
+  Abspielbare Kopien (AIFF/ALAC/CAF) entstehen erst beim ersten Abspielen;
+  gescheiterte gibt der Knopf für den nächsten Versuch frei. Dauerhafte Fehler erscheinen unter Probleme (Art
+  `audio`). Nach Import/Watch läuft das automatisch für Neues; der
+  Audio-Cache liegt getrennt (`cache/audio`) und bleibt beim Leeren der
+  Vorschaubilder erhalten.
 
 **Datenbank** — Kennzahl: Dateigröße, WAL, Schema-Version. Der Knopf
 **Aufteilung berechnen** zeigt, woraus die Datei besteht (Roh-Blobs,
@@ -441,7 +449,8 @@ der Konfiguration eine Media Library und Quellen setzen.
 Fünf Karten: **Media Library** (Import-Ziel, **Library-Verwaltung** als
 Übersichtsmodus-Schalter, ältestes plausibles Datum, Import-Regeln),
 **Thumbnails & Leistung** (Größe, Prozesse, volle Leistung,
-Langsam-Schwelle), **Oberfläche**, **Instanz** und **Module**. Jede
+Langsam-Schwelle), **Oberfläche**, **Instanz** und **Module**
+([Rankings](rankings.md), [Audio](audio.md)). Jede
 Einstellung hat ein Label, die Eingabe, eine kurze Erklärung darunter und
 ein Badge: **sofort** wirkt beim Speichern, **Neustart** erst nach einem
 Neustart des Servers. Änderungen sammeln sich in der **Speicherleiste**

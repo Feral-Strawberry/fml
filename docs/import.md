@@ -43,7 +43,7 @@ passiert (ADR 0031):
   | Ausgang | Bedeutung |
   | --- | --- |
   | `_dubletten/` | Inhalt ist (bit-identisch) schon im Bestand — **und** die Bestandskopie wurde frisch nachgehasht |
-  | `_unbekanntes-format/` | Container nicht erkannt — dein Stolper-Ordner für fehlende Formate |
+  | `_unbekanntes-format/` | Container nicht erkannt — dein Stolper-Ordner für fehlende Formate (Audiodateien landen hier, solange das [Audio-Modul](audio.md) aus ist) |
   | `_fehler/` | Lesefehler oder die Kopie ließ sich nicht verifizieren |
   | `_gesperrt/` | Hash steht auf der Sperrliste (in der Bibliothek abgelehnt) — wird nicht wieder importiert (ADR 0023/0041) |
   | `_ausgefiltert/` | von den **Import-Regeln** aussortiert (zu klein / zu groß / ausgeschlossenes Format / kein plausibles Datum, s. u.) — nach einer Regel-Änderung einfach neu einwerfen |
@@ -73,9 +73,13 @@ verschieben), Katalogisieren und Watchordner:
   Archiv-Thumbnails und anderen Kleinkram, der keinen Wert hat.
 - **Maximalgröße (längste Seite)**, z. B. `8000` px: filtert riesige
   Kontaktbögen/Thumbnail-Übersichten (zehntausende Pixel breit).
-- **Formate ausschließen**, z. B. `psd, arw`: halb unterstützte Formate
-  gar nicht erst aufnehmen. Kamera-RAW-Dateien (Sony ARW, Nikon NEF,
-  Canon CR2, DNG) werden eigens erkannt statt als TIFF durchzurutschen.
+- **Formate/Endungen ausschließen**, z. B. `psd, arw, lang`: halb
+  unterstützte Formate oder fremde Dateien gar nicht erst aufnehmen. Ein
+  Eintrag trifft das erkannte Format **oder** die Dateiendung: `lang`
+  hält Sprachdateien von Programmen fern, auch wenn ihr Inhalt zufällig
+  wie ein bekanntes Format aussieht. Kamera-RAW-Dateien (Sony ARW, Nikon
+  NEF, Canon CR2, DNG) werden eigens erkannt statt als TIFF
+  durchzurutschen.
 - **Frühestes plausibles Datum** (`[import] min_date`, Standard
   2015-01-01): eine Datei, deren Erstelldatum weder aus den Metadaten
   noch aus dem Dateistempel plausibel ist (vor `min_date` oder in der

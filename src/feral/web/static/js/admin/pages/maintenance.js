@@ -24,7 +24,7 @@ import {
   getStats, getAdminInfo, getMaintenanceStats, getDbBreakdown,
   getOrphans, pruneOrphans, clearThumbCache, getThumbCache, getImportRulesPreview, applyImportRules,
   getMoveout, startMoveout, startReparse, startRescan, startIntegrityCheck,
-  startVacuum, startThumbWarm, startBackfillDates, startReindex,
+  startVacuum, startThumbWarm, startAudioWarm, startBackfillDates, startReindex,
 } from "../../api.js";
 import { serverMsg } from "../../servermsg.js";
 import { lastKnownStatus } from "../../status.js";
@@ -47,6 +47,8 @@ const CARDS = () => [
   { key: "thumbs", title: STRINGS.mtHeaderThumbs, actions: [
     A("thumbwarm", STRINGS.maintThumbWarm, STRINGS.maintThumbWarmSub, "taskThumbWarm", startThumbWarm, STRINGS.mtEnqueue),
     A("thumbs", STRINGS.maintThumbs, STRINGS.maintThumbsSub, null, "thumbs", STRINGS.mtClear, false),
+    // Audio-Modul (A4 #161): nur sichtbar, wenn das Modul an ist (load()).
+    A("audiowarm", STRINGS.maintAudioWarm, STRINGS.maintAudioWarmSub, "taskAudioWarm", startAudioWarm, STRINGS.mtEnqueue),
   ] },
   { key: "db", title: STRINGS.mtHeaderDb, actions: [
     A("integrity", STRINGS.maintIntegrity, STRINGS.maintIntegritySub, "taskIntegrity", startIntegrityCheck, STRINGS.mtEnqueue),
@@ -71,7 +73,7 @@ const el = (sel) => root.querySelector("#" + sel);
 
 function actionRow(a) {
   return `
-    <div class="action" data-action="${a.id}">
+    <div class="action" data-action="${a.id}"${a.id === "audiowarm" ? " hidden" : ""}>
       <div class="ti">${esc(a.t)}</div>
       <button type="button" class="go${a.accent ? " accent" : ""}" data-run="${a.id}">${esc(a.btn)}</button>
       <div class="ex">${esc(a.ex)}</div>
@@ -194,6 +196,7 @@ export async function load() {
   try {
     const [st, mt] = await Promise.all([getStats(), getMaintenanceStats()]);
     stats = st;
+    root.querySelector('[data-action="audiowarm"]').hidden = !st.audio;
     renderCheap(st, mt);
   } catch (err) {
     el("mtMeter-raw").innerHTML = `<span class="warn">${esc(err.message)}</span>`;

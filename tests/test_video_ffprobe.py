@@ -105,6 +105,7 @@ def test_ffprobe_receives_the_full_path(tmp_path, monkeypatch):
 
     def fake_run(cmd, **kwargs):
         seen_paths.append(cmd[-1])
+        assert cmd[-4:-2] == ["-protocol_whitelist", "file"]   # nur lokale Dateien (#190)
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=b"{}", stderr=b"")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -116,7 +117,7 @@ def test_ffprobe_receives_the_full_path(tmp_path, monkeypatch):
     with open(path, "rb") as fh:
         video_ffprobe.extract(fh, container="matroska")        # als offener Strom
 
-    assert seen_paths == [str(path)] * 3
+    assert seen_paths == ["file:" + str(path.absolute())] * 3
 
 
 def test_ffprobe_error_output_becomes_warning(tmp_path, monkeypatch):

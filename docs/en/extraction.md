@@ -70,8 +70,10 @@ In addition, **C2PA manifests** that Pillow does not pass through are
 preserved: for **JPEG** the APP11 segments with the `JP` marker (a manifest
 may span several segments; they are reassembled by packet number, source
 label `jpeg:APP11`), for **WebP** the RIFF chunk `C2PA` (source label
-`webp:C2PA`). Again: raw bytes, no interpretation. MP4/MOV (Sora) is not
-covered yet.
+`webp:C2PA`), for **MP4/M4A** the top-level `uuid` box with the C2PA
+identifier (source label `isobmff:uuid`; ffprobe does not see it, so fml
+reads just the box headers for it). Again: raw bytes, no interpretation.
+Audio (ID3 `GEOB`, WAV chunk `C2PA`) is covered in [Audio](audio.md).
 
 ## What is read from PSD/PSB (own reader)
 
@@ -109,6 +111,20 @@ for a quick overview without a re-scan).
 > `winget install ffmpeg`. **If it is missing, that is not an error:**
 > videos are still cataloged (hash + location); a re-scan after installing
 > it fetches the metadata.
+
+On top, the **format facts** under `"isobmff:format"` (`format_name`,
+`duration`, `bit_rate`) and the **duration** as its own column. The media
+type comes from the actual tracks: a container without a real video
+track (M4A, Matroska with sound only) is audio, see
+[Audio module](audio.md) (without the module: unknown format).
+
+## What is read from audio
+
+Only with the [audio module](audio.md) switched on: MP3, FLAC, Ogg, WAV,
+AIFF and CAF via dedicated walkers (standard library), every frame and
+chunk raw with a source label; ffprobe only supplies duration, codec,
+sample rate, channels, bit depth and bit rate. Details and examples of
+the source labels in [Audio module](audio.md#what-is-stored).
 
 ## Robustness
 

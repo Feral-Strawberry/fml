@@ -47,6 +47,17 @@ def thumbnail_cache_path(config: dict[str, Any], db_path: str | Path) -> str:
     return str(Path(db_path).resolve().parent / "cache" / "thumbnails")
 
 
+def audio_cache_path(config: dict[str, Any], db_path: str | Path) -> str:
+    """Cache der abgeleiteten Audio-Daten (Analyse + Wiedergabe-Proxy, A4
+    #161): ``[cache] audio`` aus der Config, sonst ``cache/audio`` neben der
+    DB-Datei — eigener Ordner, weil Proxies groß sind und „Thumbnail-Cache
+    leeren" sie nicht mitnehmen soll."""
+    configured = config.get("cache", {}).get("audio")
+    if configured:
+        return str(configured)
+    return str(Path(db_path).resolve().parent / "cache" / "audio")
+
+
 def thumbnail_size(config: dict[str, Any]) -> int:
     """Kantenlänge der Thumbnails in Pixeln (``[cache] thumbnail_size``, Standard 320)."""
     return int(config.get("cache", {}).get("thumbnail_size", 320))
@@ -177,8 +188,12 @@ def import_rules(config: dict[str, Any]) -> dict[str, Any]:
     - ``min_kante`` / ``max_kante``: Pixel-Grenzen für die kleinste bzw.
       längste Bildseite (0 = aus; greifen nur bei Bildern mit bekannten
       Maßen — ohne Maße wird nie gefiltert, kein Raten).
-    - ``formate_ausschliessen``: Container-Namen (z. B. ``["psd", "arw"]``),
-      die beim Import/Scan gar nicht erst aufgenommen werden.
+    - ``formate_ausschliessen``: Container-Namen oder Dateiendungen (z. B.
+      ``["psd", "arw", "lang"]``), die beim Import/Scan gar nicht erst
+      aufgenommen werden. Ein Eintrag trifft den erkannten Container ODER
+      die Endung des Dateinamens (#159: „lang" traf vorher nie, weil
+      Windows-Sprachdateien als ``mp3`` erkannt waren); ein führender
+      Punkt ist egal.
     - ``min_date`` (ISO-Datum): Untergrenze des Plausibilitätsfensters fürs
       Erstelldatum — seit ADR 0075 eine Import-Regel: ohne plausibles Datum
       (vor ``min_date`` oder in der Zukunft) wird nicht aufgenommen. Immer
@@ -200,7 +215,7 @@ def import_rules(config: dict[str, Any]) -> dict[str, Any]:
 
     formate: list[str] = []
     for f in raw_formats:
-        s = str(f).strip().lower()
+        s = str(f).strip().lower().lstrip(".")
         s = _FORMAT_ALIASES.get(s, s)
         if s and s not in formate:
             formate.append(s)
@@ -209,6 +224,9 @@ def import_rules(config: dict[str, Any]) -> dict[str, Any]:
         "max_kante": _px("max_kante"),
         "formate": formate,
         "min_date": import_min_date(config),
+        # Audio-Modul (ADR 0083): reist mit den Regeln zu Scan/Import/Watcher,
+        # weil es wie eine Regel entscheidet, was aufgenommen wird.
+        "audio": audio_enabled(config),
     }
 
 
@@ -294,6 +312,17 @@ def rankings_enabled(config: dict[str, Any]) -> bool:
     return bool(config.get("rankings", {}).get("enabled", False))
 
 
+# -- Audio-Modul ([audio], ADR 0083) -------------------------------------------
+
+def audio_enabled(config: dict[str, Any]) -> bool:
+    """Audio-Modul eingeschaltet? (``[audio] enabled``, Standard False.)
+
+    Aus = exakt das Verhalten vor dem Modul: Audio-Container sind
+    unbekanntes Format, M4A/tonloses Matroska ebenso (statt fälschlich
+    Video). Die Dauer-Spalte und ``typ:`` gelten unabhängig davon."""
+    return bool(config.get("audio", {}).get("enabled", False))
+
+
 # -- Schreiben (Admin-Bereich) --------------------------------------------------
 
 def ui_show_dupes(config: dict[str, Any]) -> bool:
@@ -308,7 +337,7 @@ SLOW_REQUEST_MS_DEFAULT = 250.0
 
 
 def slow_request_ms(config: dict[str, Any]) -> float:
-    """Schwelle in ms, ab der eine Anfrage als ``langsam:`` (WARNING) ins Log
+    """Schwelle in ms, ab der eine Anfrage als ``slow:`` (WARNING) ins Log
     geht (``[performance] slow_request_ms``, Standard 250). 0 = nie warnen,
     langsame Anfragen bleiben dann still (Kaltstart/Hintergrund sind ohnehin
     nur INFO). Ungültiges → Standard."""
@@ -347,6 +376,7 @@ def update_config_file(
     instance_name: str | None = None,
     instance_accent: str | None = None,
     rankings_enabled: bool | None = None,
+    audio_enabled: bool | None = None,
     slow_request_ms: float | None = None,
 ) -> dict[str, Any]:
     """Aktualisiere verwaltete Felder der Config-Datei und schreibe sie zurück.
@@ -461,6 +491,9 @@ def update_config_file(
         # Modul-Schalter (ADR 0045): immer explizit schreiben — wer in der
         # Datei wühlt, soll die Option sehen (gleiche Logik wie beim Port).
         config.setdefault("rankings", {})["enabled"] = bool(rankings_enabled)
+    if audio_enabled is not None:
+        # Audio-Modul (ADR 0083): wie die Rankings immer explizit schreiben.
+        config.setdefault("audio", {})["enabled"] = bool(audio_enabled)
     if slow_request_ms is not None:
         # Langsam-Schwelle (#110): immer explizit schreiben, ganzzahlig in ms;
         # 0 = nie warnen. Negatives fällt auf den Standard zurück.

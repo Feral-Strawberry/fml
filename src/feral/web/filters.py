@@ -46,12 +46,16 @@ FIELDS = frozenset({
     "topaz_version", "topaz_model", "upscale_factor", "source_size", "topaz_settings",
     "claim_generator", "software_agent",
     "video_codec", "video_profile", "pixel_format",
+    # Audio (ADR 0083, Issue #160)
+    "lyrics", "title", "song_id", "parent_id", "relation", "bpm", "key",
+    "audio_codec", "sample_rate", "channels", "bit_depth",
 })
 
 # Whitelist der sort:-Direktive (ADR 0035). Muss die Schlüssel von
 # library._SORTS spiegeln (Test sichert das ab) — filters darf library
 # nicht importieren, library importiert filters.
-SORT_KEYS = frozenset({"added", "size", "name", "container", "rating", "created"})
+SORT_KEYS = frozenset({"added", "size", "name", "container", "rating", "created",
+                       "duration"})
 
 # Standardrichtung je Schlüssel (ADR 0039): "ab" = absteigend (Neuestes/
 # Größtes/Bestes zuerst), "auf" = aufsteigend (A–Z). Ein Richtungs-Suffix
@@ -59,7 +63,7 @@ SORT_KEYS = frozenset({"added", "size", "name", "container", "rating", "created"
 # beim Parsen weggekürzt — gespeicherte Ausdrücke bleiben kanonisch kurz.
 SORT_DEFAULT_DIRECTION = {
     "added": "ab", "size": "ab", "created": "ab", "rating": "ab",
-    "name": "auf", "container": "auf",
+    "name": "auf", "container": "auf", "duration": "ab",
 }
 
 
@@ -116,7 +120,7 @@ FUNDORTE = ("library", "extern")
 # auf das kanonische Feld ``tool``; ``codec:`` der kurze auf ``video_codec``
 # (Issue #71).
 _KEY_ALIASES = {"file": "datei", "location": "fundort", "generator": "tool",
-                "codec": "video_codec"}
+                "codec": "video_codec", "type": "typ", "duration": "dauer"}
 _FORMAT_ALIASES = {"portrait": "hochformat", "square": "quadratisch",
                    "landscape": "querformat"}
 _SORT_DIRECTION_ALIASES = {"asc": "auf", "desc": "ab"}
@@ -124,6 +128,51 @@ _SORT_DIRECTION_ALIASES = {"asc": "auf", "desc": "ab"}
 # komplett englisch tippbar.
 _YEAR_ALIASES = {"unknown": "unbekannt"}
 _FUNDORT_ALIASES = {"external": "extern"}
+
+# Medienart (ADR 0083): typ: bild | video | audio — modulunabhängig. Kanonisch
+# deutsch wie die übrigen Werte, englisch „image" als Alias.
+TYPES = {"bild": "image", "video": "video", "audio": "audio"}
+_TYPE_ALIASES = {"image": "bild"}
+
+# Grundbereich der Ansicht (ADR 0084/0085): Galerie = alles außer Audio,
+# Audioansicht = nur Audio. KEIN Grammatik-Schlüssel — der Server hängt das
+# Prädikat ``kind="view"`` selbst vor die Chips (Zähl-Basis, nicht
+# Suchzustand); ``parse()`` erzeugt es nie. ``IS NOT`` statt ``!=``: ein
+# Item ohne media_kind bleibt in der Galerie.
+# ``galerie+cover`` (#165, ADR 0090) ist die Galerie mit den finalisierten
+# Songs: Audio nur mit Cover. Keine eigene Ansicht, sondern die Fassung, die
+# der Server bei Modul an und vorhandenen Covern für „galerie" wählt;
+# ``file_hash`` steckt in jedem Sortier-Index, die Bedingung bleibt dort
+# (250k: tiefe Seite 7,9 → 8,6 ms).
+VIEWS = {
+    "galerie": "i.media_kind IS NOT 'audio'",
+    "galerie+cover": ("(i.media_kind IS NOT 'audio'"
+                      " OR i.file_hash IN (SELECT file_hash FROM covers))"),
+    "audio": "i.media_kind = 'audio'",
+}
+# Was ``?view=`` annehmen darf.
+VIEW_NAMES = ("galerie", "audio")
+
+
+def view_predicate(view: str) -> "Predicate":
+    """Das interne Grundbereichs-Prädikat einer Ansicht (``VIEWS``)."""
+    if view not in VIEWS:
+        raise ValueError(f"unknown view: {view}")
+    return Predicate(kind="view", negated=False, values=((view, True),))
+
+
+# Dauer (ADR 0083): dauer: >120 | <=90 | 60-180 — Sekunden oder m:ss/h:mm:ss.
+# Ein Bereich a-b ist inklusiv. Werte eines dauer: sind ODER-verknüpft.
+_DURATION_TIME = r"\d+(?:\.\d+)?|\d+(?::[0-5]\d){1,2}"
+_DURATION = re.compile(rf"^(?:(>=|<=|>|<|=)?({_DURATION_TIME})|({_DURATION_TIME})-({_DURATION_TIME}))$")
+
+
+def _seconds(text: str) -> float:
+    """``90`` / ``1:30`` / ``1:02:03`` → Sekunden."""
+    total = 0.0
+    for part in text.split(":"):
+        total = total * 60 + float(part)
+    return total
 
 
 def library_like_prefix() -> str | None:
@@ -169,7 +218,7 @@ _TOKEN = re.compile(
 
 @dataclass(frozen=True)
 class Predicate:
-    kind: str            # 'field' | 'tag' | 'container' | 'has' | 'rating' | 'metric' | 'format' | 'mp' | 'year' | 'month' | 'fundort' | 'datei' | 'text' | 'raw' | 'sort'
+    kind: str            # 'field' | 'tag' | 'container' | 'has' | 'rating' | 'metric' | 'format' | 'mp' | 'year' | 'month' | 'fundort' | 'datei' | 'typ' | 'dauer' | 'text' | 'raw' | 'sort' | 'view' (intern)
     negated: bool
     field: str = ""      # bei kind='field'/'metric'
     # ODER-Liste (wert, exakt) — ADR 0035. Ein Eintrag = das klassische
@@ -331,6 +380,19 @@ def parse(expression: str) -> list[Predicate]:
                     raise UserError("filterFundortUnknown", value=orig,
                                     known=" und ".join(FUNDORTE))
             preds.append(Predicate(kind="fundort", negated=negated, values=mapped))
+        elif key == "typ":
+            mapped = tuple((_TYPE_ALIASES.get(v.lower(), v.lower()), e) for v, e in values)
+            for (v, _), (orig, _) in zip(mapped, values):
+                if v not in TYPES:
+                    raise UserError("filterTypeUnknown", value=orig,
+                                    known=", ".join(TYPES))
+            preds.append(Predicate(kind="typ", negated=negated, values=mapped))
+        elif key == "dauer":
+            for v, _ in values:
+                if not _DURATION.match(v):
+                    raise UserError("filterDurationInvalid", value=v)
+            preds.append(Predicate(kind="dauer", negated=negated,
+                                   values=tuple((v, False) for v, _ in values)))
         elif key == "rating":
             raise UserError("filterRatingSyntax")
         elif key in FIELDS:
@@ -629,6 +691,30 @@ def build_where(
                 sub = (f"i.file_hash IN (SELECT file_hash FROM annotations "
                        f"WHERE rating {p.op} ?)")
                 params.append(int(p.value))
+        elif p.kind == "view":
+            sub = VIEWS[p.value]
+        elif p.kind == "typ":
+            marks = ", ".join("?" for _ in p.values)
+            sub = f"i.media_kind IN ({marks})"
+            params.extend(TYPES[v] for v, _ in p.values)
+        elif p.kind == "dauer":
+            # Items ohne Dauer (Bilder, Unbekanntes) matchen nie — auch
+            # nicht negiert: »-dauer: >60« = Kurzes, nicht „alles außer Langem".
+            ors = []
+            for v, _ in p.values:
+                m = _DURATION.match(v)
+                if m.group(3):
+                    ors.append("i.duration BETWEEN ? AND ?")
+                    params.extend((_seconds(m.group(3)), _seconds(m.group(4))))
+                else:
+                    ors.append(f"i.duration {m.group(1) or '='} ?")
+                    params.append(_seconds(m.group(2)))
+            inner_sql = ors[0] if len(ors) == 1 else f"({' OR '.join(ors)})"
+            sub = f"(i.duration IS NOT NULL AND {inner_sql})"
+            if p.negated:
+                sub = f"(i.duration IS NOT NULL AND NOT {inner_sql})"
+                parts.append(sub)
+                continue
         elif p.kind == "metric":
             column = _METRIC_COLUMNS[p.field]
             sub = f"{column} {p.op} ?"

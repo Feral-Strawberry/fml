@@ -5,6 +5,9 @@ nach Installationsweg woanders (winget verlinkt nach %LOCALAPPDATA%, und der
 neue PATH gilt erst in NEUEN Prozessen — der laufende Server sieht ihn nicht).
 Darum: PATH zuerst, dann bekannte Windows-Orte. Ergebnis wird gecacht;
 `refresh()` erzwingt eine neue Suche (Admin-Statusseite).
+
+Dazu die EINE Form, in der eine fremde Mediendatei an ffmpeg/ffprobe geht
+(``media_input``).
 """
 
 from __future__ import annotations
@@ -48,6 +51,18 @@ def find_binary(name: str) -> str | None:
                 break
     _cache[name] = found
     return found
+
+
+def media_input(path: str | Path) -> list[str]:
+    """Eingabe-Argumente für eine fremde Mediendatei, gleich für ffmpeg und
+    ffprobe: ``-protocol_whitelist file -i file:<absoluter Pfad>``.
+
+    Die Datei ist untrusted (SECURITY.md): ffmpeg darf nur lokale Dateien
+    öffnen, auch für Verweise IN der Datei (eine präparierte Playlist oder
+    concat-Liste griffe sonst auf Netz-Adressen zu). Das Präfix sorgt dafür,
+    dass kein Dateiname als Option (führendes ``-``) oder als Protokoll
+    (``http:``, ``concat:``) gelesen wird."""
+    return ["-protocol_whitelist", "file", "-i", "file:" + str(Path(path).absolute())]
 
 
 def refresh() -> None:

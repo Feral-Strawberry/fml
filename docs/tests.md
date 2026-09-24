@@ -30,15 +30,16 @@ pytest -q
 Am Ende steht eine Zeile wie:
 
 ```
-736 passed, 2 skipped in 9.8s
+907 passed in 40s
 ```
 
 - **passed** = bestanden. Die genaue Zahl wächst mit dem Projekt; wichtig ist:
   **0 failed, 0 errors**.
-- **skipped** ist in Ordnung: zwei Tests brauchen die Videowerkzeuge
+- **skipped** ist in Ordnung: einige Tests brauchen die Werkzeuge
   `ffmpeg`/`ffprobe` und überspringen sich selbst, wenn diese auf dem Rechner
   nicht installiert sind. Die App funktioniert dann trotzdem, nur ohne
-  Video-Metadaten und Video-Vorschaubilder. Genauso überspringen sich die
+  Video-Metadaten, Video-Vorschaubilder und die Lautheit/Wellenform von
+  Audio. Genauso überspringen sich die
   Oberflächen-Tests (Gruppe 9), wenn kein **Node.js** auf dem Rechner ist,
   und unter **Windows** ein Scan-Test, der einen Symlink braucht (das
   erlaubt Windows nur mit Adminrechten oder Entwicklermodus).

@@ -13,6 +13,10 @@
   --dim: #9a9aa2;
   --faint: #5f5f68;
   --thumb: #1b1b1f;
+  /* Dreibandige Wellenform (A5, Optik-Referenz A0): Bass / Mitten / Höhen */
+  --wave-lo: #3d86e0;
+  --wave-mid: #3fb596;
+  --wave-hi: #d9d9df;
 }
 
 /* Hell (per data-theme="light" auf <html>) */
@@ -27,6 +31,9 @@
   --dim: #6d6d73;
   --faint: #a3a3a8;
   --thumb: #eae8e3;
+  --wave-lo: #2f6fc4;
+  --wave-mid: #2a9377;
+  --wave-hi: #5a5a62;
 }
 
 /* Gemeinsam (Akzent + Mono-Stack, themenunabhängig) */

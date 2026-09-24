@@ -29,7 +29,9 @@ Port, Start per `start.bat --config name.toml`): [instanzen.md](instanzen.md).
 
 ## Aufbau
 
-**Topbar:** Suchfeld (Mitte), direkt daneben der **Sortier-Knopf** und die
+**Topbar:** Mit Audio-Modul links der Umschalter **▦ Galerie | ♪ Audio**
+(zwei Ansichten, eine Suche, siehe [Audio](audio.md#audioansicht)).
+Suchfeld (Mitte), direkt daneben der **Sortier-Knopf** und die
 **Dichte S/M/L** (die Leiste unter der Suche gehört den Chips), Aktivitäts-Anzeige
 (pulsiert, wenn Scan/Wartung läuft - ein Link auf die Admin-Seite),
 **Dark/Light-Umschalter** (Mond/Sonne; dieselbe Wahl gilt im Admin),
@@ -70,7 +72,10 @@ sprachneutral gespeichert und werden beim Anzeigen übersetzt.
 **Links - Quellen:** „Alle Medien", **Dubletten** (Items, die an mehreren
 Pfaden auf der Platte liegen - das Panel zeigt alle Fundorte), deine
 **gespeicherten Suchen**, die Gruppe **Bewertung** (genau n Sterne - auch gezielt
-schlecht Bewertetes), **Generator** (die Plattform, auf der die Datei
+schlecht Bewertetes), **Medienart** (Bild · Video - nur die Arten,
+die es im Bestand gibt; Chip `typ: video`; Audio hat mit dem Audio-Modul
+eine eigene Ansicht, siehe [Audio](audio.md#audioansicht), in der Galerie
+zählt „Audio" nur die fertigen Songs mit Cover), **Generator** (die Plattform, auf der die Datei
 entstand: ComfyUI, A1111, Midjourney, Google, OpenAI, Adobe, Topaz - aus den
 eingebetteten Metadaten bzw. Content Credentials, siehe
 [Interpretation](interpretation.md#generator-erkennung-gemini-chatgpt-firefly--co-c2paxmp);
@@ -85,7 +90,10 @@ auf - Alt-Bestände bekommen ihr Datum per „Re-Scan: alle Fundorte"),
 in den langen Listen Generator, Modell und LoRA stehen bei aktiven Chips die
 Zeilen mit Treffern oben, die im Kontext leeren gedimmt unter einer
 Trennzeile „keine Treffer mit diesem Filter · 106 Modelle" - ohne aktiven Chip gibt es
-diese Zeile nicht),
+diese Zeile nicht).
+Darunter liegt der Sammelblock **„Weitere Kriterien"** (ab Werk
+zugeklappt, ein Klick auf die Überschrift klappt ihn auf; fml merkt sich
+den Zustand je Browser) mit
 **Nach Dateityp** (PNG, WEBP, Video-Container, …), **Nach Format**
 (grobe Seitenverhältnis-Klassen: Hochformat / Quadratisch / Querformat /
 Widescreen - zur Fehlersuche nach einem Import), **Nach Auflösung**
@@ -96,6 +104,9 @@ extern" = nur am Ort katalogisiert, z. B. per `katalogisieren` von fremden
 Platten; die Gruppe erscheint nur, wenn eine Media Library konfiguriert
 ist). Ein Klick legt
 einen **Chip** in die Suchleiste über der Galerie (siehe „Suchen").
+Jede Gruppe lässt sich per Klick auf ihre Überschrift zuklappen. Ist in
+einer zugeklappten Gruppe (oder im zugeklappten Block) ein Wert aktiv,
+steht das im Kopf: **„· 1 aktiv"** - kein Filter wirkt unsichtbar.
 
 **Klick-Regel wie in Lightroom (geändert im September 2026 - bitte lesen,
 wenn du fml schon länger nutzt):**
@@ -151,7 +162,10 @@ Laden einer Suche stellt auch ihre Sortierung wieder her. Die zuletzt im
 Menü gewählte Sortierung **merkt sich fml im Browser**: Sie gilt überall
 dort weiter, wo keine Suche einen eigenen Sortier-Chip mitbringt — auch
 nach einem Neustart und nach „✕ Filter zurücksetzen". Videos tragen ein VIDEO-Badge, jede Kachel
-einen Tool-/Container-Chip. **Klick** wählt ein Medium aus (Panel rechts),
+einen Tool-/Container-Chip. Mit [Audio-Modul](audio.md) stehen auch
+**fertige Songs** in der Galerie: Songs mit Cover, als Kachel aus dem
+Coverbild mit ♪, Dauer und ▶ (Leertaste spielt, siehe
+[Cover](audio.md#cover-fertige-songs-in-der-galerie)). **Klick** wählt ein Medium aus (Panel rechts),
 **Space** öffnet die Lupe (schnelles Durchblättern), **Doppelklick oder Enter** die Einzelbildansicht (Zoom + Metadaten); **Pfeiltasten** bewegen die Auswahl auch in der Übersicht (←/→ ein Medium, ↑/↓ eine Zeile).
 
 **Rechts - Detail-Panel:** Immer sichtbar. Von oben nach unten: Vorschau
@@ -164,7 +178,8 @@ manche Workflows lassen die beiden für uns nicht unterscheiden, und
 zweimal derselbe Text wäre nur Rauschen. Unten **„🎲 Seed-Varianten
 suchen"**: baut eine exakte Chip-Suche nach derselben Generierung -
 Prompt, Negativ, Modell, LoRAs, Sampler, Scheduler, Steps, CFG und Größe
-dieses Bilds, nur der Seed variiert. Ideal zum Aufräumen und Vergleichen
+dieses Bilds, nur der Seed variiert (nur bei Medien mit Seed; Suno,
+Midjourney, ChatGPT & Co. schreiben keinen). Ideal zum Aufräumen und Vergleichen
 von Seed-Serien; zu streng? Einzelne Chips entfernen lockert die Suche) ·
 **WORKFLOW**
 (bei ComfyUI-Medien: „Node-Graph ansehen" und „als .json laden"; bei
@@ -229,8 +244,10 @@ normalen localhost-Betrieb ist das der eigene.
 kennt, in derselben Reihenfolge, die der 📂-Knopf benutzt. Jede Zeile
 trägt ein Herkunfts-Kürzel - **Library** (unter der Bestands-Wurzel),
 **Quelle** (unter einer Watch-Quelle, typisch „katalogisieren") oder
-**extern** - und der Fundort, den „Im Dateimanager anzeigen" öffnet, ist
-mit 📂 markiert. Fehlt die Datei dort, steht „(fehlt)" dahinter; liegt am
+**extern** - und vor dem Fundort, den „Im Dateimanager anzeigen" öffnet,
+steht das **📂 als Knopf**: derselbe wie oben rechts in Lupe und
+Einzelansicht, er zeigt die Datei markiert im Explorer/Finder (für Songs
+ohne Cover der einzige Weg, sie haben keine Lupe und keine Einzelansicht). Fehlt die Datei dort, steht „(fehlt)" dahinter; liegt am
 Pfad inzwischen eine andere Datei (Größe passt nicht), „(andere Datei an
 diesem Pfad)".
 
@@ -477,15 +494,24 @@ Monitore bleiben aufgeräumt. Im Bearbeiten-Modus eines Rankings (siehe
   legt aus den Chips ein **neues Ranking** an (Paarvergleich mit
   Bestenliste), siehe [Rankings](rankings.md).
 - **„+ Kriterium"** (neben den Chips) öffnet den **Baukasten**: alle
-  Kategorien (Modell, LoRA, Tags, Bewertung, Text, Jahr, Dateityp, Format,
-  Auflösung, Eingangsbild, Eckwerte, Rohdaten-Suche, Dateiname, Sortierung) mit
+  Kategorien in der Reihenfolge der Sidebar (Bewertung, Medienart,
+  Generator, Modell, LoRA, Jahr, Dateityp, Format, Auflösung,
+  Eingangsbild, Fundort), danach, was es nur hier gibt (Tags, Text,
+  **Dauer** - Eingabe wie `dauer:`, z. B. `>120` oder `1:00-3:00`, gilt für
+  Audio und Video -, Eckwerte, Rohdaten-Suche, Dateiname, Sortierung) mit
   Wertelisten und **Zählern im aktuellen Kontext**. Mehrere Werte anklicken
   = ODER-Chip; „ausschließen" macht Negativ-Kriterien; die Rohdaten-Suche
   ist das Opt-in für Treffer in Workflow-JSONs (`raw:`).
 - **Tipphilfe:** Beim Tippen schlägt das Suchfeld passende Facetten vor
   („Modell: flux.1-dev (1.234)", „Tag: favorit (56)", …). ↑/↓ wählt,
   **Enter übernimmt den Vorschlag als Chip** - Enter ohne Auswahl macht wie
-  gehabt Text-Chips. Grammatik lernen ist damit optional.
+  gehabt Text-Chips. Grammatik lernen ist damit optional. Trifft das Wort
+  eine **Medienart genau** („audio", „Bild", „video", englisch „image"),
+  ist diese Zeile schon ausgewählt: Enter ergibt `typ: video`. Ganz unten
+  steht dann die Zeile **„Volltext: video"** - ein Pfeil dorthin, und Enter
+  sucht wie gewohnt im Volltext. Liegt die Medienart in der anderen Ansicht
+  („audio" in der Galerie), steht dort statt eines Chips **„Ansicht: →
+  Audioansicht"**: Enter wechselt die Ansicht, die Suche bleibt.
 
 Gesucht wird **kuratiert**: über die interpretierten Felder (Prompt,
 Modell, Seed, Sampler, …), den **Dateinamen** (bei metadatenarmen Quellen
@@ -531,7 +557,8 @@ year: 2022 | unbekannt sort: created
 (`rating>=`, `width>=` …) bilden Bereiche über `>=`/`<=`-Paare. Die
 Direktive **`sort: <schlüssel>`** (einmal pro Ausdruck) legt die Sortierung
 fest und wird mit der Suche gespeichert: `added` (hinzugefügt), `created`
-(Erstelldatum), `size`, `name`, `container`, `rating`. Die Richtung dreht
+(Erstelldatum), `size`, `name`, `container`, `rating`, `duration` (Dauer,
+Audio und Video). Die Richtung dreht
 ein Suffix: `sort: created-auf` (älteste zuerst), `sort: name-ab` (Z–A) -
 englisch als `-asc`/`-desc` (`sort: created-asc`).
 Ohne Suffix gilt die sinnvolle Standardrichtung (Neuestes/Größtes/Bestes
@@ -560,7 +587,9 @@ Roh-Metadaten** - findet z. B. Node-Namen im Workflow-JSON: `raw: ipadapter`),
 `datei:` (englisch `file:`; gezielt der **Dateiname** der Fundorte, ohne
 Verzeichnis - Teilstring, mit `"…"` exakt; praktisch für metadatenlose
 Bestände wie Midjourney-Exporte und natürlich auch in Ranking-Ausdrücken
-nutzbar)
+nutzbar), `typ:` (englisch `type:`; Medienart `bild`/`video`/`audio`),
+`dauer:` (englisch `duration:`; Sekunden oder m:ss mit Vergleich oder als
+Bereich: `dauer: >120`, `dauer: 60-180`, siehe [Audio-Modul](audio.md))
 und die Medien-Eckwerte `width`/`height`/`fps` mit Vergleich (z. B.
 `width>=1920 fps>=24`). Gespeicherte
 Suchen sind dynamisch: ausgewertet wird bei jedem Öffnen.

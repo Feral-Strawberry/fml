@@ -81,3 +81,9 @@ class ContainerExtraction:
     width: int | None = None
     height: int | None = None
     fps: float | None = None
+    # Dauer in Sekunden (Audio/Video, ADR 0083) — None = unbekannt/Standbild.
+    duration: float | None = None
+    # Medienart aus den tatsächlichen Spuren (ADR 0083): ``"audio"`` für
+    # M4A/Matroska ohne Videospur. None = die Container-Zuordnung gilt
+    # (``store.media_kind_for``).
+    media_kind: str | None = None

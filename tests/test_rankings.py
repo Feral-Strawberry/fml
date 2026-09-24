@@ -570,3 +570,49 @@ def test_filtered_arena_scores_and_elimination(db, arena):
     board = rankings_web.leaderboard(db, ranking)
     assert (board["population"], board["total"], board["eliminated"]) == (3, 2, 1)
     assert [e["file_hash"] for e in board["entries"]] == [B, A]   # Ausgeschiedene zuletzt
+
+
+# -- Keine Songs in Arenen (#175) ---------------------------------------------------
+
+SONG = "ee" * 32
+
+
+def _add_song(db, *, cover: str | None = None) -> None:
+    store_extraction(db, file_hash=SONG, file_size=1, path=f"/lib/{SONG[:6]}.mp3",
+                     extraction=ContainerExtraction(container="mp3"), now=T0)
+    if cover:   # finalisierter Song (ADR 0090): steht in der Galerie, nie in Arenen
+        db.execute("INSERT INTO covers (file_hash, cover_hash, created_at, updated_at)"
+                   " VALUES (?, ?, ?, ?)", (SONG, cover, T0, T0))
+    db.commit()
+
+
+@pytest.mark.parametrize("cover", [None, A])
+def test_library_arena_never_contains_songs(db, arena, cover, tmp_path):
+    from feral.web.cache import EpochCache
+
+    _add_song(db, cover=cover)
+    # Altlast: ein Duell mit dem Song von vor #175 — die Score-Zeile bleibt
+    # fürs Replay, der Song taucht trotzdem nirgends auf.
+    rankings_db.record_duel(db, arena, SONG, A, now=T0)
+    ranking = rankings_db.get(db, arena)
+    cache = EpochCache(tmp_path / "feral.sqlite")
+    for seed in range(20):
+        pair = rankings_web.next_pair(db, ranking, rng=random.Random(seed), cache=cache)
+        assert pair["population"] == 4
+        assert SONG not in _pair_hashes(pair)
+    board = rankings_web.leaderboard(db, ranking, cache=cache)
+    assert board["population"] == 4
+    assert [e["file_hash"] for e in board["entries"]] == [A]
+    assert board["total"] == 1
+    cache.close()
+
+
+def test_filtered_arena_excludes_songs_and_typ_audio_is_empty(db):
+    _add_song(db)
+    rid = rankings_db.create(db, "Ohne GIF", "-container: gif", now=T0)
+    pair = rankings_web.next_pair(db, rankings_db.get(db, rid), rng=random.Random(5))
+    assert pair["population"] == 4
+    rid = rankings_db.create(db, "Songs", "typ: audio", now=T0)
+    ranking = rankings_db.get(db, rid)
+    assert rankings_web.next_pair(db, ranking) is None   # kein Einstieg in eine Audio-Arena
+    assert rankings_web.leaderboard(db, ranking)["population"] == 0

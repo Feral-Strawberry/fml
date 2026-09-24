@@ -47,9 +47,11 @@ min_date = "2015-01-01"
 # nothing is guessed when dimensions are missing.
 #min_kante = 240
 #max_kante = 8000
-# Containers that are not taken in at all (half-supported formats; camera
-# RAW such as arw/nef/cr2/dng is detected separately). Common spellings
-# (tif, jpg, mkv, mp4, …) are mapped to the internal names:
+# Formats or file extensions that are not taken in at all (half-supported
+# formats, foreign files such as "lang"; camera RAW such as arw/nef/cr2/dng
+# is detected separately). An entry matches the detected container OR the
+# file extension. Common spellings (tif, jpg, mkv, mp4, …) are mapped to
+# the internal names:
 #formate_ausschliessen = ["psd", "arw"]
 
 [database]
@@ -72,12 +74,20 @@ root = "/path/to/testdata"
 # Can also be toggled via Admin → Configuration → Modules.
 enabled = false
 
+[audio]
+# Audio module (ADR 0083): music and other audio files (MP3, FLAC, Ogg/Opus,
+# WAV, AIFF, CAF, audio-only M4A/MKV) become part of the library, with all
+# embedded tags and their duration. Default off: audio files count as
+# unknown format and are not cataloged — exactly as without the module.
+# Can also be toggled via Admin → Configuration → Modules.
+enabled = false
+
 [performance]
 # Response time in milliseconds from which a request is logged as slow
-# ("langsam:" WARNING in fml-web.log and on the console). 250 suits a
+# ("slow:" WARNING in fml-web.log and on the console). 250 suits a
 # desktop with NVMe; use ~600 for a laptop with a SATA SSD and ~1500 for
 # a Chromebook, USB drive or NAS. 0 = never warn. Cold-start runs
-# ("kalt:") are always INFO only. Changing it in the GUI takes effect
+# ("cold:") are always INFO only. Changing it in the GUI takes effect
 # immediately (Admin -> Configuration -> Thumbnails & performance).
 slow_request_ms = 250
 
@@ -85,6 +95,10 @@ slow_request_ms = 250
 # Thumbnail cache (regenerated on demand; safe to delete at any time).
 # Default when unset: "cache/thumbnails" next to the database file.
 thumbnails = "./cache/thumbnails"
+# Audio module cache: loudness/waveform analysis and lossless FLAC playback
+# copies of formats browsers cannot play (AIFF, ALAC, CAF). Regenerated on
+# demand; safe to delete. Default when unset: "cache/audio" next to the database.
+#audio = "./cache/audio"
 # Longest edge of the thumbnails in pixels.
 thumbnail_size = 320
 # Processes for thumbnail generation. Without a value: cores − 2 (full

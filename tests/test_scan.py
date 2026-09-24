@@ -197,6 +197,20 @@ def test_scan_respects_import_rules(db, tmp_path):
     assert outcomes[str(root / "foto.arw")] == "ausgefiltert"
 
 
+
+def test_scan_excludes_by_file_extension(db, tmp_path):
+    # #159: ein Eintrag der Format-Regel trifft auch die Dateiendung — selbst
+    # wenn der Inhalt wie ein bekanntes Format aussieht (hier ein echtes PNG).
+    from .pngbuild import build_png, ihdr, text_chunk
+    root = tmp_path / "programme"
+    root.mkdir()
+    png = build_png(ihdr(512, 512), text_chunk("parameters", "p"), include_ihdr=False)
+    (root / "de.lang").write_bytes(png)
+    (root / "ok.png").write_bytes(png + b"x")
+    report = scan_directory(db, root, rules={"min_kante": 0, "max_kante": 0,
+                                             "formate": ["lang"]})
+    assert report.ausgefiltert == 1 and report.new_items == 1
+
 def test_scan_date_rule_uses_configured_min_date(db, tmp_path):
     """Datumsregel beim Katalogisieren (ADR 0075, #113): ein Stempel vor
     min_date wird ausgefiltert statt mit leerem Datum katalogisiert; mit
@@ -235,7 +249,7 @@ def _stream_items(codec: str, pix_fmt: str):
 def _fake_extract(codec: str, pix_fmt: str):
     from feral.extract.types import ContainerExtraction
 
-    def extract(path):
+    def extract(path, **_kw):
         return ContainerExtraction(container="isobmff", items=_stream_items(codec, pix_fmt))
     return extract
 

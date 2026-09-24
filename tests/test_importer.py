@@ -589,7 +589,7 @@ def test_import_records_playback_issue_at_destination(env, monkeypatch):
         return RawMetadataItem(source="isobmff:stream0", keyword=keyword, text=text,
                                data=None, encoding="utf-8")
 
-    def fake_extract(path):
+    def fake_extract(path, **_kw):
         return ContainerExtraction(container="isobmff", items=[
             fact("codec_type", "video"), fact("codec_name", "prores"), fact("pix_fmt", "yuv422p10le")])
 

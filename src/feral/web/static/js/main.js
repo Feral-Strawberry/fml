@@ -7,10 +7,15 @@
 import { STRINGS, LANG, LANGUAGES, setLang } from "./strings.js";
 import { getStats } from "./api.js";
 import { initGallery } from "./gallery.js";
+import { initLibraryView } from "./libview.js";
+import { initAudioList } from "./audiolist.js";
+import { initPlayer } from "./player.js";
+import { initComments } from "./comments.js";
 import { initSidebar } from "./sidebar.js";
 import { initSearch } from "./search.js";
 import { initAdvanced } from "./advanced.js";
 import { initSaveDialog } from "./savedialog.js";
+import { initCoverDialog } from "./coverdialog.js";
 import { initContext } from "./context.js";
 import { initBulkDialog } from "./bulkdialog.js";
 import { initDetail } from "./detail.js";
@@ -26,7 +31,7 @@ import { startStatusPolling, initActivityBadge } from "./status.js";
 // -- Event-Bus -----------------------------------------------------------------
 //
 // Vereinbarte Events (Payload = event.detail):
-//   'search-state-changed' {expression, predicates, sort, reset}
+//   'search-state-changed' {expression, predicates, sort, reset, viewChanged}
 //                       — der EINE Suchzustand (Chips, ADR 0035) hat sich
 //                         geändert: Grid filtert, Sidebar markiert;
 //                         reset: true = „Alle Medien" (Sidebar) — Grid
@@ -65,6 +70,8 @@ import { startStatusPolling, initActivityBadge } from "./status.js";
 //                       — 🏆 in der Chip-Leiste: NEUE Arena aus den Chips
 //                         (search.js → rankings.js, ADR 0081)
 //   'rankings-enabled'  {enabled} — Modul-Schalter (Sidebar → search.js)
+//   'audio-enabled'     {enabled} — Modul-Schalter Audio (Sidebar →
+//                         advanced.js: Medienart „Audio" nur mit Modul, ADR 0084)
 //   'chips-rendered'    {}       — Chip-Leiste neu gezeichnet (search.js →
 //                         context.js hängt das Kontext-Segment ein)
 //   'folder-origin'     {id, name, expression}
@@ -74,6 +81,18 @@ import { startStatusPolling, initActivityBadge } from "./status.js";
 //                         Rankings (context.js → Sidebar)
 //   'rankings-changed'  {}       — Arenen-Bestand/Duelle geändert
 //                         (rankings.js → Sidebar lädt die Gruppe neu)
+//   'library-view-changed' {view} — Ansicht „galerie"|„audio" gewechselt
+//                         (libview.js, ADR 0085): Grundbereich, NICHT
+//                         Suchzustand — Galerie/Sidebar stellen die
+//                         Darstellung um; search.js dünnt die Medienart-
+//                         Chips aus und verkündet 'search-state-changed'
+//                         mit viewChanged: true, darauf wird geladen
+//   'library-view-set'  {view}   — Wunsch nach Ansichtswechsel (Leer-
+//                         Hinweis, Tipphilfe → libview.js)
+//   'cover-pick'        {hash, name, tags, cover} — Cover-Dialog für einen
+//                         Song öffnen (Detailpanel → coverdialog.js, #165)
+//   'cover-changed'     {hash, manual} — Cover gesetzt/entfernt: Galerie
+//                         frischt auf (Song kommt/geht), Panel zeichnet neu
 //   'view-changed'      {view, open}
 //                       — eine Ansicht (loupe|single|compare|rankings)
 //                         wurde geöffnet/geschlossen (ADR 0069): Haken für
@@ -198,11 +217,13 @@ initPanelResize();
 //
 
 initOverlays(); // Dialog-Stapel: Ansichtswechsel schließt alle Dialoge (ADR 0069)
+initLibraryView(); // Galerie | Audio (ADR 0085) — VOR der Galerie: gemerkte Ansicht gilt ab dem ersten Laden
 initGallery(); // Galerie: virtualisiertes Grid + Sortierung + Dichte
 initSidebar(); // Sidebar: Bibliothek + Nach Modell (Task 7)
 initSearch();  // Suche: Topbar-Feld + Ergebnisliste + Breadcrumb (Task 7)
 initAdvanced(); // Advanced Mode: „+ Kriterium"-Popover + Tipphilfe (Block S5)
 initSaveDialog(); // Speicherdialog: neue Suche oder »Name« überschreiben (Block S7, #133)
+initCoverDialog(); // Cover eines Songs aus der Bibliothek wählen (Audio A8, #165)
 initContext();    // Bearbeiten-Modus für Rankings im Breadcrumb (ADR 0081/#133)
 initBulkDialog(); // Sammel-Aktion aufs Suchergebnis (Großbaustelle K, ADR 0040)
 initDetail();  // Detail-Panel rechts: alle Schichten sichtbar (Task 9)
@@ -211,6 +232,9 @@ initSingleView();  // Einzelbildansicht: Zoom + breites Panel (Feral Strawberry,
 initCompare();     // A/B-Vergleich zweier markierter Bilder mit Wischkante (Issue #38)
 initCurate();  // Kuratieren: Rating-Tastatur + Schreibstelle manuelle Schicht (3.2)
 initRankings(); // Ranking-Modul: Arenen mit Duell + Bestenliste (ADR 0045)
+initPlayer();    // eigener Audio-Player + Abspielleiste (A5 #162, ADR 0087)
+initAudioList(); // Audioansicht: Zeilen, Zeitachse, Tasten, Alle abspielen (ADR 0085/0087)
+initComments();  // Zeitkommentare: Pins, Taste K, Panel-Abschnitt (A6 #163, ADR 0088)
 
 // Status-Poller (status.js, geteilt mit dem Admin-Dokument): Topbar-Badge,
 // und an der Flanke laufend→leer der Bus-Event 'engine-idle' (Grid, Sidebar,

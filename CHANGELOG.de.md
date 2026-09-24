@@ -6,6 +6,126 @@ Was sich zwischen den Snapshot-Releases geändert hat, aus Sicht der
 Nutzer. Versionen sind Datums-Versionen (`JJJJ.MM` oder `JJJJ.MM.N`);
 die laufende Instanz zeigt ihre Version in Admin → Übersicht.
 
+## 2026.09.2 (2026-09-24)
+
+fml kann jetzt auch **Musik**: Das neue **Audio-Modul** nimmt Songs von
+Suno, aus ComfyUI oder eigene Aufnahmen auf, zeigt sie in einer eigenen
+Audioansicht mit Wellenform und bringt einen Player mit, der zum
+Vergleichen von Fassungen gebaut ist. Das Modul ist ab Werk aus; wer nur
+Bilder und Videos verwaltet, bekommt eine aufgeräumtere Seitenleiste, den
+Filter nach Medienart und die Dauer von Videos.
+
+### Nach dem Update
+
+1. **Wie gewohnt mit `start.sh` bzw. `start.bat` starten.** Die
+   Abhängigkeiten sind unverändert.
+2. **Datenbank:** wird beim ersten Start automatisch auf Schema 28
+   migriert (vier neue Migrationen). Vorher ein Backup der
+   `feral.sqlite` anlegen, wie bei jedem Update.
+3. **Optional, einmal Admin → Wartung → „Re-Scan aller Fundorte":** gibt
+   schon aufgenommenen Videos ihre Dauer (für `dauer:` und die Sortierung
+   nach Dauer).
+4. **Musik aufnehmen:** Admin → Konfiguration → Module → **Audio-Modul**
+   einschalten, dann für bestehende Scan-Orte einmal „Re-Scan aller
+   Fundorte". Watchordner prüfen übersprungene Audiodateien von selbst neu.
+   Für Dauer, Lautheit, Wellenform und das Abspielen von AIFF/CAF wird
+   **ffmpeg** gebraucht (wie für Videos).
+
+### Highlights: das Audio-Modul
+
+- **Formate:** MP3, FLAC, Ogg/Opus, WAV (auch RF64/BW64), AIFF, CAF und
+  M4A bzw. MKA/WEBM nur mit Ton. Jeder Tag und jeder Chunk wird
+  unverändert gespeichert, eingebettete Cover nur beschrieben. Die
+  Medienart kommt aus den tatsächlichen Spuren: ein MP4 nur mit Ton ist
+  Audio, nicht mehr fälschlich Video.
+- **Was fml aus Musik liest:** Titel, Songtext, Tempo, Tonart und die
+  Technik der Tonspur. **Suno:** Song-ID, die Erstellzeit als
+  Mediendatum und die Suno-Version aus den Content Credentials
+  (`Suno v4.5`, `Suno v5` …). **ComfyUI-Musik** (YuE, ACE-Step, MiniMax
+  Music): Stil-Prompt, Songtext, Seed und Modell. Logic-Pro-Bounces und
+  iPhone-Sprachmemos werden erkannt. Der **Songtext ist in der
+  Volltextsuche**: eine Zeile daraus findet alle Fassungen eines Songs.
+- **Audioansicht:** Umschalter **▦ Galerie | ♪ Audio** oben links; beide
+  Ansichten teilen sich die Suche. Die Songs stehen als Liste über die
+  volle Breite, jede Zeile mit **dreifarbiger Wellenform** (Bass, Mitten,
+  Höhen) auf einer gemeinsamen Zeitachse, Lautheit in LUFS, Bewertung und
+  Kommentarzahl. Gleiche Namensanfänge sind abgedunkelt, damit das
+  Unterscheidende ins Auge springt.
+- **Player:** Jede Zeile hat ihren **eigenen Abspielkopf**, es spielt
+  immer genau eine: vier Fassungen lassen sich Refrain gegen Refrain
+  anhören. **Lautheitsangleich** auf -14 LUFS (Standard an), damit nicht
+  die lautere Fassung gewinnt; Tempo ohne Tonhöhenänderung, A–B-Schleife,
+  **„Alle abspielen"** wie eine CD, eine Abspielleiste, die beim Wechsel in
+  die Galerie weiterläuft, und die Medientasten der Tastatur. AIFF, CAF
+  und ALAC bekommen beim ersten Abspielen eine verlustfreie FLAC-Kopie im
+  Cache, nur wenn der Browser das Format nicht selbst kann.
+- **Zeitkommentare** wie bei SoundCloud: **K** setzt „Chorus" oder „Stimme
+  kippt" an die Stelle des Abspielkopfs. Pins unter der Wellenform
+  springen per Klick genau dorthin, beim Abspielen blenden die Texte ein,
+  und die Suche findet sie.
+- **Vergleichen:** 2 bis 6 Songs markieren, **C** drücken: die Liste
+  engt sich auf sie ein, die Wellen werden größer, die Kommentare stehen
+  als Text da. Bewerten und Ablehnen wie gewohnt, **Esc** führt an
+  dieselbe Stelle der vollen Liste zurück.
+- **Cover und fertige Songs:** Ein Bild aus der eigenen Bibliothek als
+  Cover macht einen Song „fertig". Er erscheint dann auch **in der
+  Galerie**, als Kachel mit ♪ und Dauer, mit Einzelansicht und Player; das
+  Cover zeigen auch Abspielleiste und Medientasten. In die Dateien wird
+  nichts geschrieben.
+- **Musik-Playlist nebenbei:** Normale Musik (ohne KI-Erzeuger) zeigt ihr
+  eingebettetes Albumbild in der Liste, der Abspielleiste und bei den
+  Medientasten; die Standardbilder von Suno & Co. bleiben draußen. In die
+  Galerie kommt ein Song weiterhin nur mit einem gewählten Cover. Stumme
+  Vorschau-Videos im Detailpanel und in Rankings halten die Musik nicht
+  an, und in einem Ranking bleibt die Abspielleiste sichtbar.
+- **Lautheit und Wellenform** misst fml im Hintergrund nach jedem Import;
+  Admin → Wartung → „Audio analysieren" holt Fehlendes nach.
+- Rankings bleiben bei Bildern und Videos; Songs sind nie dabei.
+
+### Verbesserungen für alle
+
+- **Seitenleiste aufgeräumt:** neue Gruppe **Medienart** (Bild · Video,
+  mit Modul auch Audio). Dateityp, Format, Auflösung, Eingangsbild und
+  Fundort stehen jetzt im Block **„Weitere Kriterien"**, der ab Werk
+  zugeklappt ist; ist darin ein Wert aktiv, zeigt der Kopf „· 1 aktiv".
+  Das „+ Kriterium"-Popover folgt derselben Reihenfolge und kennt
+  Medienart, Generator und Dauer.
+- **Neue Filter:** `typ:` (`bild`, `video`, `audio`; englisch `type:`)
+  und `dauer:` (`dauer: >120`, `dauer: <=3:30`, `dauer: 60-180`; englisch
+  `duration:`), dazu die Sortierung **nach Dauer**. Videos zeigen ihre
+  Dauer im Detailpanel, in der Lupe und in der Einzelansicht.
+- **Tipphilfe:** trifft ein Wort genau eine Medienart („video"), steht
+  sie vorn, darunter die Volltextsuche.
+- **Import-Regel „Formate/Endungen ausschließen"** trifft auch die
+  Dateiendung, beim Import wie im Bestandswerkzeug: `lang` hält
+  Sprachdateien von Programmen fern, auch wenn ihr Inhalt zufällig wie
+  ein bekanntes Format aussieht.
+- **„🎲 Seed-Varianten suchen"** erscheint nur noch bei Medien, die
+  einen Seed haben.
+
+### Fehlerbehebungen
+
+- **Admin → Übersicht** zeigte dieselbe Platte manchmal doppelt, wenn
+  während der Anzeige ein anderer Prozess schrieb. Laufwerke werden jetzt
+  an ihrer Geräte-ID erkannt.
+
+### Sicherheit und Doku
+
+- **ffmpeg und ffprobe öffnen nur noch lokale Dateien:** Eine präparierte
+  Video- oder Audiodatei kann sie nicht mehr zu Netzzugriffen bringen, und
+  ein Dateiname, der mit `-` beginnt, wird nie als Option gelesen.
+- Der neue **Audio-Parser** ist gegen abgeschnittene Dateien und gefälschte
+  Längenangaben gedeckelt und mit zehntausenden verstümmelten Dateien
+  geprüft.
+- **`SECURITY.md`** nennt die Lieferkette jetzt gleich am Anfang: jedes
+  installierte Paket benannt und per Prüfsumme gesichert, automatische
+  Prüfungen gegen die Schwachstellen-Datenbank OSV, und wie man selbst
+  nachprüft (`python tools/check_advisories.py`).
+- Neue Seite **Audio-Modul** in der Doku; README und Bedienungs-Doku
+  beschreiben Audio, Cover und die neue Seitenleiste.
+- `config.example.toml` nennt die Log-Präfixe so, wie das Log sie
+  schreibt (`slow:`, `cold:`).
+
 ## 2026.09.1 (2026-09-23)
 
 Ein Sicherheits- und Sorgfalts-Release: Jedes Paket, das fml auf deinem

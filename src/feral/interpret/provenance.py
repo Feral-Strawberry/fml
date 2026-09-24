@@ -2,7 +2,8 @@
 
 Gemini, ChatGPT, Firefly & Co. betten keine Prompts ein, aber **Content
 Credentials** (C2PA): ein JUMBF-Baum mit CBOR-Claims, den Schicht 1 byte-treu
-sichert (``png:caBX``, ``jpeg:APP11``, ``webp:C2PA``). Alle Textwerte darin
+sichert (``png:caBX``, ``jpeg:APP11``, ``webp:C2PA``; Audio: ID3-``GEOB``,
+``riff:C2PA``, ``isobmff:uuid``). Alle Textwerte darin
 (``claim_generator``, ``claim_generator_info``, ``softwareAgent``, Zertifikats-
 Aussteller, ``digitalSourceType``-URIs) liegen als UTF-8-Klartext im Payload —
 **kein CBOR-Parser nötig**: Erzeuger werden per Substring erkannt, die
@@ -11,7 +12,8 @@ Rohstrings über den 1–3 Byte langen Kopf eines CBOR-Textstrings gelesen.
 Ergebnis (Feldvokabular ``interpret/types.py``):
 
 - ``tool``             **Plattform** (Konzeptrunde 2026-09-08, ADR-0066-Nachtrag):
-                       ``google``, ``openai``, ``azure-openai``, ``adobe``, ``flux`` — oder
+                       ``google``, ``openai``, ``azure-openai``, ``adobe``, ``flux``,
+                       ``suno`` — oder
                        ``c2pa`` = Manifest erkannt, kein belegter Marker. Die
                        Produkte darunter (Gemini, Google Fotos, GPT-4o, DALL·E 3,
                        Sora, Adobe Firefly) landen in ``model``, soweit belegt.
@@ -55,7 +57,7 @@ from ..extract.types import RawMetadataItem
 from .types import InterpretedField, Interpretation
 
 NAME = "provenance"
-VERSION = 2   # v2: Plattform statt Produkt, model, Workflow-Vorrang, flux
+VERSION = 3   # v3: suno (Audio, ADR 0083); v2: Plattform statt Produkt, model, Workflow-Vorrang, flux
 
 TOOL_UNKNOWN_C2PA = "c2pa"
 
@@ -76,6 +78,10 @@ _MARKERS: tuple[tuple[str, tuple[bytes, ...]], ...] = (
     ("adobe", (b"Adobe_Firefly", b"Adobe Photoshop", b"Adobe Firefly")),
     ("google", (b"Google C2PA Core Generator Library",
                 b"Google Media Processing Services")),
+    # Suno (Belegstufe A: Manifest-Dump einer Suno-MP3 vom 2026-08-21,
+    # Recherche Audio §12) — eigene Assertion und Anbietername. Das Modell
+    # (Codename in claim_generator_info.version) übersetzt der suno-Parser.
+    ("suno", (b"com.suno.provenance", b"Suno, Inc.")),
 )
 
 # Produkt/Modell je Plattform, soweit im Manifest belegt (erste Übereinstimmung).

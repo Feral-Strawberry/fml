@@ -36,9 +36,9 @@ from typing import Any, Callable
 from .db.store import media_kind_for, now_iso, store_extraction, store_interpretations
 from .extract import container
 from .extract.container import ExtractorNotImplementedError, UnknownContainerError
-from .extract.types import ContainerExtraction
+from .extract.types import ContainerExtraction, RawMetadataItem
 from .hashing import hash_file
-from .interpret import interpret_items
+from .interpret import interpret_items, suno
 from .scan import note_playability
 
 # Sichtbare Ausgänge im Quellordner (ADR 0019).
@@ -104,22 +104,28 @@ class ImportReport:
 
 
 def filter_reason(
-    extraction: ContainerExtraction, rules: dict[str, Any] | None
+    extraction: ContainerExtraction, rules: dict[str, Any] | None,
+    path: str | Path | None = None,
 ) -> str | None:
     """Grund, warum die Import-Regeln (``[import]``, ADR 0046) diese Datei
     ausfiltern — oder ``None`` (aufnehmen).
 
     - Ausgeschlossene Formate treffen jeden Container (auch solche ohne
-      fertigen Extraktor, z. B. PSD/ARW).
+      fertigen Extraktor, z. B. PSD/ARW) und — mit ``path`` — jede Datei
+      mit dieser Endung (#159: ``lang`` gegen falsch erkannte Sprachdateien).
     - Die Maß-Grenzen gelten NUR für Bilder mit bekannten Maßen: Videos
       bleiben draußen (kleine Videos sind legitim), und ohne Maße wird
       nicht geraten — lieber ein Mini-Bild zu viel als ein Original zu wenig.
     """
     if not rules:
         return None
-    if extraction.container in rules.get("formate", ()):
+    formate = rules.get("formate", ())
+    if extraction.container in formate:
         return f"Format ausgeschlossen ({extraction.container})"
-    if media_kind_for(extraction.container) != "image":
+    suffix = Path(path).suffix.lower().lstrip(".") if path is not None else ""
+    if suffix and suffix in formate:
+        return f"Format ausgeschlossen (.{suffix})"
+    if (extraction.media_kind or media_kind_for(extraction.container)) != "image":
         return None
     w, h = extraction.width, extraction.height
     if not w or not h:
@@ -164,6 +170,11 @@ def _parse_date_text(text: str) -> datetime | None:
 
 
 def _parse_embedded_date(extraction: ContainerExtraction) -> datetime | None:
+    # Suno-Kommentar ``created=`` (ADR 0083): Erstellzeit des Clips, nicht
+    # des Downloads — Audio kennt keine EXIF-Schlüssel.
+    created = suno.created_at(extraction.items)
+    if created is not None:
+        return created
     for keyword in _DATE_KEYWORDS:
         for item in extraction.items:
             if item.keyword != keyword or not item.text:
@@ -245,6 +256,14 @@ def _date_candidate(
     noch existierenden Fundorts — beides nur im Plausibilitätsfenster.
     Gemeinsamer Helfer für Lauf UND Start-Trigger (#113): was der Trigger
     zählt, kann der Lauf auch datieren."""
+    for (text,) in conn.execute(
+        """SELECT value_text FROM raw_metadata
+            WHERE file_hash = ? AND value_text LIKE 'made with suno%'
+            ORDER BY ordinal""", (file_hash,),
+    ):
+        created = suno.created_at([RawMetadataItem("suno", None, text, None, "utf-8")])
+        if created is not None and min_date <= created <= upper:
+            return created, "metadaten"
     for keyword in _DATE_KEYWORDS:
         hit = conn.execute(
             """SELECT value_text FROM raw_metadata
@@ -462,7 +481,8 @@ def _prepare(
     ein unplausibles Datum seit #113 eine Import-Regel ist (ADR 0075)."""
     # 1) Container erkennen (unbekannt/kaputt aussortieren, ADR 0019).
     try:
-        extraction = container.extract(source)
+        extraction = container.extract(
+            source, audio_enabled=bool((rules or {}).get("audio")))
     except UnknownContainerError:
         return _Prepared(source, outcome="unbekanntes_format")
     except ExtractorNotImplementedError as exc:
@@ -473,7 +493,7 @@ def _prepare(
 
     # Import-Regeln (ADR 0046) + Datumsregel (ADR 0075) — VOR dem Hashen:
     # Ausgefiltertes kostet keinen Voll-Lesedurchgang.
-    reason = filter_reason(extraction, rules)
+    reason = filter_reason(extraction, rules, source)
     if reason is not None:
         return _Prepared(source, outcome="ausgefiltert", detail=reason)
     try:

@@ -211,6 +211,29 @@ def thumb_warm_task(conn, params, progress, ctx) -> dict[str, Any]:
     return {"summary": msg("sumThumbs", parts=parts)}
 
 
+@task("audio_warm")
+def audio_warm_task(conn, params, progress, ctx) -> dict[str, Any]:
+    """„Audio analysieren" (A4 #161): Lautheit, Wellenform und Wiedergabe-
+    Proxy vorwärmen — Automatik nur Fehlende, ``retry_failed`` (Admin-Knopf)
+    auch Fehlgeschlagene. Läuft über den Thumbnail-Pool des Workers."""
+    from ..audio_analysis import warm_audio
+
+    def on_progress(index, total, created, skipped, failed):
+        progress(current=msg("progressAudio", index=index, total=total),
+                 report=_counters(scanned_files=index, media_files=total,
+                                  new_items=created, known_items=skipped, failed=failed))
+
+    retry_failed = bool(params.get("retry_failed", False))
+    result = warm_audio(conn, params["cache_dir"], progress=on_progress,
+                        pool=ctx.thumb_pool(), retry_failed=retry_failed)
+    parts = [msg("sumThumbsNew", n=result["created"]),
+             msg("sumThumbsSkipped", n=result["skipped"])]
+    if result["failed"]:
+        parts.append(msg("sumThumbsFailedIssues" if retry_failed else "sumThumbsFailed",
+                         n=result["failed"]))
+    return {"summary": msg("sumAudio", parts=parts)}
+
+
 @task("backfill_dates")
 def backfill_dates_task(conn, params, progress, ctx) -> dict[str, Any]:
     """Erstelldaten für den Alt-Bestand nachtragen (ADR 0021/0061)."""

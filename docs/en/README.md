@@ -20,8 +20,9 @@ GitHub organization).
   processes, intake with two metadata layers, search path, installation and
   supply chain.
 - [Metadata extraction (layer 1)](extraction.md) — reads all embedded raw
-  metadata from a media file. Implemented: PNG, JPEG/WEBP/GIF/BMP/TIFF
-  (Pillow) and video (ffprobe).
+  metadata from a media file: PNG, JPEG/WEBP/GIF/BMP/TIFF/PSD (Pillow),
+  video (ffprobe) and with the audio module MP3, FLAC, Ogg, WAV, AIFF, CAF
+  and M4A.
 - [Metadata interpretation (layer 2)](interpretation.md) — turns the raw
   metadata into searchable fields (prompt, model, seed, …); runs during
   the scan and retroactively via `python -m feral.interpret`.
@@ -48,6 +49,10 @@ GitHub organization).
   with block list, rankings and server log.
 - [Rankings](rankings.md) — the optional ranking module: pairwise
   comparison with an Elo leaderboard over a saved search.
+- [Audio module](audio.md) — optional: music and other audio files with
+  all embedded metadata, a dedicated audio view with waveform, a player
+  with loudness matching, time comments, comparing and covers for finished
+  songs in the gallery.
 - [Multiple instances](instanzen.md) — parallel, independent galleries
   from one program folder (own DB + port per instance): **sub-galleries
   of a master library**, without touching any files. Start via
@@ -55,7 +60,7 @@ GitHub organization).
 - [Security](security.md) — how fml handles **untrusted** image files
   (untrusted metadata), operating recommendations, which dependencies get
   installed and how they are checked (lock with checksums, advisory check). **Read before passing the tool on to others.**
-- [The test suite](tests.md) — what the 700-odd automated tests (Python
+- [The test suite](tests.md) — what the 900-odd automated tests (Python
   and Node tests of the interface) guarantee, how to run them (`pytest -q`)
   and how to recognize a correct result.
   **Useful as an installation check on a new machine.**

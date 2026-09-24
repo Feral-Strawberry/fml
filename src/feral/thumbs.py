@@ -31,9 +31,10 @@ import threading
 from concurrent.futures import Future, ProcessPoolExecutor, wait
 from pathlib import Path
 
+from .db.manual import has_embedded_picture
 from .extract import psd
 from .messages import dump as msg_dump
-from .tools import find_binary
+from .tools import find_binary, media_input
 from PIL import Image, UnidentifiedImageError
 
 DEFAULT_SIZE = 320
@@ -114,8 +115,15 @@ class ThumbPool:
         *, media_kind: str, size: int = DEFAULT_SIZE,
     ) -> Future:
         """Reihe die Generierung ein (oder liefere die schon laufende Future)."""
+        return self.submit_call(file_hash, generate_thumbnail, str(source), dest,
+                                media_kind=media_kind, size=size)
+
+    def submit_call(self, key: str, fn, *args, **kwargs) -> Future:
+        """Beliebige reine Cache-Arbeit (picklebare Modulfunktion) einreihen,
+        dedupliziert über ``key`` — auch die Audio-Analyse und der
+        Wiedergabe-Proxy (A4, ADR 0086) laufen über diesen Pool."""
         with self._lock:
-            running = self._pending.get(file_hash)
+            running = self._pending.get(key)
             if running is not None and not running.done():
                 return running
             if self._executor is None:
@@ -123,11 +131,9 @@ class ThumbPool:
                     max_workers=self.workers, initializer=_thumb_worker_init,
                     initargs=(self.low_priority,),
                 )
-            future = self._executor.submit(
-                generate_thumbnail, str(source), dest, media_kind=media_kind, size=size,
-            )
-            self._pending[file_hash] = future
-        future.add_done_callback(lambda _f, h=file_hash: self._forget(h))
+            future = self._executor.submit(fn, *args, **kwargs)
+            self._pending[key] = future
+        future.add_done_callback(lambda _f, k=key: self._forget(k))
         return future
 
     def _forget(self, file_hash: str) -> None:
@@ -157,7 +163,9 @@ def generate_thumbnail(
     try:
         if media_kind == "image":
             ok, reason = _image_thumbnail(source, tmp, size)
-        elif media_kind == "video":
+        elif media_kind in ("video", "audio"):
+            # Audio (#165): das eingebettete Cover — ffmpeg führt es als
+            # einzige Bildspur, der „erste Frame" ist das Bild.
             ok, reason = _video_thumbnail(source, tmp, size)
         else:
             ok, reason = False, msg_dump("thumbNoSupport", kind=media_kind)
@@ -209,7 +217,7 @@ def _video_thumbnail(source: str | Path, tmp: Path, size: int) -> tuple[bool, st
         proc = subprocess.run(
             [
                 find_binary("ffmpeg") or "ffmpeg", "-v", "error", "-y",
-                "-i", str(source),
+                *media_input(source),
                 "-frames:v", "1",
                 "-vf", f"scale='min({size},iw)':-2",
                 "-f", "image2", str(tmp),
@@ -254,6 +262,11 @@ def ensure_thumbnail(
         "SELECT media_kind FROM items WHERE file_hash = ?", (file_hash,)
     ).fetchone()
     if row is None:
+        return None
+    if row["media_kind"] == "audio" and not has_embedded_picture(conn, file_hash):
+        # Audio hat kein eigenes Vorschaubild (ADR 0083); nur ein
+        # eingebettetes Cover wird eins (#165, fürs Detailpanel) — ohne
+        # Bild auch kein Fehlschlag-Marker.
         return None
 
     source = next(
@@ -314,6 +327,7 @@ def warm_thumbnails(
         """SELECT i.file_hash, i.media_kind, l.path
              FROM items i
              LEFT JOIN file_locations l ON l.file_hash = i.file_hash
+            WHERE i.media_kind != 'audio'   -- kein Vorschaubild (ADR 0083)
             ORDER BY i.first_seen_at DESC, l.id"""
     ).fetchall()
     # Fundorte je Item bündeln (Reihenfolge bleibt: neueste Items zuerst).

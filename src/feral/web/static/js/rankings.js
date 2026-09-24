@@ -26,7 +26,7 @@ import {
   createRanking, parseFilter, getRankings,
   getRankingPair, recordDuel, recordBothLost, recordOut, reinstateRanking, getLeaderboard,
   getItem, mediaUrl, displayUrl, thumbUrl, loadThumb, releaseVideo, releaseVideos, wireMediaFallback,
-  swapUnplayable } from "./api.js";
+  swapUnplayable, mediaHtml, isTimed, kindLabel } from "./api.js";
 import { dotsHtml, rate } from "./curate.js";
 import { emit, on } from "./main.js";
 import { registerDialog } from "./overlays.js";
@@ -117,6 +117,13 @@ export function initRankings() {
   }
 
   function mediaEl(entry) {
+    if (entry.media_kind === "audio") {
+      // Gemeinsame Weiche (#158): Audio-Duelle sind noch kein Thema (#166),
+      // aber ein Audio-Item darf nie als <img> geladen werden.
+      const holder = document.createElement("div");
+      holder.innerHTML = mediaHtml(entry);
+      return holder.firstElementChild;
+    }
     if (entry.media_kind !== "video") {
       const img = document.createElement("img");
       img.setAttribute("src", displayUrl(entry));
@@ -254,6 +261,7 @@ export function initRankings() {
       nextPair = d;
       releaseWarm();        // nur das aktuell vorgeholte Paar puffern
       for (const entry of d.pair || []) {
+        if (entry.media_kind === "audio") continue;
         if (entry.media_kind !== "video") { new Image().src = displayUrl(entry); continue; }
         const v = makeVideo(entry);
         v.dataset.prefetched = "1";
@@ -404,7 +412,7 @@ export function initRankings() {
     list.insertAdjacentHTML("beforeend", entries.map((e, k) => `
       <div class="rkbrow${e.eliminated ? " rkout" : ""}" data-index="${start + k}">
         <span class="rkbrank">${e.eliminated ? STRINGS.rankingOutMarker : e.rank}</span>
-        <span class="rkbthumb">${e.media_kind === "video" ? `<span class="rkbadge">${STRINGS.badgeVideo}</span>` : ""}</span>
+        <span class="rkbthumb">${kindLabel(e) ? `<span class="rkbadge">${kindLabel(e)}</span>` : ""}</span>
         <span class="rkbelo" title="${e.duels} ${STRINGS.rankingDuels}">${Math.round(e.score)}</span>
       </div>`).join(""));
     if (!thumbWatcher) {
@@ -501,9 +509,8 @@ export function initRankings() {
     const entry = boardCache.get(i);
     board = { current: i, entry };
     releaseVideos(body.querySelector("#rkbStage"));
-    body.querySelector("#rkbStage").innerHTML = entry.media_kind === "video"
-      ? `<video src="${mediaUrl(entry.file_hash)}" poster="${thumbUrl(entry.file_hash)}" controls autoplay loop playsinline></video>`
-      : `<img src="${displayUrl(entry)}" alt="">`;
+    body.querySelector("#rkbStage").innerHTML = mediaHtml(entry, {
+      video: `poster="${thumbUrl(entry.file_hash)}" controls autoplay loop playsinline` });
     wireMediaFallback(body.querySelector("#rkbStage"), STRINGS.noPreview);   // Hinweis statt schwarzem Player (#25)
     // Ausgeschiedene (#87) haben keinen Platz, sondern den Marker und den
     // Rückweg „Wieder rein"; „von m" zählt nur die Aktiven.
@@ -533,7 +540,7 @@ export function initRankings() {
     // Rang-Nachbarn vorholen (Bilder in den Browser-Cache wärmen).
     for (const delta of [1, -1]) {
       const n = boardCache.get(i + delta);
-      if (n && n.media_kind !== "video") new Image().src = displayUrl(n);
+      if (n && !isTimed(n)) new Image().src = displayUrl(n);
     }
   }
 
@@ -719,7 +726,7 @@ export function initRankings() {
   foot.addEventListener("click", (e) => {
     if (e.target.closest("#rkSkip")) skip();
     else if (e.target.closest("#rkBothLost")) bothLost();
-    else if (e.target.closest("#rkbSingle") && board) {
+    else if (e.target.closest("#rkbSingle") && board && board.entry.media_kind !== "audio") {
       emit("single-open", { hash: board.entry.file_hash });
     }
   });
@@ -748,7 +755,9 @@ export function initRankings() {
         // stopPropagation: singleview hat einen eigenen Galerie-Enter —
         // der würde sonst das GALERIE-Item statt des Rang-Items öffnen.
         e.preventDefault(); e.stopPropagation();
-        emit("single-open", { hash: board.entry.file_hash });
+        // Audio öffnet aus dem Ranking keine Einzelansicht (#162); Songs
+        // mit Cover erreichen sie über die Galerie (#165), Arenen ohne Audio: #175.
+        if (board.entry.media_kind !== "audio") emit("single-open", { hash: board.entry.file_hash });
       }
       return;
     }

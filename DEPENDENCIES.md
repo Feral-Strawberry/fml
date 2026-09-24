@@ -21,7 +21,7 @@ on the **pure standard library** (`hashlib`, `zlib`, `struct`, `json`,
 
 | System program | Where | Why |
 |----------------|-------|-----|
-| **ffprobe/ffmpeg** | `src/feral/extract/video_ffprobe.py`: video container tags (WEBM/MKV, MP4/MOV); `src/feral/thumbs.py`: video poster frames | The 20-year-old de-facto standard for media containers; `ffprobe` prints container tags as JSON, `ffmpeg` extracts the poster frame. No pip package, called via `subprocess`. **Optional:** without ffmpeg, videos are still catalogued (without metadata/thumbnail); a later scan or viewing fetches both. Installation: macOS `brew install ffmpeg`, Debian/Ubuntu `apt install ffmpeg`, Windows `winget install ffmpeg`. (ADR 0008/0013) |
+| **ffprobe/ffmpeg** | `src/feral/extract/video_ffprobe.py`: video container tags (WEBM/MKV, MP4/MOV); `src/feral/thumbs.py`: video poster frames; `src/feral/audio_analysis.py`: loudness (`ebur128`), three-band waveform and lossless FLAC playback copies for audio | The 20-year-old de-facto standard for media containers; `ffprobe` prints container tags as JSON, `ffmpeg` extracts the poster frame. No pip package, called via `subprocess`. **Optional:** without ffmpeg, videos are still catalogued (without metadata/thumbnail); a later scan or viewing fetches both. Installation: macOS `brew install ffmpeg`, Debian/Ubuntu `apt install ffmpeg`, Windows `winget install ffmpeg`. (ADR 0008/0013) |
 
 ### Web interface (ADR 0001)
 

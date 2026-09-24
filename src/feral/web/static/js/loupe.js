@@ -8,8 +8,9 @@
 // Grid-Ring beim Schließen auf dem zuletzt betrachteten Item stehen.
 
 import { STRINGS } from "./strings.js";
-import { displayUrl, getItem, mediaUrl, wireMediaFallback, wireReveal, releaseVideos, scopeSignal, abortScope, isAbort, canPlayVideo, mountUnplayable, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
+import { libraryView, displayUrl, getItem, wireMediaFallback, wireReveal, releaseVideos, scopeSignal, abortScope, isAbort, mediaHtml, wireUnplayable, kindLabel, fmtDuration, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
 import { galleryItemAt, galleryTotal } from "./gallery.js";
+import { togglePlay } from "./audiolist.js";
 import { renderWorkflowInto } from "./workflow.js";
 import { dotsHtml, rate } from "./curate.js";
 import { emit, on } from "./main.js";
@@ -97,6 +98,13 @@ export function initLoupe() {
       || d.interpreted.some((f) => f.parser === "a1111");
     segWf.hidden = !hasWorkflow;
     if (!hasWorkflow) mode = "media";
+    // Audio (#162): die Lupe zeigt nur den Node-Graphen (Panel → „Node-Graph
+    // ansehen"), keine Medienbühne und keinen Weg in die Einzelansicht —
+    // der Player in der Liste kann mehr. Ohne Workflow: der ehrliche Hinweis.
+    const audio = d.media_kind === "audio";
+    segImg.hidden = audio;
+    root.querySelector("#lpSegSingle").hidden = audio;
+    if (audio) mode = "workflow";
 
     const name = d.locations.length
       ? d.locations[0].path.split("/").pop().split("\\").pop()
@@ -104,7 +112,8 @@ export function initLoupe() {
     root.querySelector("#lpTitle").textContent = name;
     root.querySelector("#lpMeta").textContent =
       `${d.width ? `${d.width}×${d.height} · ` : ""}${d.fps ? `${d.fps} fps · ` : ""}`
-      + `${d.container.toUpperCase()}${d.media_kind === "video" ? " · VIDEO" : ""}`
+      + `${d.duration != null ? `${fmtDuration(d.duration)} · ` : ""}`
+      + `${d.container.toUpperCase()}${kindLabel(d) ? ` · ${kindLabel(d)}` : ""}`
       + `${d.media_kind === "video" && videoCodecFacts(d) ? ` · ${codecLabel(videoCodecFacts(d))}` : ""}`;
     renderCounter();
     renderDots(d.manual.rating);
@@ -112,15 +121,11 @@ export function initLoupe() {
 
     if (mode === "media") {
       releaseVideos(stage);   // #89: voriges Video gibt seine Verbindung zurück
-      // Nicht dekodierbarer Codec (#71): Poster + Hinweis statt Player.
-      if (d.media_kind === "video" && !canPlayVideo(d)) {
-        mountUnplayable(stage, d);
-      } else {
-        stage.innerHTML = d.media_kind === "video"
-          ? `<video src="${mediaUrl(hash)}" controls autoplay loop></video>`
-          : `<img src="${displayUrl(d)}" alt="">`;
-        wireMediaFallback(stage, mediaFallbackLabel(d), d);
-      }
+      // Gemeinsame Medien-Weiche (#158); nicht Abspielbares (#71) kommt
+      // als Hinweis mit 📂 statt Player.
+      stage.innerHTML = mediaHtml(d, { video: "controls autoplay loop" });
+      wireUnplayable(stage, d);
+      wireMediaFallback(stage, mediaFallbackLabel(d), d);
     } else {
       renderMode();
     }
@@ -217,8 +222,16 @@ export function initLoupe() {
       // Tastatur-Guards in ALLEN Richtungen, spiegelbildlich zu singleview.js.
       if (!document.getElementById("rankings").hidden) return;
       if (!document.getElementById("single").hidden) return;
+      // Audioansicht: Space spielt die Zeile (audiolist.js, ADR 0085).
+      if (libraryView() === "audio") return;
       e.preventDefault();               // Space darf die Seite nicht scrollen
-      openLoupe(cur.hash, cur.index);
+      // Finalisierter Song in der Galerie (#165): Space spielt, wie in der
+      // Liste — die Lupe zeigte ihn nur als Node-Graph.
+      const at = cur;
+      galleryItemAt(at.index ?? -1).then((item) => {
+        if (item?.file_hash === at.hash && item.media_kind === "audio") togglePlay(item);
+        else openLoupe(at.hash, at.index);
+      });
     }
   });
 }

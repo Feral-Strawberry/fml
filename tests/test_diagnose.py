@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -121,7 +122,8 @@ def test_probe_video_stream_calls_ffprobe_header_only(tmp_path):
     assert facts == {"codec_type": "video", "codec_name": "hevc", "pix_fmt": "yuv420p10le"}
     cmd = seen[0]
     assert "-select_streams" in cmd and cmd[cmd.index("-select_streams") + 1] == "v:0"
-    assert "-show_format" not in cmd and cmd[-1] == "/x/clip.mov"
+    assert "-show_format" not in cmd and cmd[-1] == "file:" + str(Path("/x/clip.mov").absolute())
+    assert cmd[-4:-2] == ["-protocol_whitelist", "file"]   # nur lokale Dateien (#190)
 
 
 def test_report_from_db_uses_layer2_fields_without_ffprobe(db, tmp_path):

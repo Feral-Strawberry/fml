@@ -4,8 +4,9 @@
 > [`docs/en/`](docs/en/)
 
 Die **Feral Media Library** — kurz **fml** — ist eine lokale
-Medienverwaltung für **KI-generierte Bilder und Videos**. Sie ist für Bestände gebaut, an denen klassische
-Foto-Tools scheitern: animierte WEBPs, WEBM-Videos und zehntausende Dateien
+Medienverwaltung für **KI-generierte Bilder und Videos**, auf Wunsch auch
+für **Musik** (optionales Audio-Modul). Sie ist für Bestände gebaut, an
+denen klassische Foto-Tools scheitern: animierte WEBPs, WEBM-Videos und zehntausende Dateien
 mit eingebetteten ComfyUI-/A1111-Workflows, Prompts und Seeds. Alles läuft
 auf deinem Rechner: kein Cloud-Dienst, kein Konto, der Server ist nur unter
 `127.0.0.1` erreichbar.
@@ -174,6 +175,18 @@ Größenangaben.
   Sperrliste entfernen (Admin) und neu aufnehmen - die extrahierten
   Metadaten kommen vollständig wieder, eigene Bewertungen/Tags des
   abgelehnten Items sind dann allerdings weg.
+- **Audio-Modul (optional, ab Werk aus):** Musik von Suno, aus
+  ComfyUI (YuE, ACE-Step, MiniMax) oder eigene Aufnahmen: MP3, FLAC, Ogg,
+  WAV, AIFF, CAF, M4A, mit allen eingebetteten Tags, Songtext in der
+  Volltextsuche und Suno-Version aus den Content Credentials. Eine eigene
+  **Audioansicht** zeigt die Songs als Liste mit dreifarbiger Wellenform
+  (Bass, Mitten, Höhen) auf gemeinsamer Zeitachse, jede Zeile mit eigenem
+  Abspielkopf. Der Player gleicht die Lautheit an, damit beim Vergleichen
+  nicht die lautere Fassung gewinnt; dazu **Zeitkommentare** an Stellen
+  im Song („Chorus" bei 1:40), **Vergleichen** von bis zu sechs Fassungen
+  und **Cover** aus der eigenen Bibliothek, mit denen fertige Songs in die
+  Galerie kommen. Die Audiodateien selbst ändert fml nie. Alles dazu:
+  [`docs/audio.md`](docs/audio.md).
 - **Mehrere Instanzen:** fml kann mehrfach parallel laufen - jede Instanz
   mit eigener Datenbank, eigenem Port, eigenem Namen und eigener
   Akzentfarbe. Damit bildest du aus einer konsolidierten Gesamt-Library
@@ -188,7 +201,8 @@ Größenangaben.
 
 ## Was fml nicht tut
 
-- **Keine Bildbearbeitung, kein Export:** fml ist Katalog und Sichtgerät.
+- **Keine Bild- oder Audiobearbeitung, kein Export:** fml ist Katalog und
+  Sichtgerät.
   Der Absprung zurück ins Erzeugen ist der Workflow-Download für ComfyUI.
 - **Kein Löschen von Dateien** - in keinem Modus. Die einzigen zwei
   Stellen, an denen fml Dateien überhaupt anfasst, sind der Import und
@@ -229,9 +243,10 @@ bleiben dabei erhalten.
 
 Der erste Start richtet die Python-Umgebung ein; der Browser öffnet sich,
 sobald der Server bereit ist (Standard: **http://127.0.0.1:8765**). Für
-**Video**-Metadaten und -Vorschaubilder einmalig ffmpeg installieren
-(Windows: `winget install Gyan.FFmpeg`, macOS: `brew install ffmpeg`) - die
-Oberfläche weist darauf hin, falls es fehlt.
+**Video**-Metadaten und -Vorschaubilder (und für Dauer, Lautheit und
+Wellenform im Audio-Modul) einmalig ffmpeg installieren (Windows: `winget
+install Gyan.FFmpeg`, macOS: `brew install ffmpeg`) - die Oberfläche weist
+darauf hin, falls es fehlt.
 
 ### Einstieg, wenn du nur Übersicht willst (Ziel 1)
 
@@ -285,8 +300,9 @@ Oberfläche weist darauf hin, falls es fehlt.
 
 [`docs/gui.md`](docs/gui.md) (Bedienung) · [`docs/import.md`](docs/import.md)
 (Import & Watchordner) · [`docs/instanzen.md`](docs/instanzen.md) (mehrere
-Instanzen / Subgalerien) · [`docs/admin.md`](docs/admin.md) (Admin &
-Wartung) · [`docs/architektur.md`](docs/architektur.md) (technisches
+Instanzen / Subgalerien) · [`docs/audio.md`](docs/audio.md) (Audio-Modul)
+· [`docs/rankings.md`](docs/rankings.md) (Rankings) ·
+[`docs/admin.md`](docs/admin.md) (Admin & Wartung) · [`docs/architektur.md`](docs/architektur.md) (technisches
 Konzept) · [`docs/security.md`](docs/security.md) (Sicherheit und
 Abhängigkeiten) · [`docs/`](docs/) (alles Weitere)
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import socket
 import threading
@@ -29,7 +30,7 @@ log = logging.getLogger(__name__)
 
 _TABLES = (
     "items", "file_locations", "raw_metadata", "interpreted_metadata",
-    "scan_issues", "annotations", "tags", "item_tags",
+    "scan_issues", "annotations", "tags", "item_tags", "time_comments",
 )
 
 
@@ -156,7 +157,7 @@ def admin_info(
 
 def overview_stats(
     conn: sqlite3.Connection, *, db_path: str | Path, library_root: str | Path | None,
-    days: int = 30,
+    days: int = 30, now: datetime | None = None,
 ) -> dict[str, Any]:
     """Zahlen für die Diagramme der Admin-Übersicht (ADR 0074 Nachtrag,
     Mockup Runde 3): Zusammensetzung nach Art (Bilder/Videos mit Bytes),
@@ -165,7 +166,10 @@ def overview_stats(
     Reine Lesezugriffe über die vorhandenen Indizes (Messung 2026-09-12,
     250k Items: Art 47 ms, Jahrgänge 47 ms, Zuwachs 9 ms); die
     Typ-Zusammensetzung kommt aus ``library_stats`` (``by_container``).
+    ``now`` (UTC) ist für Tests injizierbar: EIN Zeitpunkt für Fenster und
+    letzten Tag, kein Kippen an der Tagesgrenze (#180).
     """
+    now = now or datetime.now(timezone.utc)
     by_kind = [
         {"kind": row[0], "count": row[1], "bytes": row[2]}
         for row in conn.execute(
@@ -180,7 +184,7 @@ def overview_stats(
             "GROUP BY y ORDER BY y"
         ).fetchall()
     ]
-    since = (datetime.now(timezone.utc) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    since = (now - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     per_day = {
         row[0]: row[1]
         for row in conn.execute(
@@ -188,7 +192,7 @@ def overview_stats(
             "WHERE first_seen_at >= ? GROUP BY d ORDER BY d", (since,)
         ).fetchall()
     }
-    today = datetime.now(timezone.utc).date()
+    today = now.date()
     growth = [
         {"day": (d := (today - timedelta(days=days - 1 - i)).isoformat()), "count": per_day.get(d, 0)}
         for i in range(days)
@@ -198,11 +202,15 @@ def overview_stats(
     for label, path in (("db", db_path), ("library", library_root)):
         if not path:
             continue
+        target = Path(path).resolve().parent if label == "db" else Path(path)
         try:
-            usage = shutil.disk_usage(Path(path).resolve().parent if label == "db" else path)
+            usage = shutil.disk_usage(target)
+            # Gleiches Laufwerk = gleiche Geräte-ID (Windows: Volume-Seriennummer).
+            # Früher: gleiche Gesamt-/Frei-Zahlen — schrieb ein anderer Prozess
+            # zwischen den beiden Abfragen, erschien dieselbe Platte doppelt (#180).
+            key = str(os.stat(target).st_dev)
         except OSError:
             continue
-        key = f"{usage.total}:{usage.free}"     # gleiches Laufwerk = gleiche Zahlen
         if key in seen:
             continue
         seen.add(key)
@@ -577,16 +585,11 @@ def clear_thumb_cache(thumb_cache: str | Path) -> int:
 # unangetastet („Original heilig", ADR 0041), Entsperren macht es rückgängig.
 
 
-# TIFF-basierte RAW-Formate: Alt-Bestand von VOR der RAW-Erkennung (ADR 0046)
-# steht noch als »tiff« im Katalog — dort ist die Dateiendung die Wahrheit.
-_TIFF_RAW_FORMATS = ("arw", "nef", "dng", "cr2")
-
-
 def _import_rules_parts(rules: dict[str, Any] | None) -> list[tuple[str, str, list[Any]]]:
     """(Grund-Schlüssel, WHERE-Fragment über Alias ``i``, Parameter) je aktiver
     Regel. Maß-Regeln nur für Bilder mit bekannten Maßen (wie beim Import);
     ``datum`` = ohne plausibles Erstelldatum (ADR 0075)."""
-    from .filters import BASENAME
+    from .filters import BASENAME, _escape_like
 
     if not rules:
         return []
@@ -594,19 +597,16 @@ def _import_rules_parts(rules: dict[str, Any] | None) -> list[tuple[str, str, li
     formate = rules.get("formate") or []
     if formate:
         marks = ", ".join("?" for _ in formate)
-        frags = [f"i.container IN ({marks})"]
-        params: list[Any] = list(formate)
-        # Ausgeschlossene RAW-Formate treffen auch Alt-Items, die noch als
-        # »tiff« katalogisiert sind (Feral Strawberrys Befund 2026-07-17: .ARW wurde
-        # nur über »tiff« gefunden) — Suffix-Match auf den Fundort-Dateinamen,
-        # damit kein Re-Scan nötig ist. Echte TIFFs bleiben unberührt.
-        for ext in (f for f in formate if f in _TIFF_RAW_FORMATS):
-            frags.append(
-                f"(i.container = 'tiff' AND i.file_hash IN "
-                f"(SELECT file_hash FROM file_locations WHERE {BASENAME} LIKE ?))"
-            )
-            params.append(f"%.{ext}")
-        parts.append(("formate", "(" + " OR ".join(frags) + ")", params))
+        # Container ODER Dateiendung eines Fundorts — wie beim Scan
+        # (importer.filter_reason). Die Endung trifft auch Alt-Bestand, der
+        # unter falschem Container steht: RAW von vor der RAW-Erkennung als
+        # »tiff« (Befund 2026-07-17), Windows-Sprachdateien als »mp3« (#159).
+        # LIKE ist für ASCII groß/klein-unabhängig (.ARW = .arw).
+        likes = " OR ".join(f"{BASENAME} LIKE ? ESCAPE '\\'" for _ in formate)
+        frag = (f"(i.container IN ({marks}) OR i.file_hash IN "
+                f"(SELECT file_hash FROM file_locations WHERE {likes}))")
+        params: list[Any] = [*formate, *(f"%.{_escape_like(f)}" for f in formate)]
+        parts.append(("formate", frag, params))
     guard = ("i.media_kind = 'image' AND i.width IS NOT NULL "
              "AND i.height IS NOT NULL AND i.height > 0 AND i.width > 0")
     if rules.get("min_kante"):

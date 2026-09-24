@@ -10,7 +10,7 @@ Suche werkzeugübergreifend funktioniert):
 
     tool             Erzeuger-PLATTFORM (ADR 0066 + Nachtrag 2026-09-08):
                      'a1111', 'comfyui', 'midjourney', 'google', 'openai',
-                     'azure-openai', 'adobe', 'flux', 'topaz'; 'c2pa' = Manifest
+                     'azure-openai', 'adobe', 'flux', 'topaz', 'suno'; 'c2pa' = Manifest
                      erkannt, nicht zugeordnet. Das Produkt darunter (Gemini,
                      GPT-4o, Topaz Gigapixel, Midjourney V7) steht in `model`.
     prompt           positiver Prompt
@@ -54,6 +54,25 @@ Suche werkzeugübergreifend funktioniert):
                      ('prores', 'hevc', 'h264', 'vp9', 'av1'; Issue #71/ADR 0070)
     video_profile    Codec-Profil ('HQ', 'Main 10', 'High 10')
     pixel_format     Pixelformat des Video-Streams ('yuv420p', 'yuv422p10le')
+
+Audio (ADR 0083, Issue #160) — Style/Caption eines Musikmodells ist `prompt`,
+Titel/Songtext/Technik liefert der Parser ``audio``, die Suno-Identität
+der Parser ``suno``:
+
+    lyrics           Songtext (ID3 USLT, Vorbis LYRICS, M4A ©lyr, ComfyUI-
+                     Eingang ``lyrics``); in der Volltextsuche
+    title            Titel-Tag (TIT2, INAM, Vorbis TITLE, M4A ©nam)
+    song_id          Clip-ID beim Dienst (Suno-UUID)
+    parent_id        Clip-ID des Eltern-Songs (nur wo die Datei sie nennt)
+    relation         Beziehung zum Eltern-Song: 'extend', 'cover', 'remaster',
+                     'edit', 'speed_edit', 'section_replace', 'stitch', 'derived'
+    bpm              Tempo (TBPM, ACE-Step ``bpm``)
+    key              Tonart (TKEY, ACE-Step ``keyscale``)
+    audio_codec      Codec der ersten Tonspur, wie ffprobe ihn nennt
+                     ('flac', 'mp3', 'aac', 'pcm_s16le', 'opus')
+    sample_rate      Abtastrate in Hz ('48000')
+    channels         Kanalzahl ('2')
+    bit_depth        Bittiefe verlustfreier Formate ('16', '24')
 
 Ein Feld darf mehrfach vorkommen (z. B. mehrere `prompt`-Kandidaten in einem
 ComfyUI-Graphen); die Reihenfolge bleibt erhalten.

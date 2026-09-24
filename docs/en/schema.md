@@ -38,6 +38,7 @@ erDiagram
     integer height
     real fps
     text media_date
+    real duration
   }
   file_locations {
     integer id PK
@@ -87,6 +88,20 @@ erDiagram
     text file_hash PK, FK
     integer tag_id PK, FK
     text created_at
+  }
+  time_comments {
+    integer id PK
+    text file_hash FK
+    integer at_ms
+    text text
+    text created_at
+    text updated_at
+  }
+  covers {
+    text file_hash PK, FK
+    text cover_hash FK
+    text created_at
+    text updated_at
   }
   smart_folders {
     integer id PK
@@ -170,6 +185,9 @@ erDiagram
   items ||--o| annotations : "file_hash"
   tags ||--o{ item_tags : "tag_id"
   items ||--o{ item_tags : "file_hash"
+  items ||--o{ time_comments : "file_hash"
+  items ||--o{ covers : "cover_hash"
+  items ||--o| covers : "file_hash"
   rankings ||--o{ ranking_duels : "ranking_id"
   rankings ||--o{ ranking_scores : "ranking_id"
   items |o..o{ ranking_scores : "file_hash"
@@ -197,8 +215,9 @@ erDiagram
 | `height` | integer |  |  |  |
 | `fps` | real |  |  |  |
 | `media_date` | text |  |  |  |
+| `duration` | real |  |  |  |
 
-Indexes: `idx_items_container`, `idx_items_first_seen`, `idx_items_media_date`, `idx_items_size`
+Indexes: `idx_items_container`, `idx_items_duration`, `idx_items_first_seen`, `idx_items_media_date`, `idx_items_size`
 
 #### `file_locations` · PK `id`
 
@@ -284,6 +303,30 @@ Indexes: none
 | `created_at` | text |  | yes |  |
 
 Indexes: `idx_item_tags_tag`
+
+#### `time_comments` · PK `id`
+
+| Column | Type | Key | Required | Default |
+| --- | --- | --- | --- | --- |
+| `id` | integer | PK |  |  |
+| `file_hash` | text | FK → `items.file_hash` | yes |  |
+| `at_ms` | integer |  | yes |  |
+| `text` | text |  | yes |  |
+| `created_at` | text |  | yes |  |
+| `updated_at` | text |  | yes |  |
+
+Indexes: `idx_time_comments_item`
+
+#### `covers` · PK `file_hash`
+
+| Column | Type | Key | Required | Default |
+| --- | --- | --- | --- | --- |
+| `file_hash` | text | PK · FK → `items.file_hash` | yes |  |
+| `cover_hash` | text | FK → `items.file_hash` | yes |  |
+| `created_at` | text |  | yes |  |
+| `updated_at` | text |  | yes |  |
+
+Indexes: `idx_covers_cover`
 
 #### `smart_folders` · PK `id`
 

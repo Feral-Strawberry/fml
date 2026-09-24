@@ -35,6 +35,16 @@ Internet: nie blind vertrauen.
   weiter.
 - **ComfyUI-Workflow-Graphen** werden mit Zyklus-Schutz ausgewertet — ein
   absichtlich verketteter/zyklischer Graph läuft nicht in eine Endlosschleife.
+- **Audio-Tags** (ID3, APEv2, Vorbis-Kommentar, WAV-/AIFF-/CAF-Chunks) liest
+  ein eigener Parser aus der Standardbibliothek: Kein Block wird größer als
+  64 MiB gelesen, abgeschnittene Blöcke werden erkannt, komprimierte
+  ID3-Frames werden gedeckelt entpackt, eingebettete Bilder nur beschrieben, nie gespeichert. Mit
+  zehntausenden verstümmelten Dateien geprüft: kein Absturz, kein Hänger.
+- **ffmpeg/ffprobe** (Videos, Audio) bekommen jede Datei als lokale Datei:
+  `-protocol_whitelist file` und ein absoluter `file:`-Pfad. Eine präparierte
+  Datei (etwa eine versteckte Playlist) kann ffmpeg nicht zu Netzzugriffen
+  bringen, ein Dateiname wird nie als Option oder Protokoll gelesen. Jeder
+  Aufruf läuft ohne Shell und mit Zeitlimit.
 
 **Verarbeitung / Datenbank:**
 
@@ -44,8 +54,8 @@ Internet: nie blind vertrauen.
 
 **Anzeige (in der Browser-Oberfläche):**
 
-- Jeder aus einer Datei stammende Text (Prompt, Roh-Metadaten, Dateiname, Tags,
-  Suchtreffer) wird beim Einsetzen in die Seite **HTML-escaped** — eingebetteter
+- Jeder aus einer Datei stammende Text (Prompt, Roh-Metadaten, Songtitel und
+  Songtext, Dateiname, Tags, Zeitkommentare, Suchtreffer) wird beim Einsetzen in die Seite **HTML-escaped** — eingebetteter
   Schadcode wird als Text angezeigt, nicht ausgeführt.
 - Die Workflow-Graph-Vorschau erzwingt für alle Koordinaten aus dem fremden JSON
   **Zahlen**, sodass kein Wert aus dem SVG ausbrechen kann; Farbwerte aus dem
@@ -70,6 +80,10 @@ Internet: nie blind vertrauen.
   ihren Hash, Range-Anfragen mit genau einem Bereich, abgebrochene Streams
   beenden das Lesen sofort — ein Browser kann den Server nicht mit
   halboffenen Video-Streams blockieren.
+- **Audio-Cache:** Lautheits-Analyse und abspielbare Kopien liegen unter
+  einem Pfad, der nur aus dem geprüften Hash gebildet wird; fml schreibt nie
+  in die Originale. Ein **Cover** ist ein Verweis zwischen zwei
+  katalogisierten Items, kein Upload und kein Pfad.
 
 ## Restrisiken & Betriebsempfehlung
 
@@ -89,7 +103,8 @@ Internet: nie blind vertrauen.
   ist gewollt, aber ein Grund mehr, den Server nicht nach außen zu öffnen.
 - **Neue Formate = neue Prüfung.** Die TIFF/PSD-Vorschau läuft über Pillow
   (serverseitig gerendertes JPEG, Original unangetastet); PDF wird nur
-  katalogisiert. Für jeden weiteren Parser gelten dieselben Regeln (Parser
+  katalogisiert; Audio läuft über den eigenen Tag-Parser und ffmpeg (siehe
+  oben). Für jeden weiteren Parser gelten dieselben Regeln (Parser
   deckeln, Ausgabe escapen).
 
 ## Abhängigkeiten im Blick behalten

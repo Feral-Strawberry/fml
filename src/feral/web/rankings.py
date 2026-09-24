@@ -2,6 +2,8 @@
 
 Die Population einer Arena ist ihr Filterausdruck, live ausgewertet (wie
 Smart Folders); ein leerer Ausdruck heißt „ganze Bibliothek" (ADR 0040).
+Audio gehört nie dazu (#175, ``ARENA_VIEW``): Songs vergleicht und bewertet
+das Audio-Modul mit eigenen Werkzeugen.
 Abgelehnte/verschwundene Items fallen automatisch heraus: sie stehen nicht
 mehr in ``items`` (ihre Duell-Geschichte bleibt, siehe ``db/rankings.py``).
 
@@ -52,7 +54,14 @@ SCORE_WINDOW = 150.0
 # dabei sind (im Bibliotheks-Pfad sonst der exakte, seltene Fallback-Lauf).
 SAMPLE_SIZE = 8
 
-_ALL = "1"   # Populationsbedingung „ganze Bibliothek"
+# Grundbereich jeder Arena (#175): Bilder und Videos, nie Audio — zum
+# Vergleichen und Bewerten von Songs hat das Audio-Modul eigene Werkzeuge
+# (Vergleichsansicht, Zeitkommentare). Ausdrücklich per ``media_kind``, NICHT
+# über den Galerie-Grundbereich der Ansicht: der nimmt mit Modul an die Songs
+# mit Cover auf (ADR 0090). ``typ: audio`` ergibt damit einen leeren Pool.
+# Steht vor dem Ausdruck wie ``view_preds`` vor den Chips — und im Zähler-
+# Cache-Schlüssel, den Sidebar (``/api/rankings``) und Paarung teilen.
+ARENA_VIEW = (filters.view_predicate("galerie"),)
 _COLS = "i.file_hash, i.media_kind, i.container"
 _FIELDS = ("file_hash", "media_kind", "container", "score", "duels", "eliminated")
 
@@ -95,27 +104,30 @@ SELECT * FROM (
      LIMIT ? OFFSET ?)
 """
 
-# Ganze Bibliothek: Score-Zeilen der Arena, nur Items, die es noch gibt.
+# Ganze Bibliothek: Score-Zeilen der Arena, nur Items, die es noch gibt
+# und die im Grundbereich liegen (``{pop}``, Parameter nach der Arena-ID).
 # CROSS JOIN legt die Reihenfolge fest (SQLite-Konvention): außen die
 # kleine Score-Menge über den Primärschlüssel (ranking_id, file_hash).
 _LIBRARY_SCORED = """
     FROM ranking_scores s
     CROSS JOIN items i ON i.file_hash = s.file_hash
-    WHERE s.ranking_id = ?
+    WHERE s.ranking_id = ? AND {pop}
 """
 
 _BOARD_ORDER = "ORDER BY s.eliminated, s.score DESC, s.duels DESC, s.file_hash"
 
 
-def _population_where(expression: str) -> tuple[str, list[Any]]:
-    """Populationsbedingung über Alias ``i`` (``_ALL`` = ganze Bibliothek) +
-    Parameter. Wirft bei ungültigem Ausdruck (``UserError``, ein
+def _population_where(expression: str) -> tuple[str, list[Any], bool]:
+    """Populationsbedingung über Alias ``i`` (Grundbereich ``ARENA_VIEW`` +
+    Ausdruck), Parameter und ob der Ausdruck filtert (sonst: ganze
+    Bibliothek). Wirft bei ungültigem Ausdruck (``UserError``, ein
     ``ValueError``)."""
+    base, params = filters.build_where(list(ARENA_VIEW))
     if expression and expression.strip():
-        fragment, params = filters.build_where(filters.parse(expression))
+        fragment, extra = filters.build_where(filters.parse(expression))
         if fragment:
-            return f"({fragment})", params
-    return _ALL, []
+            return f"({base}) AND ({fragment})", [*params, *extra], True
+    return f"({base})", params, False
 
 
 def _entry(row: sqlite3.Row) -> dict[str, Any]:
@@ -146,21 +158,23 @@ def _filtered_population(
 
 
 def _library_population(
-    conn: sqlite3.Connection, ranking_id: int, sample_n: int,
+    conn: sqlite3.Connection, ranking_id: int, pop: str, params: list[Any], sample_n: int,
     cache: EpochCache | None, scope: dict | None,
 ) -> tuple[int, dict[str, dict[str, Any]], list[dict[str, Any]]]:
     """Wie ``_filtered_population`` für die ganze Bibliothek: nichts zu
-    kopieren — Zähler aus dem Epochen-Cache, Stichprobe als Index-Pass."""
-    population = library.count_items(conn, None, cache=cache, scope=scope)
+    kopieren — Zähler aus dem Epochen-Cache, Stichprobe als Index-Pass.
+    ``pop`` ist hier nur der Grundbereich (``ARENA_VIEW``)."""
+    population = library.count_items(conn, None, cache=cache, scope=scope,
+                                     view_preds=ARENA_VIEW)
     scored = {
         row["file_hash"]: _entry(row) for row in conn.execute(
             f"SELECT s.file_hash, i.media_kind, i.container, s.score, s.duels, s.eliminated"
-            f"{_LIBRARY_SCORED}", (ranking_id,))
+            f"{_LIBRARY_SCORED.format(pop=pop)}", (ranking_id, *params))
     }
     sample = [
         _unscored(_entry(row)) for row in conn.execute(
             f"SELECT {_COLS}, NULL AS score, NULL AS duels, NULL AS eliminated"
-            f" FROM items i ORDER BY RANDOM() LIMIT ?", (sample_n,))
+            f" FROM items i WHERE {pop} ORDER BY RANDOM() LIMIT ?", (*params, sample_n))
         if row["file_hash"] not in scored
     ]
     return population, scored, sample
@@ -203,9 +217,10 @@ def next_pair(
     """
     rng = rng or random.Random()
     rid = ranking["id"]
-    pop, params = _population_where(ranking["expression"])
-    if pop == _ALL:
-        population, scored, sample = _library_population(conn, rid, SAMPLE_SIZE, cache, scope)
+    pop, params, filtered = _population_where(ranking["expression"])
+    if not filtered:
+        population, scored, sample = _library_population(
+            conn, rid, pop, params, SAMPLE_SIZE, cache, scope)
     else:
         population, scored, sample = _filtered_population(conn, rid, pop, params, SAMPLE_SIZE)
     if population < 2:
@@ -262,15 +277,17 @@ def leaderboard(
     Liste — für Ausgeschiedene zeigt die UI statt der Zahl den Marker.
     """
     rid = ranking["id"]
-    pop, params = _population_where(ranking["expression"])
-    if pop == _ALL:
-        population = library.count_items(conn, None, cache=cache, scope=scope)
+    pop, params, filtered = _population_where(ranking["expression"])
+    if not filtered:
+        population = library.count_items(conn, None, cache=cache, scope=scope,
+                                         view_preds=ARENA_VIEW)
+        scored_sql = _LIBRARY_SCORED.format(pop=pop)
         total, eliminated = conn.execute(
-            f"SELECT COUNT(*), COALESCE(SUM(s.eliminated), 0){_LIBRARY_SCORED}", (rid,)
+            f"SELECT COUNT(*), COALESCE(SUM(s.eliminated), 0){scored_sql}", (rid, *params)
         ).fetchone()
         rows = [_entry(r) for r in conn.execute(
             f"SELECT s.file_hash, i.media_kind, i.container, s.score, s.duels, s.eliminated"
-            f"{_LIBRARY_SCORED} {_BOARD_ORDER} LIMIT ? OFFSET ?", (rid, limit, offset))]
+            f"{scored_sql} {_BOARD_ORDER} LIMIT ? OFFSET ?", (rid, *params, limit, offset))]
     else:
         population, total, eliminated, rows = 0, 0, 0, []
         for row in conn.execute(

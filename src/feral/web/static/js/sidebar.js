@@ -1,6 +1,7 @@
 // sidebar.js — linke Quellen-Spalte: Gruppe „Bibliothek" (Alle Medien) und
-// Facetten-Gruppen (Modell/Generator/LoRA/Bewertung/Jahr/Dateityp/Format/
-// Auflösung/Eingangsbild).
+// Facetten-Gruppen. Seit ADR 0084: häufig Genutztes oben (Bewertung/
+// Medienart/Generator/Modell/LoRA/Jahr), Seltenes im Sammelblock „Weitere
+// Kriterien" (Dateityp/Format/Auflösung/Eingangsbild/Fundort, ab Werk zu).
 //
 // Kommuniziert nur über den Bus. Seit Block S3 (ADR 0035) füttern die
 // Facetten-Zeilen den EINEN Suchzustand: Klick = 'chip-toggle' (Lightroom-
@@ -20,6 +21,7 @@ import { STRINGS } from "./strings.js";
 import { getStats, getSidebar, getFolders, deleteFolder, getRankings } from "./api.js";
 import { emit, on } from "./main.js";
 import { serverMsg } from "./servermsg.js";
+import { viewKinds } from "./libview.js";
 
 // TODO(Feral Strawberry) — bewusst offengehalten:
 // Roh-Modellwerte aus den Metadaten (z. B. "sd_xl_base_1.0.safetensors")
@@ -43,6 +45,9 @@ export function displayModelName(raw) {
 export const modelChipValues = (x) =>
   (x.variants || [x.model]).map((v) => ({ value: v, exact: true }));
 export const modelTitle = (x) => (x.variants || [x.model]).join(" | ");
+
+// Punktfarben der Medienart-Zeilen (ADR 0084).
+const MEDIA_KIND_DOTS = { bild: "#8a9bd6", video: "#e0915b", audio: "#b06fd6" };
 
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) =>
@@ -83,49 +88,62 @@ export function initSidebar() {
         <div class="mlabel">${STRINGS.groupSmartFolders}</div>
         <div id="sbFolders"></div>
       </div>
-      <div class="sbgroup" data-group="rankings" hidden>
+      <div class="sbgroup" data-group="rankings" data-scope="bild video" hidden>
         <div class="mlabel">${STRINGS.groupRankings}</div>
         <div id="sbRankings"></div>
       </div>
       <div class="sbgroup" data-group="rating">
-        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByRating}</div>
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByRating}<span class="sbactive"></span></div>
         <div id="sbRatings"></div>
       </div>
+      <div class="sbgroup" data-group="mediakind" data-scope="bild video" hidden>
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByMediaKind}<span class="sbactive"></span></div>
+        <div id="sbMediaKinds"></div>
+      </div>
+      <div class="sbgroup" data-group="lyrics" data-scope="audio">
+        <div class="mlabel">${STRINGS.groupByLyrics}<span class="sbactive"></span></div>
+        <div id="sbLyrics"></div>
+      </div>
       <div class="sbgroup" data-group="generator">
-        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByGenerator}</div>
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByGenerator}<span class="sbactive"></span></div>
         <div id="sbTools"></div>
       </div>
       <div class="sbgroup" data-group="model">
-        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByModel}</div>
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByModel}<span class="sbactive"></span></div>
         <div id="sbModels"></div>
       </div>
-      <div class="sbgroup" data-group="lora">
-        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByLora}</div>
+      <div class="sbgroup" data-group="lora" data-scope="bild video">
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByLora}<span class="sbactive"></span></div>
         <div id="sbLoras"></div>
       </div>
       <div class="sbgroup" data-group="year">
-        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByYear}</div>
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByYear}<span class="sbactive"></span></div>
         <div id="sbYears"></div>
       </div>
-      <div class="sbgroup" data-group="container">
-        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByContainer}</div>
-        <div id="sbContainers"></div>
-      </div>
-      <div class="sbgroup" data-group="format">
-        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByFormat}</div>
-        <div id="sbFormats"></div>
-      </div>
-      <div class="sbgroup" data-group="megapixels">
-        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByMegapixels}</div>
-        <div id="sbMegapixels"></div>
-      </div>
-      <div class="sbgroup" data-group="inputimage">
-        <div class="mlabel">${STRINGS.groupByInputImage}</div>
-        <div id="sbInputImage"></div>
-      </div>
-      <div class="sbgroup" data-group="fundort" hidden>
-        <div class="mlabel">${STRINGS.groupByFundort}</div>
-        <div id="sbFundort"></div>
+      <div class="sbgroup sbmore" data-group="more">
+        <div class="mlabel">${STRINGS.groupMore}<span class="sbactive"></span></div>
+        <div class="sbmorebody">
+          <div class="sbgroup" data-group="container">
+            <div class="mlabel" title="${clickHint()}">${STRINGS.groupByContainer}<span class="sbactive"></span></div>
+            <div id="sbContainers"></div>
+          </div>
+          <div class="sbgroup" data-group="format" data-scope="bild video">
+            <div class="mlabel" title="${clickHint()}">${STRINGS.groupByFormat}<span class="sbactive"></span></div>
+            <div id="sbFormats"></div>
+          </div>
+          <div class="sbgroup" data-group="megapixels" data-scope="bild video">
+            <div class="mlabel" title="${clickHint()}">${STRINGS.groupByMegapixels}<span class="sbactive"></span></div>
+            <div id="sbMegapixels"></div>
+          </div>
+          <div class="sbgroup" data-group="inputimage" data-scope="bild video">
+            <div class="mlabel">${STRINGS.groupByInputImage}<span class="sbactive"></span></div>
+            <div id="sbInputImage"></div>
+          </div>
+          <div class="sbgroup" data-group="fundort" hidden>
+            <div class="mlabel">${STRINGS.groupByFundort}<span class="sbactive"></span></div>
+            <div id="sbFundort"></div>
+          </div>
+        </div>
       </div>
     </div>
     <div class="sbfooter">
@@ -144,11 +162,30 @@ export function initSidebar() {
   const inputImageBox = nav.querySelector("#sbInputImage");
   const fundortBox = nav.querySelector("#sbFundort");
   const yearsBox = nav.querySelector("#sbYears");
+  const mediaKindsBox = nav.querySelector("#sbMediaKinds");
+  const lyricsBox = nav.querySelector("#sbLyrics");
+
+  // Geltungsbereich je Gruppe (ADR 0084 Punkt 5): data-scope nennt die
+  // Medienarten, für die eine Gruppe Sinn ergibt; sichtbar ist sie, wenn
+  // sich das mit dem Grundbereich der Ansicht schneidet (LoRA, Format …
+  // nur Bild/Video, Songtext nur Audio). Eigene Klasse statt hidden — das
+  // Attribut gehört den datengetriebenen Schaltern (Modul, Library-Root).
+  function applyScope() {
+    const kinds = viewKinds();
+    for (const g of nav.querySelectorAll(".sbgroup[data-scope]")) {
+      g.classList.toggle("offview", !g.dataset.scope.split(" ").some((k) => kinds.includes(k)));
+    }
+  }
+  applyScope();
 
   // Gruppen ein-/ausklappbar (Feral Strawberry, 2026-07-07: „wird langsam voll"), Klick
-  // auf die Überschrift; Zustand überlebt in localStorage.
+  // auf die Überschrift; Zustand überlebt in localStorage. Der Sammelblock
+  // „Weitere Kriterien" (ADR 0084) ist ab Werk zugeklappt — sein Zustand
+  // steht deshalb unter eigenem Schlüssel als „aufgeklappt".
   const COLLAPSED_KEY = "feral-sb-collapsed";
+  const MORE_OPEN_KEY = "feral-sb-more-open";
   const collapsed = new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) || "[]"));
+  if (localStorage.getItem(MORE_OPEN_KEY) !== "1") collapsed.add("more");
   const openMonths = new Set();   // aufgeklappte Jahre (Session-Gedächtnis)
   for (const group of nav.querySelectorAll(".sbgroup[data-group]")) {
     group.classList.toggle("collapsed", collapsed.has(group.dataset.group));
@@ -160,8 +197,49 @@ export function initSidebar() {
     const key = group.dataset.group;
     collapsed.has(key) ? collapsed.delete(key) : collapsed.add(key);
     group.classList.toggle("collapsed", collapsed.has(key));
-    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
+    if (key === "more") localStorage.setItem(MORE_OPEN_KEY, collapsed.has(key) ? "0" : "1");
+    else localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed].filter((k) => k !== "more")));
+    refreshActiveMarks();
   });
+
+  // Aktiv-Marker (ADR 0084): eine zugeklappte Gruppe (oder der zugeklappte
+  // Sammelblock) mit aktivem Wert zeigt „· N aktiv" im Kopf — kein Filter
+  // ist unsichtbar aktiv. Gezählt wird aus dem Suchzustand, nicht aus den
+  // Zeilen: auch ein Wert ohne eigene Zeile (negiert, getippt) zählt.
+  let activePreds = [];
+  const isField = (f) => (p) => (p.kind === "field" && p.field === f)
+    || (p.kind === "has" && (p.values || []).every((v) => v.value === f));
+  const GROUP_PREDS = {
+    rating: (p) => p.kind === "rating",
+    mediakind: (p) => p.kind === "typ",
+    generator: isField("tool"),
+    model: isField("model"),
+    lora: isField("lora"),
+    year: (p) => p.kind === "year" || p.kind === "month",
+    container: (p) => p.kind === "container",
+    format: (p) => p.kind === "format",
+    megapixels: (p) => p.kind === "mp",
+    inputimage: isField("input_image"),
+    lyrics: isField("lyrics"),
+    fundort: (p) => p.kind === "fundort",
+  };
+  const activeIn = (key) => {
+    if (key === "more") {
+      return [...nav.querySelectorAll(".sbmorebody .sbgroup[data-group]")]
+        .reduce((n, g) => n + activeIn(g.dataset.group), 0);
+    }
+    const match = GROUP_PREDS[key];
+    return match ? activePreds.filter(match).reduce((n, p) => n + (p.values?.length || 1), 0) : 0;
+  };
+  function refreshActiveMarks() {
+    for (const group of nav.querySelectorAll(".sbgroup[data-group]")) {
+      const head = [...group.children].find((c) => c.classList.contains("mlabel"));
+      const mark = head?.querySelector(".sbactive");
+      if (!mark) continue;
+      const n = group.classList.contains("collapsed") ? activeIn(group.dataset.group) : 0;
+      mark.textContent = n ? " " + STRINGS.sidebarActiveMark.replace("{n}", n) : "";
+    }
+  }
 
   // Facetten-Zeile (Block S3): trägt ihr Ein-Wert-Prädikat als JSON
   // (data-chip) — Klick togglet den Wert im Suchzustand (chip-toggle) —
@@ -238,6 +316,9 @@ export function initSidebar() {
   // Live-Population der Arena (Ausdruck kaputt geworden → ⚠ wie bei
   // gespeicherten Suchen); Duelle stehen im Tooltip.
   let rankingsEnabled = false;
+  // Audio-Modul (ADR 0083/0084): die Zeile „Audio" der Medienart gibt es nur
+  // mit Modul; Popover/Tipphilfe (advanced.js) hören auf 'audio-enabled'.
+  let audioEnabled = null;
   const rankingsBox = nav.querySelector("#sbRankings");
   let arenasSeq = 0;
   const renderArenas = (rankings) => {
@@ -297,12 +378,15 @@ export function initSidebar() {
     const [stats, side] = await Promise.allSettled([getStats(), getSidebar(filter)]);
     if (seq !== countsSeq) return;   // eine jüngere Anfrage läuft schon
     const models = side.status === "fulfilled" ? { status: "fulfilled", value: side.value.models } : side;
+    // „Alle Medien" zählt den Grundbereich der Ansicht (ADR 0085); ohne
+    // Grundbereich (kein Audio im Bestand) den ganzen Bestand.
+    const viewTotal = side.status === "fulfilled" ? side.value.total ?? null : null;
     const facets = side.status === "fulfilled" ? { status: "fulfilled", value: side.value.facets } : side;
     if (side.status === "fulfilled") renderRatings(side.value.ratings.ratings);
     if (stats.status === "fulfilled") {
       const s = stats.value;
       nav.querySelector("#sbAllCount").textContent =
-        s.total_items.toLocaleString(STRINGS.locale);
+        (viewTotal ?? s.total_items).toLocaleString(STRINGS.locale);
       nav.querySelector("#sbDupesCount").textContent =
         s.items_multi_location.toLocaleString(STRINGS.locale);
       const size = (b) => b >= 1e9
@@ -324,6 +408,10 @@ export function initSidebar() {
         nav.querySelector('.sbgroup[data-group="rankings"]').hidden = !rankingsEnabled;
         emit("rankings-enabled", { enabled: rankingsEnabled });   // 🏆 in der Chip-Leiste
         loadArenas();
+      }
+      if (audioEnabled !== !!s.audio) {
+        audioEnabled = !!s.audio;
+        emit("audio-enabled", { enabled: audioEnabled });
       }
     }
     if (models.status === "fulfilled") {
@@ -349,6 +437,13 @@ export function initSidebar() {
       const f = facets.value;
       // Dubletten-Zeile ausblendbar (Admin → Konfiguration → Oberfläche).
       nav.querySelector('.sbrow[data-kind="dupes"]').hidden = f.show_dupes === false;
+      // Medienart (ADR 0084): nur Arten, die es gibt (Server), Audio nur mit
+      // Modul — keine dauerhaft toten Zeilen; Zähler mitfilternd.
+      const kinds = (f.media_kinds || []).filter((m) => m.typ !== "audio" || audioEnabled);
+      nav.querySelector('.sbgroup[data-group="mediakind"]').hidden = !kinds.length;
+      mediaKindsBox.innerHTML = kinds.map((m) =>
+        chipRow(pred("typ", m.typ), STRINGS.mediaKindLabels[m.typ] ?? m.typ,
+                MEDIA_KIND_DOTS[m.typ] ?? "var(--faint)", m.count, `typ: ${m.typ}`)).join("");
       containersBox.innerHTML = f.containers.map((c) =>
         chipRow(pred("container", c.container), c.container.toUpperCase(), "#b06fd6", c.count)).join("");
       formatsBox.innerHTML = Object.entries(STRINGS.formatLabels).map(([key, label]) =>
@@ -382,6 +477,14 @@ export function initSidebar() {
                   "#c9b45b", f.input_image.mit, "has: input_image")
           + chipRow(pred("has", "input_image", { negated: true }), STRINGS.inputImageWithout,
                     "var(--faint)", f.input_image.ohne, "-has: input_image")
+        : "";
+      // Songtext (ADR 0084): has: lyrics = Gesang, ohne = instrumental —
+      // Bauform wie Eingangsbild, nur in der Audioansicht (data-scope).
+      lyricsBox.innerHTML = f.lyrics
+        ? chipRow(pred("has", "lyrics"), STRINGS.lyricsWith,
+                  "#b06fd6", f.lyrics.mit, "has: lyrics")
+          + chipRow(pred("has", "lyrics", { negated: true }), STRINGS.lyricsWithout,
+                    "var(--faint)", f.lyrics.ohne, "-has: lyrics")
         : "";
       // Fundort (ADR 0041, I2): Gruppe nur bei konfigurierter Library —
       // sonst wäre alles „nur extern" und die Facette ohne Aussage.
@@ -490,6 +593,7 @@ export function initSidebar() {
 
   function refreshHighlights() {
     placeOrHint();   // Ersthinweis überlebt die Neuzeichnung der Listen
+    refreshActiveMarks();
     for (const row of nav.querySelectorAll(".sbrow")) {
       if (row.dataset.akey !== undefined) {
         row.classList.toggle("active", activeKeys.has(row.dataset.akey));
@@ -582,6 +686,7 @@ export function initSidebar() {
   }
   on("search-state-changed", (d) => {
     activeKeys = new Set();
+    activePreds = (d.predicates || []).filter((p) => p.kind !== "sort");
     for (const p of d.predicates || []) {
       if (p.kind === "sort") continue;
       for (const v of p.values || []) {
@@ -598,7 +703,14 @@ export function initSidebar() {
       }
     }
     refreshHighlights();
-    applyFilter(d.expression || "");
+    if (d.viewChanged) {
+      // Neuer Grundbereich: sofort zählen, auch bei gleichem Ausdruck.
+      currentFilter = d.expression || "";
+      clearTimeout(filterTimer);
+      loadCounts();
+    } else {
+      applyFilter(d.expression || "");
+    }
   });
   // Gespeicherte Suche geladen (Sidebar-Klick) bzw. gerade gespeichert
   // (Speicherdialog): ab jetzt ist sie die Quelle der Chips.
@@ -616,11 +728,18 @@ export function initSidebar() {
   on("source-changed", (d) => {
     if (d?.kind !== "dupes") return;
     activeKeys = new Set();
+    activePreds = [];
     stateEmpty = true;
     dupesActive = true;
     refreshHighlights();
     applyFilter("");   // Spezialansicht: Zähler wieder global
   });
+
+  // Ansichtswechsel (ADR 0085): andere Gruppen, andere Zähl-Basis — die
+  // Chips (und damit currentFilter) bleiben.
+  // Die Zähler lädt der Suchzustand nach (viewChanged, s. unten) — search.js
+  // verkündet ihn nach dem Ausdünnen der Medienart-Chips neu.
+  on("library-view-changed", () => { applyScope(); refreshActiveMarks(); loadFolders(); });
 
   // Nach abgeschlossenen Engine-Aufgaben (Scan/Wartung) alles auffrischen.
   // Nach einem Rating-Klick NUR Bewertungs-Gruppe + Smart Folders — die
@@ -631,6 +750,7 @@ export function initSidebar() {
   on("annotation-changed", () => { loadCounts(); loadFolders(); });
   on("model-changed", () => { loadCounts(); loadFolders(); });  // ADR 0022
   on("items-rejected", () => { loadCounts(); loadFolders(); }); // ADR 0041
+  on("cover-changed", () => { loadCounts(); loadFolders(); });  // Song kommt/geht (#165)
   on("folders-changed", loadFolders);
   // Sammel-Aktion (ADR 0040): kann Tags/Modelle/Bewertungen in Masse ändern.
   on("bulk-applied", () => { loadCounts(); loadFolders(); });

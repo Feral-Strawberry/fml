@@ -1,4 +1,4 @@
-"""Manuelle Schicht: Rating, Notizen, Tags (Stufe 3.1, ADR 0005/0017).
+"""Manuelle Schicht: Rating, Notizen, Tags, Zeitkommentare (Stufe 3.1, ADR 0005/0017; #163).
 
 Eigene Persistenz-Funktionen, strikt getrennt von der extrahierten Schicht —
 hier schreibt ausschließlich Feral Strawberry (bzw. die GUI in seinem Auftrag), nie ein
@@ -11,7 +11,7 @@ Konventionen:
 - Tag-Namen werden getrimmt und case-insensitiv dedupliziert ("Portrait" ==
   "portrait"); Tags überleben das Entfernen vom letzten Item (Vokabular).
 - Unbekannter `file_hash` ⇒ ``ValueError`` (klarer als ein FK-Fehler).
-- Textänderungen (Notizen, Tags, manuelles Modell) pflegen die FTS-Zeile des
+- Textänderungen (Notizen, Tags, manuelles Modell, Zeitkommentare) pflegen die FTS-Zeile des
   Items in derselben Transaktion (ADR 0036) — ein Tag ist sofort findbar.
 """
 
@@ -149,7 +149,7 @@ def remove_tag(conn: sqlite3.Connection, file_hash: str, name: str) -> bool:
 
 
 def annotations_for(conn: sqlite3.Connection, file_hash: str) -> dict[str, Any]:
-    """Manuelle Schicht eines Items: {rating, notes, updated_at, tags}."""
+    """Manuelle Schicht eines Items: {rating, notes, model, updated_at, tags, cover}."""
     row = conn.execute(
         "SELECT rating, notes, model, updated_at FROM annotations WHERE file_hash = ?",
         (file_hash,),
@@ -168,6 +168,8 @@ def annotations_for(conn: sqlite3.Connection, file_hash: str) -> dict[str, Any]:
         "model": row["model"] if row else None,
         "updated_at": row["updated_at"] if row else None,
         "tags": tags,
+        # Cover eines Songs (#165, ADR 0090): Hash des Bildes oder None.
+        "cover": cover_of(conn, file_hash),
     }
 
 
@@ -181,3 +183,149 @@ def list_tags(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                 GROUP BY t.id ORDER BY t.name COLLATE NOCASE"""
         )
     ]
+
+
+# -- Zeitkommentare (Audio A6, #163, ADR 0088) ---------------------------------------------
+
+def _comment_text(text: str | None) -> str:
+    value = (text or "").strip()
+    if not value:
+        raise UserError("commentEmpty")
+    return value
+
+
+def _comment_ms(at_ms: int) -> int:
+    if not isinstance(at_ms, int) or isinstance(at_ms, bool) or at_ms < 0:
+        raise UserError("commentTime", value=repr(at_ms))
+    return at_ms
+
+
+def list_comments(conn: sqlite3.Connection, file_hash: str) -> list[dict[str, Any]]:
+    """Zeitkommentare eines Items in zeitlicher Folge."""
+    return [
+        dict(r)
+        for r in conn.execute(
+            """SELECT id, at_ms, text, created_at, updated_at FROM time_comments
+                WHERE file_hash = ? ORDER BY at_ms, id""",
+            (file_hash,),
+        )
+    ]
+
+
+def add_comment(
+    conn: sqlite3.Connection, file_hash: str, at_ms: int, text: str, *, now: str | None = None
+) -> int:
+    """Kommentar an der Stelle ``at_ms`` anlegen → id. Leerer Text ⇒ Fehler."""
+    _require_item(conn, file_hash)
+    value, ms = _comment_text(text), _comment_ms(at_ms)
+    ts = now or now_iso()
+    with conn:
+        cur = conn.execute(
+            """INSERT INTO time_comments (file_hash, at_ms, text, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (file_hash, ms, value, ts, ts),
+        )
+        update_search_index(conn, file_hash)   # ADR 0036: sofort findbar
+    return int(cur.lastrowid)
+
+
+def _require_comment(conn: sqlite3.Connection, file_hash: str, comment_id: int) -> None:
+    row = conn.execute(
+        "SELECT 1 FROM time_comments WHERE id = ? AND file_hash = ?", (comment_id, file_hash)
+    ).fetchone()
+    if row is None:
+        raise UserError("commentUnknown", id=comment_id)
+
+
+def update_comment(
+    conn: sqlite3.Connection, file_hash: str, comment_id: int, *,
+    text: str | None = None, at_ms: int | None = None, now: str | None = None,
+) -> None:
+    """Text und/oder Stelle eines Kommentars ändern. Leerer Text ⇒ Fehler
+    (Löschen ist ``delete_comment``)."""
+    _require_comment(conn, file_hash, comment_id)
+    sets, params = [], []
+    if text is not None:
+        sets.append("text = ?")
+        params.append(_comment_text(text))
+    if at_ms is not None:
+        sets.append("at_ms = ?")
+        params.append(_comment_ms(at_ms))
+    if not sets:
+        return
+    with conn:
+        conn.execute(
+            f"UPDATE time_comments SET {', '.join(sets)}, updated_at = ? WHERE id = ?",  # noqa: S608 — feste Spaltennamen
+            (*params, now or now_iso(), comment_id),
+        )
+        update_search_index(conn, file_hash)
+
+
+def delete_comment(conn: sqlite3.Connection, file_hash: str, comment_id: int) -> bool:
+    """Kommentar löschen; ``False``, wenn es ihn (für dieses Item) nicht gab."""
+    with conn:
+        cur = conn.execute(
+            "DELETE FROM time_comments WHERE id = ? AND file_hash = ?", (comment_id, file_hash)
+        )
+        if cur.rowcount:
+            update_search_index(conn, file_hash)
+    return bool(cur.rowcount)
+
+
+# -- Cover (Audio A8, #165, ADR 0090) --------------------------------------------------------
+
+def cover_of(conn: sqlite3.Connection, file_hash: str) -> str | None:
+    """Hash des Coverbilds eines Songs oder ``None``."""
+    row = conn.execute(
+        "SELECT cover_hash FROM covers WHERE file_hash = ?", (file_hash,)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def set_cover(
+    conn: sqlite3.Connection, file_hash: str, cover_hash: str, *, now: str | None = None
+) -> None:
+    """Bild ``cover_hash`` als Cover des Songs ``file_hash`` setzen (ersetzt ein
+    vorhandenes). Nur ein Verweis in der DB, keine Datei wird angefasst.
+    Song muss Audio sein, das Cover ein Bild der Bibliothek."""
+    kinds = dict(conn.execute(
+        "SELECT file_hash, media_kind FROM items WHERE file_hash IN (?, ?)",
+        (file_hash, cover_hash),
+    ).fetchall())
+    for h in (file_hash, cover_hash):
+        if h not in kinds:
+            raise UserError("itemUnknown", hash=h)
+    if kinds[file_hash] != "audio":
+        raise UserError("coverNotSong")
+    if kinds[cover_hash] != "image":
+        raise UserError("coverNotImage")
+    ts = now or now_iso()
+    with conn:
+        conn.execute(
+            """INSERT INTO covers (file_hash, cover_hash, created_at, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(file_hash) DO UPDATE
+                  SET cover_hash = excluded.cover_hash, updated_at = excluded.updated_at""",
+            (file_hash, cover_hash, ts, ts),
+        )
+
+
+def remove_cover(conn: sqlite3.Connection, file_hash: str) -> bool:
+    """Cover entfernen; ``False``, wenn der Song keins hatte."""
+    with conn:
+        cur = conn.execute("DELETE FROM covers WHERE file_hash = ?", (file_hash,))
+    return bool(cur.rowcount)
+
+
+def has_embedded_picture(conn: sqlite3.Connection, file_hash: str) -> bool:
+    """Trägt die Audiodatei ein eingebettetes Bild (Suno-Cover, APIC, FLAC-
+    PICTURE, M4A-``covr``)? Aus Schicht 1: Bild-Deskriptoren der Walker
+    (``id3.picture_descriptor``) oder eine Bildspur in ffprobes Eckwerten —
+    bei Audio ist jede „Video"-Spur das Cover. Zählt NICHT als Cover."""
+    return conn.execute(
+        """SELECT EXISTS (SELECT 1 FROM raw_metadata
+                           WHERE file_hash = ?
+                             AND (value_text LIKE '{"mime": %'
+                                  OR (keyword = 'codec_type' AND value_text = 'video')))""",
+        (file_hash,),
+    ).fetchone()[0] == 1

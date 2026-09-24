@@ -196,7 +196,8 @@ def move_out(
             #    darf hier scheitern (unbekannter/kaputter Container) — dann
             #    greift der Dateisystem-Stempel als Rückfall.
             try:
-                extraction = container.extract(path)
+                # Nur fürs Datum — hier ist jedes Format recht.
+                extraction = container.extract(path, audio_enabled=True)
             except Exception:
                 extraction = ContainerExtraction(container="unbekannt")
             when, date_source = determine_date(extraction, path.stat(), min_date=min_date)

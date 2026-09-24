@@ -29,6 +29,7 @@ const el = (sel) => root.querySelector("#" + sel);
 const KIND_LABELS = () => ({
   failed: STRINGS.issuesKindFailed, warning: STRINGS.issuesKindWarning,
   thumbnail: STRINGS.issuesKindThumbnail, playback: STRINGS.issuesKindPlayback,
+  audio: STRINGS.issuesKindAudio,
 });
 
 export function render(target) {

@@ -35,6 +35,16 @@ internet: never trust it blindly.
   stops the whole run — the file becomes an issue entry, the scan goes on.
 - **ComfyUI workflow graphs** are evaluated with cycle protection — a
   deliberately chained/cyclic graph does not run into an endless loop.
+- **Audio tags** (ID3, APEv2, Vorbis comment, WAV/AIFF/CAF chunks) are read
+  by fml's own standard-library parser: no block is read beyond 64 MiB,
+  truncated blocks are detected, compressed ID3 frames are decompressed with
+  a cap, embedded pictures are only described, never stored. Tested
+  with tens of thousands of mangled files: no crash, no hang.
+- **ffmpeg/ffprobe** (videos, audio) receive every file as a local file:
+  `-protocol_whitelist file` and an absolute `file:` path. A crafted file
+  (such as a hidden playlist) cannot make ffmpeg access the network, and a
+  file name is never read as an option or protocol. Every call runs without
+  a shell and with a time limit.
 
 **Processing / database:**
 
@@ -44,8 +54,8 @@ internet: never trust it blindly.
 
 **Display (in the browser interface):**
 
-- Every text originating from a file (prompt, raw metadata, filename,
-  tags, search hits) is **HTML-escaped** when inserted into the page —
+- Every text originating from a file (prompt, raw metadata, song title and
+  lyrics, filename, tags, time comments, search hits) is **HTML-escaped** when inserted into the page —
   embedded malicious code is displayed as text, not executed.
 - The workflow graph preview forces all coordinates from the untrusted
   JSON to **numbers**, so no value can break out of the SVG; colour values
@@ -71,6 +81,10 @@ internet: never trust it blindly.
   range requests with exactly one range, aborted streams stop reading
   immediately — a browser cannot block the server with half-open video
   streams.
+- **Audio cache:** loudness analysis and playable copies live under a path
+  built only from the validated hash; fml never writes into the originals.
+  A **cover** is a reference between two cataloged items, no upload and no
+  path.
 
 ## Residual risks & operating recommendation
 
@@ -91,7 +105,8 @@ internet: never trust it blindly.
   server.
 - **New formats = new review.** The TIFF/PSD preview goes through Pillow
   (a server-side rendered JPEG, the original untouched); PDF is only
-  cataloged. For every further parser the same rules apply (cap the
+  cataloged; audio goes through fml's own tag parser and ffmpeg (see
+  above). For every further parser the same rules apply (cap the
   parsers, escape the output).
 
 ## Keeping an eye on dependencies

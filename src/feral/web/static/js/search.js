@@ -18,8 +18,33 @@
 // eine Spezialansicht außerhalb des Chip-Zustands.
 
 import { STRINGS } from "./strings.js";
-import { parseFilter, buildFilter } from "./api.js";
+import { parseFilter, buildFilter, libraryView } from "./api.js";
 import { emit, on } from "./main.js";
+import { viewKinds } from "./libview.js";
+
+/** Medienart-Chips für eine Ansicht ausdünnen (ADR-0084-Nachtrag, #159): die
+ *  Medienart gilt immer INNERHALB der Ansicht. Werte, die es im Grundbereich
+ *  nicht gibt, fallen weg (typ: bild beim Wechsel in die Audioansicht);
+ *  ein verneinter Chip, der den ganzen Grundbereich ausschlösse, ebenso.
+ *  Ausnahme: ``audio`` bleibt in der Galerie stehen, dort zeigt es die
+ *  fertigen Songs mit Cover (ADR 0090); ohne welche erklärt der Leer-
+ *  Hinweis den Weg in die Audioansicht. Alle anderen Chips bleiben —
+ *  dieselbe Frage, andere Linse. Liefert die neue Prädikat-Liste oder null,
+ *  wenn sich nichts ändert. */
+export function pruneForView(predicates, view) {
+  const inside = viewKinds(view);
+  const keep = view === "audio" ? inside : [...inside, "audio"];
+  let changed = false;
+  const out = [];
+  for (const p of predicates) {
+    if (p.kind !== "typ") { out.push(p); continue; }
+    const values = p.values.filter((v) => keep.includes(v.value));
+    const coversAll = p.negated && inside.every((k) => values.some((v) => v.value === k));
+    if (values.length !== p.values.length || coversAll) changed = true;
+    if (values.length && !coversAll) out.push({ ...p, values });
+  }
+  return changed ? out : null;
+}
 
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>
@@ -33,6 +58,14 @@ export const looksLikeExpr = (s) =>
 
 // Begriffe der Texteingabe: "…" hält Wortfolgen zusammen (FTS-Phrase).
 const splitTerms = (s) => s.match(/"[^"]*"|\S+/g) || [];
+
+/** Getippte Eingabe → Ausdruck: Grammatik bleibt, wie sie ist; nackte
+ *  Begriffe werden text:-Prädikate. EINE Regel für die Suche und den
+ *  Cover-Dialog (#165). */
+export const inputExpression = (text) => (looksLikeExpr(text)
+  ? text : splitTerms(text).map((t) => `text: ${t}`).join(" "));
+/** Reicht die Eingabe fürs Live-Filtern (kein Ausdruck, ab 3 Zeichen)? */
+export const liveInput = (text) => !looksLikeExpr(text) && text.length >= 3;
 
 // Getippter Einzelwert (Chip-Editor, Tipphilfe) → {value, exact} nach der
 // Grammatik (ADR 0035 + Nachtrag #132): "…" = exakt, '…' = enthält als
@@ -159,22 +192,25 @@ export function initSearch() {
   // — das Grid startet dann oben ohne Rücksprung (Issue #33). Alles andere
   // (Chips, ✕ Filter zurücksetzen, Esc) behält den Rücksprung zum
   // ausgewählten Bild (ADR 0060).
-  function announce(reset = false) {
+  // viewChanged: true = Ansichtswechsel (ADR 0085) — Galerie und Sidebar
+  // laden daraufhin im neuen Grundbereich, auch bei gleichem Ausdruck.
+  function announce(reset = false, viewChanged = false) {
     emit("search-state-changed", {
       expression: effectiveExpression(),
       canonical: state.expression,   // ohne Live-Begriffe — Vergleichsbasis (context.js)
       predicates: state.predicates,
       sort: state.sort,
       reset,
+      viewChanged,
     });
   }
 
-  function setState(d, { reset = false } = {}) {
+  function setState(d, { reset = false, viewChanged = false } = {}) {
     state = d;
     dupes = false;
     hideError();
     renderChips();
-    announce(reset);
+    announce(reset, viewChanged);
   }
 
   /** Getippten/gespeicherten Ausdruck übernehmen (ersetzt den Zustand). */
@@ -197,16 +233,16 @@ export function initSearch() {
   }
 
   /** Chip-Zustand (bearbeitete Prädikate) serverseitig kanonisieren. */
-  async function setPredicates(preds) {
+  async function setPredicates(preds, opts = {}) {
     const seq = ++stateSeq;
     if (!preds.length) {
-      setState({ expression: "", predicates: [], sort: null });
+      setState({ expression: "", predicates: [], sort: null }, opts);
       return;
     }
     try {
       const d = await buildFilter(preds);
       if (seq !== stateSeq) return;
-      setState(d);
+      setState(d, opts);
     } catch (err) {
       if (seq === stateSeq) showError(err.message);
     }
@@ -241,7 +277,8 @@ export function initSearch() {
     // Speichern + Sammel-Aktion (Großbaustelle K) + Filter zurücksetzen
     // sitzen als EINE Gruppe in #midtools statt im Chip-Fluss.
     saveBtn.hidden = !(state.expression && !dupes);
-    arenaBtn.hidden = !(rankingsEnabled && !dupes);
+    // Arenen vergleichen Bilder/Videos — in der Audioansicht kein 🏆 (ADR 0085).
+    arenaBtn.hidden = !(rankingsEnabled && !dupes && libraryView() !== "audio");
     bulkBtn.hidden = dupes || galleryTotal <= 0;
     resetBtn.hidden = !(state.predicates.length || liveTerms.length || dupes);
     emit("chips-rendered", {});   // context.js hängt sein Segment ein — VOR der Messung
@@ -475,9 +512,7 @@ export function initSearch() {
     if (!text) return;
     // Grammatik-Ausdruck ODER Begriffe → beides landet als Chips im EINEN
     // Zustand (additiv zum Bestehenden — Eingaben werfen den Kontext nicht weg).
-    const addition = looksLikeExpr(text)
-      ? text
-      : splitTerms(text).map((t) => `text: ${t}`).join(" ");
+    const addition = inputExpression(text);
     if (await loadExpression([state.expression, addition].filter(Boolean).join(" "))) {
       q.value = "";
     }
@@ -487,6 +522,17 @@ export function initSearch() {
 
   // Sidebar-Klick: Wert togglen — neuer Wert derselben Gruppe erweitert den
   // Chip zum ODER, aktiver Wert fliegt raus (leerer Chip verschwindet).
+  // Ansichtswechsel (ADR 0085): Der Suchzustand ist der EINE Auslöser fürs
+  // Neuladen — erst die Medienart-Chips für den neuen Grundbereich
+  // ausdünnen, dann verkünden (Grid oben, ohne Rücksprung: das ausgewählte
+  // Item gehört zur anderen Ansicht). So lädt die Galerie einmal, und ein
+  // unmöglicher typ:-Chip blitzt nie als leere Ansicht auf.
+  on("library-view-changed", (d) => {
+    const pruned = pruneForView(clonePreds(), d.view);
+    if (pruned) setPredicates(pruned, { reset: true, viewChanged: true });
+    else { dupes = false; renderChips(); announce(true, true); }
+  });
+
   on("chip-toggle", async (d) => {
     const pred = d.pred;
     // Lightroom-Regel (Feral Strawberry, 2026-09-08, ADR-0035-Nachtrag): nur ein

@@ -28,7 +28,7 @@ from typing import Any, Callable
 from .db import connect
 from .extract.video_ffprobe import video_stream_facts
 from .interpret.video import browser_support
-from .tools import find_binary
+from .tools import find_binary, media_input
 
 _TIMEOUT_SECONDS = 30
 _SIZE_UNITS = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
@@ -128,7 +128,7 @@ def probe_video_stream(path: str, *, run: Callable[..., Any] = subprocess.run) -
     try:
         proc = run(
             [find_binary("ffprobe") or "ffprobe", "-v", "error", "-print_format", "json",
-             "-show_streams", "-select_streams", "v:0", path],
+             "-show_streams", "-select_streams", "v:0", *media_input(path)],
             capture_output=True, timeout=_TIMEOUT_SECONDS,
         )
     except FileNotFoundError as exc:

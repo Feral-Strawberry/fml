@@ -16,11 +16,13 @@ from __future__ import annotations
 import sqlite3
 from concurrent.futures import Executor
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Sequence
 
 from ..db import store_interpretations
 from ..db.store import now_iso
 from ..extract.types import RawMetadataItem
+from . import suno
 from .registry import interpret_items
 from .types import Interpretation
 
@@ -97,6 +99,20 @@ def _planned_rows(interpretations: Sequence[Interpretation]) -> list[tuple]:
     return rows
 
 
+def _suno_media_date(
+    conn: sqlite3.Connection, file_hash: str, interpretations: Sequence[Interpretation],
+) -> None:
+    """Suno-Erstellzeit wird Mediendatum (ADR 0083) — auch rückwirkend, damit
+    ``python -m feral.interpret`` für den Bestand genügt (Rescan-Prinzip).
+    Nur für Suno-Items: Bilddaten bleiben Sache der Scan-Kaskade."""
+    if not any(i.parser == suno.NAME for i in interpretations):
+        return
+    when = suno.created_at(raw_items_for(conn, file_hash))
+    if when is not None and when <= datetime.now(timezone.utc) + timedelta(days=1):
+        from ..importer import set_media_date   # Lazy: importer → interpret
+        set_media_date(conn, file_hash, when, "metadaten")
+
+
 def reparse_database(
     conn: sqlite3.Connection,
     *,
@@ -145,6 +161,7 @@ def reparse_database(
                 conn, file_hash=file_hash, interpretations=interpretations,
                 now=ts, commit=False,
             )
+            _suno_media_date(conn, file_hash, interpretations)
         conn.commit()
         if progress is not None:
             progress(report)

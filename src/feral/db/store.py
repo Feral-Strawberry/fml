@@ -36,11 +36,20 @@ _MEDIA_KIND = {
     "pdf": "document",
     "matroska": "video",
     "isobmff": "video",
+    # Audio-Modul (ADR 0083). M4A/tonloses Matroska setzt der Extraktor
+    # selbst auf "audio" (ContainerExtraction.media_kind).
+    "mp3": "audio",
+    "flac": "audio",
+    "ogg": "audio",
+    "wav": "audio",
+    "aiff": "audio",
+    "caf": "audio",
 }
 
 
 def media_kind_for(container: str) -> str:
-    """Grobe Medienart eines Containers: ``image`` | ``video`` | ``document``."""
+    """Grobe Medienart eines Containers: ``image`` | ``video`` | ``audio`` |
+    ``document``."""
     return _MEDIA_KIND.get(container, "unknown")
 
 
@@ -109,7 +118,8 @@ def store_extraction(
                     wird beim nächsten Watcher-Start voll geprüft).
     """
     ts = now or now_iso()
-    media_kind = media_kind_for(extraction.container)
+    # Tatsächliche Spuren schlagen die Container-Zuordnung (ADR 0083).
+    media_kind = extraction.media_kind or media_kind_for(extraction.container)
 
     with conn:  # commit bei Erfolg, rollback bei Ausnahme
         # items: anlegen oder updaten; first_seen_at bleibt beim ersten Mal.
@@ -117,8 +127,8 @@ def store_extraction(
             """
             INSERT INTO items
                 (file_hash, file_size, container, media_kind, image_hash,
-                 width, height, fps, first_seen_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 width, height, fps, duration, first_seen_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(file_hash) DO UPDATE SET
                 file_size  = excluded.file_size,
                 container  = excluded.container,
@@ -127,10 +137,12 @@ def store_extraction(
                 width      = COALESCE(excluded.width, items.width),
                 height     = COALESCE(excluded.height, items.height),
                 fps        = COALESCE(excluded.fps, items.fps),
+                duration   = COALESCE(excluded.duration, items.duration),
                 updated_at = excluded.updated_at
             """,
             (file_hash, file_size, extraction.container, media_kind, image_hash,
-             extraction.width, extraction.height, extraction.fps, ts, ts),
+             extraction.width, extraction.height, extraction.fps,
+             extraction.duration, ts, ts),
         )
 
         # Fundort-Eindeutigkeit (ADR 0049, Gegenrichtung zu ADR 0033): ein
@@ -246,7 +258,8 @@ def update_search_index(conn: sqlite3.Connection, file_hash: str) -> None:
     """FTS5-Zeile eines Items neu aufbauen (ADR 0024, kuratiert nach ADR 0036).
 
     Fünf Spalten: ``interp`` (Schicht 2 OHNE negative_prompt), ``names``
-    (Basenamen der Fundorte), ``manuell`` (Tags/Notizen/manuelles Modell),
+    (Basenamen der Fundorte), ``manuell`` (Tags/Notizen/manuelles Modell/
+    Zeitkommentare),
     ``negativ`` (negative_prompt) und ``raw`` (Roh-Texte) — die Standard-
     Suche matcht nur {interp names manuell}. Wird von ``store_extraction``/
     ``store_interpretations`` UND ``db/manual.py`` mitgepflegt; Löschen
@@ -277,6 +290,12 @@ def update_search_index(conn: sqlite3.Connection, file_hash: str) -> None:
     ).fetchone()
     if ann is not None:
         manual_parts.extend(v for v in (ann[0], ann[1]) if v)
+    # Zeitkommentare (#163): „Chorus" findet den Song.
+    manual_parts.extend(
+        r[0] for r in conn.execute(
+            "SELECT text FROM time_comments WHERE file_hash = ? ORDER BY at_ms, id", (file_hash,),
+        )
+    )
     raw = conn.execute(
         """SELECT group_concat(value_text, char(10)) FROM raw_metadata
             WHERE file_hash = ? AND value_text IS NOT NULL""", (file_hash,),

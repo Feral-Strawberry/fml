@@ -43,7 +43,7 @@ scan needed). The mode determines only what happens to the **source**
   | Outcome | Meaning |
   | --- | --- |
   | `_dubletten/` | content is already in the collection (bit-identical) — **and** the collection copy was freshly re-hashed |
-  | `_unbekanntes-format/` | container not recognized — your stumbling-block folder for missing formats |
+  | `_unbekanntes-format/` | container not recognized — your stumbling-block folder for missing formats (audio files land here while the [audio module](audio.md) is off) |
   | `_fehler/` | read error, or the copy could not be verified |
   | `_gesperrt/` | hash is on the blocklist (rejected in the library) — will not be imported again (ADR 0023/0041) |
   | `_ausgefiltert/` | sorted out by the **import rules** (too small / too large / excluded format / no plausible date, see below) — after changing the rules, just drop them in again |
@@ -71,8 +71,11 @@ folders:
   archive thumbnails and other small fry with no value.
 - **Maximum size (longest side)**, e.g. `8000` px: filters huge contact
   sheets/thumbnail overviews (tens of thousands of pixels wide).
-- **Exclude formats**, e.g. `psd, arw`: don't even ingest half-supported
-  formats. Camera RAW files (Sony ARW, Nikon NEF, Canon CR2, DNG) are
+- **Exclude formats/extensions**, e.g. `psd, arw, lang`: don't even
+  ingest half-supported formats or foreign files. An entry matches the
+  detected format **or** the file extension: `lang` keeps programs'
+  language files out, even if their content happens to look like a known
+  format. Camera RAW files (Sony ARW, Nikon NEF, Canon CR2, DNG) are
   recognized specifically instead of slipping through as TIFF.
 - **Earliest plausible date** (`[import] min_date`, default 2015-01-01):
   a file whose creation date is plausible neither from its metadata nor

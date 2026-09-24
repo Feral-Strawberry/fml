@@ -326,6 +326,12 @@ img.pe-icon {
 .sbgroup[data-group] > .mlabel::before { content: "▾ "; color: var(--faint); }
 .sbgroup.collapsed > .mlabel::before { content: "▸ "; }
 .sbgroup.collapsed > :not(.mlabel) { display: none; }
+/* Aktiv-Marker im Kopf zugeklappter Gruppen (ADR 0084): „· N aktiv". */
+.sbactive { color: var(--accent); text-transform: none; letter-spacing: 0; }
+/* Sammelblock „Weitere Kriterien" (ADR 0084): abgesetzt, Gruppen darin
+   leicht eingerückt — Seltenes bleibt erreichbar, aber aus dem Weg. */
+.sbmore { margin-top: 13px; border-top: 1px solid var(--border-soft); }
+.sbmorebody { padding-left: 8px; }
 /* Nach Jahr: Caret klappt die Monats-Unterzeilen auf (ADR 0021) */
 .sbtwist {
   border: 0; background: none; padding: 0 2px;
@@ -682,6 +688,8 @@ img.pe-icon {
 }
 .tarow:hover, .tarow.active { background: var(--accent-dim); }
 .tarow.dim { opacity: .45; }
+/* „Volltext"-Zeile unter einer Vorauswahl (ADR 0084): abgesetzt, ohne Zähler. */
+.tarow.tafull { border-top: 1px solid var(--border-soft); margin-top: 3px; }
 .tacat { color: var(--faint); font-size: 10.5px; flex: none; }
 .talabel { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tacount { font-family: var(--mono); font-size: 9.5px; color: var(--faint); flex: none; }
@@ -714,6 +722,70 @@ img.pe-icon {
   overflow: hidden;
 }
 .ppreview img, .ppreview video { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* Audio (#158, A5 #162): ♪-Bühne mit dem eigenen Player (.aplayer, player.js).
+   Gilt in Panel, Lupe, Einzelansicht und Arena gleich (gemeinsame Weiche
+   api.mediaHtml); im Panel ohne ♪ und ohne Quadrat. */
+.audiostage {
+  width: 100%; height: 100%; box-sizing: border-box; padding: 16px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+}
+.audioglyph { font-size: 64px; line-height: 1; color: var(--faint); }
+.audiodur { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+.audiostage .aplayer { width: min(100%, 640px); }
+.ppreview:has(.aplayer) { aspect-ratio: auto; cursor: default; }
+/* Audioansicht: die Zeile ist der Player — kein zweiter im Panel (#162) */
+body.view-audio #panel .ppreview:has(.aplayer) { display: none; }
+/* …aber ein Cover (#165) bleibt oben stehen, nur ohne Player */
+body.view-audio #panel .ppreview:has(.hascover) { display: block; }
+body.view-audio #panel .ppreview .hascover .aplayer { display: none; }
+body.view-audio #panel .ppreview .audiostage.hascover { padding-bottom: 14px; }
+.ppreview .audiostage { padding: 12px 14px 10px; }
+.ppreview .audioglyph { display: none; }
+.aplayer .wv { position: relative; height: 96px; cursor: pointer; }
+.ppreview .aplayer .wv { height: 54px; }
+.aplayer .pwrow { display: flex; align-items: center; gap: 10px; margin-top: 9px; font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+.aplayer .pgain { margin-left: auto; }
+.aplayer .pnote { margin-top: 6px; font-size: 11px; color: var(--bad); }
+.aplayer .pbtn, #pbar .pbtn { width: 26px; height: 26px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center;
+  justify-content: center; font-size: 10px; color: var(--text); background: var(--panel2); }
+/* Wellenfläche (Liste, Player, Leiste): Canvas + Abspielkopf + Loop-Bereich */
+.wv canvas { position: absolute; left: 0; top: 0; height: 100%; display: block; }
+.wv .ph { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--accent);
+  border-radius: 1px; pointer-events: none; box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg) 60%, transparent); }
+.wv .loopr { position: absolute; top: 0; bottom: 0; background: var(--accent-dim); pointer-events: none;
+  border-left: 1px solid var(--accent-line); border-right: 1px solid var(--accent-line); }
+.wv .loopr.open { border-right-style: dashed; min-width: 2px; }
+
+/* Abspielleiste (A5 #162, Optik-Referenz A0) — unten, über alle Ansichten */
+#pbar { flex: none; height: 90px; display: grid; grid-template-columns: auto minmax(160px, 280px) minmax(0, 1fr) auto;
+  gap: 16px; align-items: center; padding: 0 14px; background: var(--panel); border-top: 1px solid var(--border); }
+#pbar .tr { display: flex; gap: 6px; align-items: center; }
+#pbar .tr button { width: 30px; height: 30px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center;
+  justify-content: center; font-size: 11px; color: var(--dim); background: transparent; border: 1px solid var(--border); }
+#pbar .tr button:disabled { opacity: .35; }
+#pbar .tr button.main { width: 36px; height: 36px; background: var(--accent); border-color: var(--accent); color: #fff; font-size: 12px; }
+#pbar .now { min-width: 0; display: flex; align-items: center; gap: 10px; }
+#pbar .now .nt { min-width: 0; flex: 1; }
+#pbar .pcov { width: 48px; height: 48px; flex: none; border-radius: 6px; overflow: hidden; background: var(--thumb); box-shadow: 0 0 0 1px var(--border-soft); }
+#pbar .pcov img { display: block; width: 100%; height: 100%; object-fit: cover; }
+#pbar .now .n { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#pbar .now .q { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#pbar .now .q b { color: var(--accent); font-weight: 600; }
+#pbar .now .q .bad { color: var(--bad); }
+#pbar .mid { display: flex; align-items: center; gap: 10px; min-width: 0; }
+#pbar .mid .wv { position: relative; flex: 1; height: 60px; cursor: pointer; }
+#pbar .mid .tm { font-family: var(--mono); font-size: 10.5px; color: var(--dim); flex: none; }
+#pbar .opts { display: flex; gap: 6px; align-items: center; }
+#pbar .opts button { font-size: 11px; padding: 3px 8px; color: var(--dim); background: transparent; border: 1px solid var(--border);
+  border-radius: 6px; white-space: nowrap; }
+#pbar .opts button:hover { color: var(--accent); border-color: var(--accent-line); }
+#pbar .opts button.on { color: var(--accent); border-color: var(--accent-line); }
+#pbar .opts .gain { font-family: var(--mono); font-size: 9.5px; color: var(--accent); margin-left: 4px; }
+@media (max-width: 1100px) {
+  #pbar { grid-template-columns: auto minmax(0, 1fr) auto; }
+  #pbar .now { display: none; }
+}
+.tile .ph.audioph { font-size: 34px; }
 .phead { padding: 13px 14px; border-bottom: 1px solid var(--border); }
 .pname { font-family: var(--mono); font-size: 12px; word-break: break-all; line-height: 1.35; margin-bottom: 7px; }
 .pmeta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -784,6 +856,8 @@ img.pe-icon {
   background: var(--panel2); color: var(--dim);
 }
 .locrowv.preferred .lockind { background: var(--accent-dim); color: var(--accent); }
+.locrowv .locreveal { border: 0; background: transparent; padding: 0 4px 0 0; font-size: 12px; cursor: pointer; line-height: 1; }
+.locrowv .locreveal:hover { filter: brightness(1.3); }
 .locrowv a.seg { color: inherit; text-decoration: none; }
 .locrowv a.seg:hover { text-decoration: underline; }
 .locrowv .seg.file { font-weight: 600; }
@@ -1200,6 +1274,9 @@ img.pe-icon {
   flex-direction: column;
 }
 #rankings[hidden] { display: none; }
+/* Musik beim Duellieren (#198): läuft ein Song, endet die Arena über der
+   Abspielleiste (#pbar, 90 px) — Stelle, Pause und ⏭ bleiben erreichbar. */
+body.has-pbar #rankings { bottom: 90px; }
 #rankings #rkTitle { font-size: 13px; font-weight: 600; }
 #rankings #rkBack, #rankings #rkEdit, #rankings #rkClose {
   background: rgba(255, 255, 255, .1);
@@ -1371,3 +1448,178 @@ img.pe-icon {
 
 /* Admin → Wartung → Ranking-Arenen: armierter Lösch-Knopf (zweistufig). */
 .arenadel[data-armed] { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ---------- Audioansicht (ADR 0085, Optik-Referenz aus dem Audio-Mockup A0) ---------- */
+/* Umschalter „Galerie | Audio" in der Kopfzeile, nur mit Audio-Modul. */
+#viewseg { display: inline-flex; flex: none; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+#viewseg[hidden] { display: none; }
+#viewseg button { border: 0; border-radius: 0; background: transparent; color: var(--dim); padding: 5px 12px; font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }
+#viewseg button + button { border-left: 1px solid var(--border); }
+#viewseg button.on { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+/* Geltungsbereich je Sidebar-Gruppe (ADR 0084 Punkt 5) */
+.sbgroup.offview { display: none; }
+/* Leer-Hinweis mit Wechsel-Knopf (ADR 0084 Punkt 2) */
+.gridempty .gotoview { margin-left: 8px; font-size: 12px; padding: 3px 10px; border-radius: 6px; color: var(--accent); border: 1px solid var(--accent-line); background: transparent; }
+
+/* Liste = dieselbe Virtualisierung mit einer Spalte und fester Zeilenhöhe.
+   Spalten: ▶ · Dateiname · Erzeuger · Dauer · Lautheit · Bewertung. */
+:root { --lcols: 28px minmax(140px, 1fr) minmax(0, 170px) 54px 58px 64px 26px; }
+#listhead { flex: none; display: grid; grid-template-columns: var(--lcols); gap: 10px; align-items: end;
+  padding: 7px 14px 5px; background: var(--bg); border-bottom: 1px solid var(--border-soft);
+  overflow-y: hidden; scrollbar-gutter: stable; }
+#listhead[hidden] { display: none; }
+#listhead .num { text-align: right; }
+/* Legende der Wellenfarben (#162): was die Farbe bedeutet, nicht nur welche */
+#listhead .wlegend { grid-column: 1 / -1; display: flex; gap: 14px; justify-content: flex-end; margin-top: 2px;
+  font-size: 10px; color: var(--faint); white-space: nowrap; overflow: hidden; cursor: help; }
+#listhead .wlegend b { font-weight: 600; color: var(--dim); }
+#listhead .wlegend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+#listhead .wlegend i.lo { background: var(--wave-lo); }
+#listhead .wlegend i.mid { background: var(--wave-mid); }
+#listhead .wlegend i.hi { background: var(--wave-hi); }
+/* Lineal der gemeinsamen Zeitachse (ADR 0087) — bündig mit den Wellen */
+#listhead .ruler { grid-column: 1 / -1; position: relative; height: 14px; margin-left: 38px; }
+#listhead .ruler span { position: absolute; top: 0; font-family: var(--mono); font-size: 9px; color: var(--faint); transform: translateX(-50%); }
+#listhead .ruler span:first-child { transform: none; }
+#listhead .ruler span::before { content: ""; position: absolute; left: 50%; top: 11px; width: 1px; height: 3px; background: var(--border); }
+#listhead .ruler span:first-child::before { left: 0; }
+body.view-audio #mid { container-type: inline-size; }
+body.view-audio #gridwrap { padding: 0; scrollbar-gutter: stable; }
+#grid.list { grid-template-columns: 1fr; gap: 0; }
+#grid.list.density-s { --wh: 20px; }
+#grid.list.density-m { --wh: 34px; }
+#grid.list.density-l { --wh: 56px; }
+/* Feste Höhe = Polster 15 + Kopfzeile 26 + Abstand 6 + Wellenfläche */
+.tile.arow { aspect-ratio: auto; height: calc(47px + var(--wh, 18px)); border-radius: 0; overflow: hidden;
+  padding: 7px 14px 8px; background: transparent; box-shadow: none; border-bottom: 1px solid var(--border-soft); cursor: default; }
+.tile.arow:hover { background: color-mix(in srgb, var(--panel2) 70%, transparent); }
+.tile.arow.selected { background: var(--accent-dim); box-shadow: inset 3px 0 0 var(--accent); }
+.arow .rtop { display: grid; grid-template-columns: var(--lcols); gap: 10px; align-items: center; }
+.arow .pbtn { width: 26px; height: 26px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center;
+  justify-content: center; font-size: 10px; color: var(--text); background: var(--panel2); }
+.arow .pbtn:hover:not(:disabled) { border-color: var(--accent-line); color: var(--accent); }
+.arow .pbtn:disabled { opacity: .35; cursor: default; }
+.arow.playing .pbtn, .arow.playing .pbtn:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: #fff; }
+.arow .rname { display: flex; align-items: center; min-width: 0; white-space: nowrap; font-size: 13px; }
+/* white-space: pre — das Leerzeichen am Ende des Anfangs trennt sichtbar vom Rest */
+.arow .rname .pre { color: var(--faint); overflow: hidden; text-overflow: ellipsis; flex: 0 100 auto; min-width: 1ch; white-space: pre; }
+.arow .rname .pre:empty { display: none; }
+.arow .rname b { font-weight: 500; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.arow.playing .rname b { color: var(--accent); }
+.arow .rname .ext { font-family: var(--mono); font-size: 9.5px; color: var(--faint); flex: none; margin-left: 1px; }
+.arow .rtool { font-family: var(--mono); font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.arow .rdur, .arow .rlufs { font-family: var(--mono); font-size: 11px; color: var(--dim); text-align: right; }
+.arow.current:not(.selected) { box-shadow: inset 3px 0 0 var(--accent-line); }
+.arow .rdots { display: inline-flex; gap: 4px; justify-content: flex-end; }
+.arow .rdots .rdot { cursor: pointer; }
+/* Zeitkommentare (#163): Zahl in der Zeile, Pins auf jeder Welle, Tooltip,
+   Eingabe an der Abspielstelle, Abschnitt im Detailpanel (Optik-Referenz A0). */
+.arow .rcom { font-family: var(--mono); font-size: 11px; color: var(--faint); text-align: right; }
+.arow .rcom.has { color: var(--accent); }
+.wv .pins { position: absolute; inset: 0; pointer-events: none; }
+.wv .pin { position: absolute; bottom: -7px; width: 0; height: 0; border-left: 5px solid transparent;
+  border-right: 5px solid transparent; border-bottom: 7px solid var(--text); transform: translateX(-5px);
+  cursor: pointer; pointer-events: auto; z-index: 2; }
+.wv .pin:hover { border-bottom-color: var(--accent); }
+/* Beim Abspielen: Kommentar 1 s vor bis 5 s nach seiner Stelle über der Welle. */
+.wv .plabel { position: absolute; bottom: calc(100% + 3px); transform: translateX(-4px); max-width: 260px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; padding: 1px 6px;
+  border-radius: 5px; background: var(--panel); border: 1px solid var(--border); color: var(--text);
+  pointer-events: none; z-index: 3; opacity: 0; transition: opacity .25s; }
+.wv .plabel.on { opacity: 1; }
+.wv .plabel.r { transform: translateX(calc(-100% + 4px)); }
+.wv .plabel[data-lvl="1"] { bottom: calc(100% + 23px); }
+.wv .plabel[data-lvl="2"] { bottom: calc(100% + 43px); }
+.wv .plabel[data-lvl="3"] { bottom: calc(100% + 63px); }
+.wv .plabel .t { font-family: var(--mono); color: var(--accent); margin-right: 5px; }
+#pintip { position: fixed; z-index: 60; pointer-events: none; font-size: 11px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; max-width: 260px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .35); }
+#pintip .t, #comprompt .t, .com .t { font-family: var(--mono); font-size: 10.5px; color: var(--accent); margin-right: 6px; }
+#comprompt { position: fixed; z-index: 60; display: flex; align-items: center; gap: 4px; width: 320px;
+  padding: 6px 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .35); }
+#comprompt input { flex: 1; min-width: 0; padding: 4px 8px; font-size: 12px; }
+#pComs .coms { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+#pComs .com { display: flex; gap: 3px; align-items: baseline; padding: 4px 6px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+#pComs .com:hover { background: var(--border-soft); }
+#pComs .comadd { font-size: 12px; padding: 4px 10px; }
+#pComs .com .t { flex: none; width: 34px; }
+#pComs .com .ctext { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+#pComs .com .ctext input { width: 100%; padding: 2px 6px; font-size: 12px; }
+#pComs .com .x { flex: none; margin-left: auto; background: none; border: 0; color: var(--faint); font-size: 10px;
+  cursor: pointer; visibility: hidden; }
+#pComs .com:hover .x { visibility: visible; }
+/* Wellenfläche auf der gemeinsamen Zeitachse (ADR 0087); Klick springt. */
+.arow .wv { position: relative; margin: 6px 0 0 38px; height: var(--wh, 18px); cursor: pointer; }
+/* Vergleich in der Liste (A7 #164, Optik-Referenz A0): nur die markierten
+   Songs, höhere Wellen, Kommentartexte stehen über der Welle.
+   Feste Höhe = Polster 28 + Kopfzeile 26 + Beschriftungsraum 75 + Wellenfläche;
+   75 px tragen drei gestapelte Beschriftungen, ohne den Namen zu verdecken. */
+#grid.list.compare { --wh: 96px; }
+#grid.compare .tile.arow { height: calc(129px + var(--wh)); padding-top: 12px; padding-bottom: 16px; }
+#grid.compare .arow .wv { margin-top: 75px; }
+#grid.pinlabels .wv .plabel { opacity: 1; }
+/* Im Vergleich sind die Zeilen der Player: die Abspielleiste weicht (Platz für Wellen). */
+body.list-compare #pbar { display: none; }
+#grid.pinlabels .wv .plabel.on { border-color: var(--accent-line); }
+#listhead .cmpnote { grid-column: 1 / -1; display: flex; gap: 14px; justify-content: space-between; align-items: baseline;
+  margin: -7px -14px 6px; padding: 9px 14px; font-size: 11.5px; color: var(--dim); border-bottom: 1px solid var(--border-soft); }
+#listhead .cmpnote[hidden] { display: none; }
+#listhead .cmpnote b { color: var(--text); font-weight: 600; }
+#listhead .cmpnote .cmpgain { flex: none; }
+#midtools .cmpmatch { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--dim); padding: 3px 9px; font-size: 11px; white-space: nowrap; cursor: pointer; }
+#midtools .cmpmatch[hidden] { display: none; }
+#midtools .cmpmatch.on { color: var(--accent); border-color: var(--accent-line); }
+#midtools .cmpmatch input { margin: 0; }
+#midtools #listCmpBtn:disabled { opacity: .5; cursor: default; }
+/* Schmale Mitte: der Erzeuger weicht, der Name hat Vorrang (wie im Mockup). */
+@container (max-width: 620px) {
+  .arow .rtop, #listhead { --lcols: 28px minmax(0, 1fr) 54px 64px 26px; }
+  .arow .rtool, #listhead .h-tool, .arow .rlufs, #listhead .h-lufs { display: none; }
+}
+
+/* ---------- Cover eines Songs (Audio A8, #165, ADR 0090) ---------- */
+/* Galerie-Kachel des finalisierten Songs: Vorschaubild des Coverbilds, ♪ + Dauer, ▶ */
+.tile .songbadge { font-size: 9px; letter-spacing: .3px; }
+.tile .tplay {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 38px; height: 38px; padding: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; color: #fff; background: rgba(0, 0, 0, .55); border: 1px solid rgba(255, 255, 255, .35);
+  opacity: 0; transition: opacity .12s;
+}
+.tile:hover .tplay, .tile.selected .tplay, .tile.playing .tplay { opacity: 1; }
+.tile.playing .tplay { background: var(--accent); border-color: var(--accent); }
+/* Einzelansicht und Panel: das Cover steht über dem Player (Hintergrund, kein <img>) */
+.audiocover { background: center / cover no-repeat var(--thumb); border-radius: 10px; box-shadow: 0 0 0 1px var(--border-soft); }
+.audiostage.hascover .audiocover { width: min(100%, 62vh); aspect-ratio: 1; flex: none; }
+.ppreview .audiostage.hascover { padding-top: 14px; }
+.ppreview .audiostage.hascover .audiocover { width: 100%; border-radius: 8px; }
+/* Listenzeile: Miniatur vor dem Namen */
+.arow .rname .rcov { width: 18px; height: 18px; border-radius: 4px; object-fit: cover; flex: none; margin-right: 7px; box-shadow: 0 0 0 1px var(--border-soft); }
+/* Detailpanel: Cover-Zeile direkt unter der Vorschau, eingebettetes Bild unter „Datei" */
+.pcoverbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.pcoverbar .cvstate { font-size: 12px; font-weight: 600; margin-right: auto; }
+.pcoverbar button:not(.accentbtn) { font-size: 11px; padding: 3px 9px; }
+.pcoverbar .cvhint { font-size: 11.5px; color: var(--dim); line-height: 1.4; flex: 1 1 160px; }
+.filerows .embrow { align-items: center; }
+.cvemb { width: 24px; height: 24px; border-radius: 4px; overflow: hidden; opacity: .55; filter: saturate(.6); background: var(--thumb); }
+.cvemb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* Auswahldialog */
+#coverdlg[hidden] { display: none; }
+.coverbox { width: min(760px, 94vw); display: flex; flex-direction: column; gap: 10px; outline: none; }
+.cvsearch { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cvchips { display: contents; }
+.cvsearch .cvinput { flex: 1 1 160px; min-width: 120px; padding: 4px 8px; font-size: 12px; }
+/* Zeilen in Inhaltshöhe: Kacheln mit aspect-ratio + overflow: hidden haben
+   sonst die Mindesthöhe 0, und das höhenbegrenzte Grid quetscht sie zu Streifen. */
+.cvgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px;
+  grid-auto-rows: max-content; align-content: start;
+  max-height: min(52vh, 520px); overflow-y: auto; padding: 2px; }
+.cvgrid .cvtile { aspect-ratio: 1; }
+.cvempty { grid-column: 1 / -1; padding: 30px 10px; text-align: center; color: var(--dim); font-size: 12px; }
+.coverbox .sdactions { align-items: center; }
+.coverbox .sdactions .sdhint { margin-right: auto; }
+#single.song #svZoom { display: none; }

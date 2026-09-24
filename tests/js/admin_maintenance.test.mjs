@@ -34,7 +34,9 @@ before(async () => {
 test("vier Karten in einer Reihe, je Aktion eine Zeile; keine Overlay-Reste", () => {
   const cards = [...document.querySelectorAll(".row.c4 > .card[data-card]")].map((c) => c.dataset.card);
   assert.deepEqual(cards, ["raw", "thumbs", "db", "reeval"]);
-  assert.equal(document.querySelectorAll(".action[data-action]").length, 8, "acht Aktionszeilen in den vier Karten");
+  assert.equal(document.querySelectorAll(".action[data-action]").length, 9, "neun Aktionszeilen in den vier Karten");
+  // „Audio analysieren" (A4 #161) nur mit Audio-Modul — /api/stats ohne audio.
+  assert.equal(document.querySelector('[data-action="audiowarm"]').hidden, true);
   assert.equal(document.querySelector(".maintbtn"), null, "alte Knopfleiste ist weg");
   assert.equal(document.querySelector(".pickoverlay"), null, "kein Overlay offen");
   assert.ok(document.getElementById("moCard"), "Rausverschieben ist eine Karte");

@@ -215,10 +215,11 @@ function renderStock() {
   // gesamt" oben). Vorher stand nur bei Videos eine unbeschriftete GB-Zahl.
   const img = kinds.image || { count: 0, bytes: 0 };
   const vid = kinds.video || { count: 0, bytes: 0 };
+  const aud = kinds.audio;   // nur, wenn es Audio gibt (Modul, ADR 0083)
   el("pType").innerHTML = total ? `
     <div class="comp">${segs.map((s) => `<i class="${s.cls}" style="width:${(s.v / total) * 100}%" title="${esc(s.n)} ${fmtNum(s.v)}"></i>`).join("")}</div>
     <div class="lg">${segs.map((s) => `<i class="${s.cls}"></i><span class="n">${esc(s.n)}</span><span class="v">${fmtNum(s.v)}</span><span class="p">${pct(s.v, total)} %</span>`).join("")}</div>
-    <div class="axis" style="margin-top:auto;padding-top:8px"><span>${STRINGS.ovImages} ${pct(img.count, total)} % · ${fmtBytes(img.bytes)}</span><span>${STRINGS.ovVideos} ${pct(vid.count, total)} % · ${fmtBytes(vid.bytes)}</span></div>`
+    <div class="axis" style="margin-top:auto;padding-top:8px"><span>${STRINGS.ovImages} ${pct(img.count, total)} % · ${fmtBytes(img.bytes)}</span><span>${STRINGS.ovVideos} ${pct(vid.count, total)} % · ${fmtBytes(vid.bytes)}</span>${aud ? `<span>${STRINGS.ovAudio} ${fmtNum(aud.count)} · ${pct(aud.count, total)} % · ${fmtBytes(aud.bytes)}</span>` : ""}</div>`
     : `<div class="vdim">${STRINGS.ovEmpty}</div>`;
 
   // Zuwachs je Tag: 30 Säulen, heute hervorgehoben.

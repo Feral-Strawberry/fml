@@ -229,6 +229,14 @@ re-reads the cache folder.
   ones and leave dismissed failures alone.
 - **Clear cache** — delete all previews including failure markers; they
   regenerate when viewed.
+- **Analyse audio** (audio module only) — loudness and waveform for all
+  audio items: create missing ones, retry failed ones, recalculate
+  outdated measurements after an update. Playable copies (AIFF/ALAC/CAF)
+  are only created on first playback; the button releases failed ones for
+  the next attempt.
+  Permanent failures appear under Issues (kind `audio`). After
+  import/watch this runs automatically for new items; the audio cache is
+  separate (`cache/audio`) and survives clearing the previews.
 
 **Database** — key figure: file size, WAL, schema version. The button
 **Compute breakdown** shows what the file consists of (raw blobs, items +
@@ -426,7 +434,8 @@ operation, set a media library and sources in the configuration.
 Five cards: **Media library** (import target, **library management** as
 the read-only-mode switch, oldest plausible date, import rules),
 **Thumbnails & performance** (size, processes, full power, slow
-threshold), **Interface**, **Instance** and **Modules**. Every setting has
+threshold), **Interface**, **Instance** and **Modules**
+([rankings](rankings.md), [audio](audio.md)). Every setting has
 a label, the input, a short explanation underneath and a badge:
 **immediate** takes effect on save, **restart** only after restarting the
 server. Changes collect in the **save bar** at the bottom, which only

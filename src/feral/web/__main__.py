@@ -19,6 +19,7 @@ from ..config import (
     load_config,
     slow_request_ms,
     thumbnail_cache_path,
+    audio_cache_path,
     thumbnail_low_priority,
     thumbnail_size,
     thumbnail_workers,
@@ -79,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         port = int(os.environ.get("PORT") or 0) or web_port(config) or 8765
     db = args.db or database_path(config)
     thumb_cache = thumbnail_cache_path(config, db)
+    audio_cache = audio_cache_path(config, db)
     # Serverlog (#64): logs/ neben der Datenbank, rotierend; Konsole nur
     # Warnungen. uvicorn bekommt keine eigene Log-Konfiguration mehr, seine
     # Warnungen laufen über den Root-Logger in dieselbe Datei.
@@ -93,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     app = create_app(
         db,
         thumb_cache=thumb_cache,
+        audio_cache=audio_cache,
         thumb_size=thumbnail_size(config),
         thumb_workers=thumbnail_workers(config),
         thumb_low_priority=thumbnail_low_priority(config),

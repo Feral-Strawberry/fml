@@ -70,8 +70,10 @@ Zusätzlich werden **C2PA-Manifeste** gesichert, die Pillow nicht durchreicht:
 bei **JPEG** die APP11-Segmente mit Kennung `JP` (ein Manifest kann über
 mehrere Segmente gehen; sie werden nach Paketnummer zusammengesetzt, Quell-
 Label `jpeg:APP11`), bei **WebP** der RIFF-Chunk `C2PA` (Quell-Label
-`webp:C2PA`). Auch hier: rohe Bytes, keine Deutung. Für MP4/MOV (Sora) gibt
-es das noch nicht.
+`webp:C2PA`), bei **MP4/M4A** die `uuid`-Box der obersten Ebene mit der
+C2PA-Kennung (Quell-Label `isobmff:uuid`; ffprobe sieht sie nicht, fml liest
+dafür nur die Box-Köpfe). Auch hier: rohe Bytes, keine Deutung. Audio
+(ID3-`GEOB`, WAV-Chunk `C2PA`) steht in [Audio](audio.md).
 
 ## Was bei PSD/PSB gelesen wird (Eigenbau)
 
@@ -108,6 +110,20 @@ schnellen Überblick ohne Re-Scan).
 > `winget install ffmpeg`. **Fehlt es, ist das kein Fehler:** Videos werden
 > trotzdem katalogisiert (Hash + Fundort); ein erneuter Scan nach der
 > Installation holt die Metadaten nach.
+
+Dazu die **Format-Eckwerte** unter `"isobmff:format"` (`format_name`,
+`duration`, `bit_rate`) und die **Dauer** als eigene Spalte. Die
+Medienart kommt aus den tatsächlichen Spuren: ein Container ohne echte
+Videospur (M4A, Matroska nur mit Ton) ist Audio, siehe
+[Audio-Modul](audio.md) (ohne Modul: unbekanntes Format).
+
+## Was bei Audio gelesen wird
+
+Nur mit eingeschaltetem [Audio-Modul](audio.md): MP3, FLAC, Ogg, WAV,
+AIFF und CAF über eigene Walker (Standardbibliothek), jeder Frame und
+Chunk roh mit Quell-Label; ffprobe liefert nur Dauer, Codec, Samplerate,
+Kanäle, Bittiefe und Bitrate. Details und Beispiele der Quell-Labels in
+[Audio-Modul](audio.md#was-gespeichert-wird).
 
 ## Robustheit
 

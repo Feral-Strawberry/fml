@@ -193,7 +193,8 @@ def _process_file(
     #    sauseinanderhalten; echte Lesefehler als 'failed' verbuchen.
     pending = False
     try:
-        extraction = container.extract(path)
+        extraction = container.extract(
+            path, audio_enabled=bool((rules or {}).get("audio")))
     except UnknownContainerError:
         report.skipped_unknown += 1
         _remember_outcome(conn, path, "unbekannt")
@@ -216,7 +217,7 @@ def _process_file(
     # importer-Abhängigkeit beim Modul-Laden.)
     from .importer import date_reason, determine_date, filter_reason, rule_min_date
 
-    reason = filter_reason(extraction, rules)
+    reason = filter_reason(extraction, rules, path)
     if reason is None:
         # Datumsregel (ADR 0075, #113): kein plausibles Datum aus Metadaten
         # oder Dateistempel ⇒ ausgefiltert wie jeder andere Regel-Treffer —
