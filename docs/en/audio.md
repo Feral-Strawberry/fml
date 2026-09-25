@@ -128,8 +128,9 @@ disappear (LoRA, aspect, resolution, input image, rankings in the audio
 view; media type would have only one row there). Songs never belong to a
 [ranking](rankings.md), not even with a cover: for comparing and rating
 there are dedicated tools here. New in the audio view is
-the group **Lyrics**: "with vocals" (`has: lyrics`) and "instrumental"
-(`-has: lyrics`). The "+ Criterion" popover also shows only the fitting
+the group **Lyrics**: "with lyrics" (`has: lyrics`) and "without lyrics"
+(`-has: lyrics`). It only tells whether lyrics are stored in the file, not
+whether anyone sings: many songs with vocals carry no lyrics. The "+ Criterion" popover also shows only the fitting
 categories. A **bulk action** on the search result hits exactly what the
 view shows.
 

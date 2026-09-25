@@ -8,6 +8,7 @@ Container = ein neues Extraktor-Modul + ein Registry-Eintrag (ADR 0008/0011):
 - JPEG/WEBP/GIF/BMP/TIFF → Pillow als Container-Öffner (`image_pillow.py`)
 - WEBM/MKV, MP4/MOV      → ffprobe-System-Binary (`video_ffprobe.py`)
 - PSD/PSB    → Stdlib-Eigenbau (`psd.py`, ADR 0052)
+- PCD        → Kodak Photo CD, Stdlib-Eigenbau inkl. 16Base-Decoder (`pcd.py`, #208)
 - PDF        → erkannt, kein Extraktor (gestrichen, ADR 0051)
 - MP3/FLAC/Ogg/WAV/AIFF/CAF → Stdlib-Walker + ffprobe-Fakten (`audio.py`,
   ADR 0083) — NUR bei eingeschaltetem Audio-Modul; aus = unbekanntes Format.
@@ -19,7 +20,7 @@ from functools import partial
 from pathlib import Path
 from typing import Callable
 
-from . import audio, image_pillow, png, psd, video_ffprobe
+from . import audio, image_pillow, pcd, png, psd, video_ffprobe
 from .types import ContainerExtraction
 
 
@@ -48,14 +49,15 @@ class ExtractorNotImplementedError(ContainerError):
 _EXTRACTORS: dict[str, Callable[[str | Path], ContainerExtraction]] = {
     "png": png.extract,
     "psd": psd.extract,
+    "pcd": pcd.extract,
     **{c: partial(image_pillow.extract, container=c) for c in image_pillow.CONTAINERS},
     **{c: partial(video_ffprobe.extract, container=c) for c in video_ffprobe.CONTAINERS},
     **{c: partial(audio.extract, container=c) for c in audio.CONTAINERS},
 }
 
 # Wie viele Bytes vom Dateianfang fürs Sniffing genügen (MP4-'ftyp' liegt bei 4..8,
-# WEBP-'WEBP' bei 8..12).
-_SNIFF_BYTES = 16
+# WEBP-'WEBP' bei 8..12, Photo CD 'PCD_IPI' erst bei 2048..2055).
+_SNIFF_BYTES = pcd.IPI_OFFSET + len(pcd.SIGNATURE)
 
 # TIFF-basierte Kamera-RAW-Formate: identische Magic Bytes wie TIFF — hier
 # entscheidet ausnahmsweise die Endung (die Alternative wäre ein IFD-Parser
@@ -97,6 +99,9 @@ def sniff_container(head: bytes) -> str | None:
         return "psd"
     if head.startswith(b"%PDF"):
         return "pdf"
+    if pcd.is_pcd(head):
+        # Vor Audio: Sektor 0 ist 0xFF-Füllung — sähe wie MPEG-Sync aus.
+        return "pcd"
     # Audio zuletzt (ADR 0083): die MPEG-Frame-Sync-Prüfung ist die
     # schwächste Signatur und darf keinen der obigen Container überdecken.
     return audio.sniff(head)

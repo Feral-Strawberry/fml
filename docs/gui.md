@@ -22,7 +22,13 @@ Dann im Browser öffnen: **http://127.0.0.1:8765**
 Optionen: `--config config.toml` (welche Instanz), `--port`, `--host
 127.0.0.1` (Standard: nur lokal erreichbar), `--db` (überschreibt den
 DB-Pfad aus der Config), `--browser` (öffnen, sobald der Server
-antwortet — nutzen die Startskripte). Der Port kann dauerhaft in der
+antwortet — nutzen die Startskripte), `--exit-when-idle MINUTEN` (der
+Server beendet sich selbst, wenn so lange keine fml-Seite mehr offen war
+und keine Aufgabe läuft oder wartet; mindestens 2 Minuten, weil Browser
+verdeckte Tabs drosseln. Gedacht für Installationen ohne Konsole),
+`--help-dir ORDNER` (ein Ordner mit `index.html`, z. B. eine Anleitung: fml
+zeigt dann oben rechts ein **?**, das sie in einem Fenster über der Bibliothek
+öffnet; Esc schließt). Der Port kann dauerhaft in der
 Config stehen (`[web] port`; Vorrang: `--port` > `$PORT` > Config > 8765).
 **Mehrere parallel laufende Instanzen** (je Instanz eigene Config + DB +
 Port, Start per `start.bat --config name.toml`): [instanzen.md](instanzen.md).
@@ -732,9 +738,9 @@ Einzelbild; `codec: prores` im Suchfeld findet alle Betroffenen
   stecken, zeigt `codec: prores` im Suchfeld bzw. das
   [Diagnose-Kommando](scanning.md#diagnose-video-codecs-im-bestand); beim
   Aufnehmen erscheint das Problem unter Admin → Probleme (Art `playback`).
-- **TIFF und PSD** zeigt kein Browser nativ — Galerie, Lupe und
+- **TIFF, PSD und Kodak Photo CD** zeigt kein Browser nativ — Galerie, Lupe und
   Einzelbildansicht rendern dafür serverseitig ein JPEG (das Original bleibt
-  unangetastet). PSD nutzt das eingebettete Composite. PSDs, die **ohne
+  unangetastet). Photo CD in der größten Stufe (3072×2048). PSD nutzt das eingebettete Composite. PSDs, die **ohne
   „Maximale Kompatibilität"** gespeichert wurden, tragen keinen Composite (nur
   die Ebenen) — sie zeigen ehrlich „Keine Vorschau verfügbar" statt eines
   falschen weißen Bildes. Wer sie sehen will, speichert sie in Photoshop einmal

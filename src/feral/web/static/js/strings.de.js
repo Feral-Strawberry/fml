@@ -11,6 +11,9 @@ export const STRINGS = {
   // -- Topbar ---------------------------------------------------------------
   searchPlaceholder: "Suche — Begriffe, feld: wert, ODER mit | …",
   tooltipAdmin: "Admin",
+  helpButton: "Anleitung",
+  helpTitle: "Anleitung",
+  helpClose: "Schließen (Esc)",
   tooltipActivity: "Aktivität — Klick öffnet den Admin",
   serverUnreachable: "Server nicht erreichbar",
   langSwitchTitle: "Sprache wechseln / switch language — übersteuert die Browser-Sprache dauerhaft",
@@ -67,8 +70,8 @@ export const STRINGS = {
   inputImageWith: "mit Eingangsbild",
   inputImageWithout: "ohne Eingangsbild",
   groupByLyrics: "Songtext",
-  lyricsWith: "mit Gesang",
-  lyricsWithout: "instrumental",
+  lyricsWith: "mit Songtext",
+  lyricsWithout: "ohne Songtext",
   // Fundort (ADR 0041, I2): nur sichtbar, wenn eine Media Library
   // konfiguriert ist — sonst gibt es die Unterscheidung nicht.
   groupByFundort: "Fundort",

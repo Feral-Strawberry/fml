@@ -183,6 +183,27 @@ test("Pfeiltasten: ausgewählte Zeile ±5 s, Shift ±1 s — auch ohne dass sie 
   assert.equal(document.getElementById("single").hidden, true);
 });
 
+test("Neumalen während der Wiedergabe lässt ❚❚ und die Leiste unangetastet (#211)", async () => {
+  click(row(1).querySelector(".pbtn"));
+  await flush();
+  assert.equal(player.playingHash(), hashOf(1));
+  const btn = row(1).querySelector(".pbtn");
+  const barBtn = bar().querySelector('[data-act="play"]');
+  const tempo = bar().querySelector('[data-act="tempo"]');
+  // Der Textknoten unter dem Mauszeiger darf nicht ersetzt werden: sonst
+  // verwirft der Browser einen Klick, dessen mousedown davor lag.
+  const before = [btn.childNodes[0], barBtn.childNodes[0], tempo.childNodes[0]];
+  assert.equal(btn.textContent, "❚❚");
+  player.repaint();
+  player.repaint(hashOf(1));
+  await flush();
+  assert.deepEqual([btn.childNodes[0], barBtn.childNodes[0], tempo.childNodes[0]], before);
+  click(btn);                                                        // anhalten klappt
+  await flush();
+  assert.equal(player.playingHash(), null);
+  assert.equal(btn.textContent, "▶");
+});
+
 test("Lautheitsangleich: Faktor aus der Analyse, global abschaltbar und gemerkt", async () => {
   click(row(1).querySelector(".pbtn"));
   await flush();

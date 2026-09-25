@@ -24,7 +24,7 @@ import json
 import struct
 import subprocess
 
-from ..tools import find_binary, media_input
+from ..tools import NO_WINDOW, find_binary, media_input
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -74,6 +74,7 @@ def probe(path: str | Path) -> tuple[dict[str, Any] | None, str | None]:
             ],
             capture_output=True,
             timeout=_TIMEOUT_SECONDS,
+            **NO_WINDOW,
         )
     except FileNotFoundError:
         return None, (

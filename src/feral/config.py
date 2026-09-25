@@ -47,6 +47,16 @@ def thumbnail_cache_path(config: dict[str, Any], db_path: str | Path) -> str:
     return str(Path(db_path).resolve().parent / "cache" / "thumbnails")
 
 
+def preview_cache_path(config: dict[str, Any], db_path: str | Path) -> str:
+    """Verlustfrei abgelegte Anzeigebilder teurer Formate (Photo CD, #208):
+    ``[cache] preview`` aus der Config, sonst ``cache/preview`` neben der
+    DB-Datei — eigener Ordner, weil die PNGs groß sind (≈ 11 MB je Bild)."""
+    configured = config.get("cache", {}).get("preview")
+    if configured:
+        return str(configured)
+    return str(Path(db_path).resolve().parent / "cache" / "preview")
+
+
 def audio_cache_path(config: dict[str, Any], db_path: str | Path) -> str:
     """Cache der abgeleiteten Audio-Daten (Analyse + Wiedergabe-Proxy, A4
     #161): ``[cache] audio`` aus der Config, sonst ``cache/audio`` neben der

@@ -20,7 +20,7 @@ Strawberry** (zugleich der Name der GitHub-Organisation).
   Lieferkette.
 - [Metadaten-Extraktion (Schicht 1)](extraction.md) — liest alle eingebetteten
   Roh-Metadaten aus einer Mediendatei: PNG, JPEG/WEBP/GIF/BMP/TIFF/PSD
-  (Pillow), Video (ffprobe) und mit Audio-Modul MP3, FLAC, Ogg, WAV, AIFF,
+  (Pillow), Kodak Photo CD, Video (ffprobe) und mit Audio-Modul MP3, FLAC, Ogg, WAV, AIFF,
   CAF und M4A.
 - [Metadaten-Interpretation (Schicht 2)](interpretation.md) — macht aus den
   Roh-Metadaten durchsuchbare Felder (Prompt, Modell, Seed, …); läuft beim Scan

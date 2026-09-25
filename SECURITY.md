@@ -45,6 +45,10 @@ The most important safeguards (full write-up in
   **ffmpeg/ffprobe may open local files only**
   (`-protocol_whitelist file`, absolute `file:` path): a crafted file cannot
   trigger network access, a file name is never read as an option.
+- **Kodak Photo CD files are decoded by a capped reader** (at most 16 MiB
+  read, a bounded number of rows per resolution level, the row-marker
+  search runs in C): a crafted file ends quickly instead of tying up the
+  thumbnail workers.
 - **All SQL is parameterized**, full-text search terms are quoted, and
   every text originating from a file is **HTML-escaped** on display.
 - **Host-header guard against DNS rebinding** (only

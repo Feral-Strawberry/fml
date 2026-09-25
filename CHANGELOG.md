@@ -7,6 +7,63 @@ What changed between snapshot releases, from the user's point of view.
 Versions are date versions (`YYYY.MM` or `YYYY.MM.N`); a running
 instance shows its version under Admin → Overview.
 
+## 2026.09.3 (2026-09-25)
+
+fml now reads **Kodak Photo CD**: the pictures from the photo CDs of the
+90s, in full resolution. Plus two fixes in the audio module and more
+robustness on Windows.
+
+### After updating
+
+1. **Start with `start.sh` or `start.bat` as usual.** Dependencies and
+   database schema are unchanged.
+2. **Photo CD files that were sorted out so far** (the watch folder's
+   "unknown format" outcome folder): simply put them into the watch folder
+   again, or rescan the scan location.
+
+### New: Kodak Photo CD
+
+- **`.PCD` files** are recognized, cataloged and displayed in the largest
+  size the file holds: **3072×2048** (or 1536×1024). Portrait shots are
+  rotated as noted on the CD.
+- **Creation date from the CD:** the scan time is stored in the file's
+  header and becomes the picture's date, even when the file stamp was lost
+  long ago. The detail panel also shows scanner, film type and photo lab.
+- **Fast from the second time on:** fml computes the large picture on the
+  first view (one or two seconds) and then keeps it losslessly as PNG in
+  the cache (`cache/preview` next to the database, about 11 MB per picture;
+  safe to delete any time, location via `[cache] preview`).
+
+### Fixes
+
+- **Audio: the pause button** in the list and in the playback bar reacts
+  reliably during playback. Before, a click on ❚❚ often went nowhere while
+  the space bar worked.
+- **Audio: the sidebar group "Lyrics"** now says "with lyrics" / "without
+  lyrics" instead of "with vocals" / "instrumental": it only tells whether
+  lyrics are stored in the file, not whether anyone sings.
+- **Windows:** ffmpeg and ffprobe no longer flash console windows, and the
+  server no longer crashes when its output is redirected (e.g. when started
+  without a console).
+- **Overview mode:** Admin → Sources no longer shows a false "no import
+  target" warning.
+
+### For installs without a console
+
+- **`--exit-when-idle MINUTES`:** the server shuts itself down once no fml
+  page has been open for that long and no task is running or waiting (at
+  least 2 minutes).
+- **`--help-dir DIR`:** a folder with an `index.html`, such as your own
+  guide: fml then shows a **?** at the top right that opens it in a window
+  above the library.
+
+### Security
+
+- **fml reads Photo CD with its own capped decoder:** at most 16 MiB per
+  file, a bounded number of rows, the search for row markers runs in C. A
+  crafted file ends quickly instead of blocking the thumbnail processes.
+  Permanent test with mangled files.
+
 ## 2026.09.2 (2026-09-24)
 
 fml now does **music** too: the new **audio module** catalogs songs from

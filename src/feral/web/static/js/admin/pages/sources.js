@@ -116,7 +116,12 @@ function renderWatch(d) {
   if (locked && el("adImpModus").value !== "katalogisieren") {
     el("adImpModus").value = "katalogisieren";
   }
-  el("adWatchWarn").innerHTML = d.has_library ? "" : `<div class="warn watchwarn">${STRINGS.watchNoLibrary}</div>`;
+  // Ohne Media Library nur warnen, wo sie gebraucht wird (#187): Im
+  // Übersichtsmodus mit reinen katalogisieren-Ordnern ist sie überflüssig,
+  // die Warnung dort nur falscher Alarm.
+  const needsLibrary = !locked || d.sources.some((s) => s.modus !== "katalogisieren");
+  el("adWatchWarn").innerHTML = d.has_library || !needsLibrary
+    ? "" : `<div class="warn watchwarn">${STRINGS.watchNoLibrary}</div>`;
   el("adWatchCount").textContent = d.sources.length ? `${d.sources.length}` : "";
   if (!d.sources.length) {
     box.className = "row";

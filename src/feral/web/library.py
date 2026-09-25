@@ -1032,6 +1032,7 @@ _MIME = {
     "bmp": "image/bmp",
     "tiff": "image/tiff",
     "psd": "image/vnd.adobe.photoshop",
+    "pcd": "image/x-photo-cd",
     "matroska": "video/webm",
     "isobmff": "video/mp4",
     "pdf": "application/pdf",

@@ -125,3 +125,15 @@ test("Leere Liste ehrlich gesagt", async () => {
   assert.ok(document.getElementById("adWatchWarn").querySelector(".warn"), "kein Import-Ziel");
 });
 
+test("Übersichtsmodus mit katalogisieren-Ordnern: kein falscher Alarm (#187)", async () => {
+  const katalog = { ...sources()[0], modus: "katalogisieren" };
+  watch = { sources: [katalog], has_library: false, verwaltung: false };
+  state.status = { ...state.status, finished_seq: 11 };
+  await pollOnce(); await flush();
+  assert.equal(document.getElementById("adWatchWarn").querySelector(".warn"), null);
+  watch = { sources: [{ ...katalog, modus: "kopieren" }], has_library: false, verwaltung: false };
+  state.status = { ...state.status, finished_seq: 12 };
+  await pollOnce(); await flush();
+  assert.ok(document.getElementById("adWatchWarn").querySelector(".warn"), "kopieren braucht die Library");
+});
+

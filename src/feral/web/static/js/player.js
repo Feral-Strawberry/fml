@@ -450,14 +450,25 @@ export function paintWave(wv, hash, { axis, duration }) {
   }
 }
 
-const btnState = (btn, hash) => {
+// Neumalen läuft während der Wiedergabe ~10× je Sekunde: nur schreiben, was
+// sich ändert. Ein neu gesetzter Text ersetzt den Textknoten unter dem
+// Mauszeiger, fällt das zwischen mousedown und mouseup, verwirft der
+// Browser den Klick — ❚❚ ließ sich kaum drücken (#211).
+export function setText(node, text) {
+  if (node && node.textContent !== text) node.textContent = text;
+}
+const setTitle = (node, title) => { if (node && node.title !== title) node.title = title; };
+const setHtml = (node, html) => { if (node._html !== html) { node._html = html; node.innerHTML = html; } };
+
+/** ▶/❚❚-Knopf eines Songs (Listenzeile, eingebetteter Player, Leiste). */
+export function btnState(btn, hash) {
   if (!btn) return;
   const bad = failed.has(hash);
   const on = playingHash() === hash;
-  btn.disabled = bad;
-  btn.textContent = on ? "❚❚" : "▶";
-  btn.title = bad ? STRINGS.audioPlayFailed : on ? STRINGS.audioPause : STRINGS.audioPlay;
-};
+  if (btn.disabled !== bad) btn.disabled = bad;
+  setText(btn, on ? "❚❚" : "▶");
+  setTitle(btn, bad ? STRINGS.audioPlayFailed : on ? STRINGS.audioPause : STRINGS.audioPlay);
+}
 
 const gainText = (hash) => {
   if (!matchOn()) return STRINGS.audioGainOff;
@@ -477,10 +488,8 @@ function paintWidget(w) {
   const dur = durationOf(hash, parseFloat(w.dataset.dur) || 0);
   paintWave(w.querySelector(".wv"), hash, { axis: dur, duration: dur });
   btnState(w.querySelector(".pbtn"), hash);
-  const t = w.querySelector(".ptime");
-  if (t) t.textContent = `${fmtDuration(positionOf(hash)) || "0:00"} / ${fmtDuration(dur)}`;
-  const g = w.querySelector(".pgain");
-  if (g) g.textContent = gainText(hash);
+  setText(w.querySelector(".ptime"), `${fmtDuration(positionOf(hash)) || "0:00"} / ${fmtDuration(dur)}`);
+  setText(w.querySelector(".pgain"), gainText(hash));
   const note = w.querySelector(".pnote");
   if (note) note.hidden = !failed.has(hash);
 }
@@ -518,30 +527,31 @@ function paintBar() {
   const hash = cur.file_hash;
   const dur = durationOf(hash, cur.duration);
   btnState(bar.querySelector('[data-act="play"]'), hash);
-  bar.querySelector('[data-act="next"]').disabled = !queue || queue.i >= queue.items.length - 1;
+  const nx = bar.querySelector('[data-act="next"]');
+  const last = !queue || queue.i >= queue.items.length - 1;
+  if (nx.disabled !== last) nx.disabled = last;
   paintBarCover(bar.querySelector(".pcov"), pictureOf(cur));
   const n = bar.querySelector(".n");
-  n.textContent = cur.name || hash.slice(0, 12);
-  n.title = cur.name;
-  const q = bar.querySelector(".q");
+  setText(n, cur.name || hash.slice(0, 12));
+  setTitle(n, cur.name);
   const who = cur.model || cur.tool;
-  q.innerHTML = (queue
+  setHtml(bar.querySelector(".q"), (queue
     ? `<b>${esc(STRINGS.audioPlayAll)}</b> · ${esc(STRINGS.audioQueueInfo.replace("{i}", queue.i + 1).replace("{n}", queue.items.length))}`
     : esc(STRINGS.audioSingle)) + (who ? ` · ${esc(who)}` : "")
-    + (failed.has(hash) ? ` · <span class="bad">${esc(STRINGS.audioPlayFailed)}</span>` : "");
-  bar.querySelector(".tpos").textContent = fmtDuration(positionOf(hash)) || "0:00";
-  bar.querySelector(".tdur").textContent = fmtDuration(dur);
+    + (failed.has(hash) ? ` · <span class="bad">${esc(STRINGS.audioPlayFailed)}</span>` : ""));
+  setText(bar.querySelector(".tpos"), fmtDuration(positionOf(hash)) || "0:00");
+  setText(bar.querySelector(".tdur"), fmtDuration(dur));
   paintWave(bar.querySelector(".wv"), hash, { axis: dur, duration: dur });
   const m = bar.querySelector('[data-act="match"]');
   m.classList.toggle("on", matchOn());
-  m.querySelector(".gain").textContent = matchOn() && analyses.get(hash)
-    ? fmtDb(matchGainDb(analyses.get(hash).loudness), STRINGS.locale) + " dB" : "";
+  setText(m.querySelector(".gain"), matchOn() && analyses.get(hash)
+    ? fmtDb(matchGainDb(analyses.get(hash).loudness), STRINGS.locale) + " dB" : "");
   const tb = bar.querySelector('[data-act="tempo"]');
-  tb.textContent = `${tempo.toLocaleString(STRINGS.locale, { minimumFractionDigits: 2 })}×`;
+  setText(tb, `${tempo.toLocaleString(STRINGS.locale, { minimumFractionDigits: 2 })}×`);
   tb.classList.toggle("on", tempo !== 1);
   const lb = bar.querySelector('[data-act="loop"]');
   const lp = loopOf(hash);
-  lb.textContent = !lp ? `⟲ ${STRINGS.audioLoop}` : lp.b === null ? `⟲ ${STRINGS.audioLoopA}` : `⟲ ${STRINGS.audioLoopOn}`;
+  setText(lb, !lp ? `⟲ ${STRINGS.audioLoop}` : lp.b === null ? `⟲ ${STRINGS.audioLoopA}` : `⟲ ${STRINGS.audioLoopOn}`);
   lb.classList.toggle("on", !!lp);
 }
 

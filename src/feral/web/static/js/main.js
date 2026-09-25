@@ -25,6 +25,7 @@ import { initCompare } from "./compare.js";
 import { initCurate } from "./curate.js";
 import { initRankings } from "./rankings.js";
 import { initOverlays } from "./overlays.js";
+import { initHelp, setHelpAvailable } from "./help.js";
 import { initTheme, initThemeToggle, applyInstance } from "./appearance.js";
 import { startStatusPolling, initActivityBadge } from "./status.js";
 
@@ -129,12 +130,15 @@ async function initCounts() {
     // I5: Name/Farbe wirken sofort (auch nach Config-Speichern im Admin-Tab)
     applyInstance(s.instanz, { badge: document.getElementById("instanceBadge"),
                                badgeTitle: STRINGS.instanceBadgeTitle });
+    // Hilfe (ADR 0091): „?“ nur, wenn der Server einen Hilfe-Ordner hat.
+    setHelpAvailable(document.getElementById("helpBtn"), s.hilfe === true);
   } catch (err) {
     console.warn(err); // Debugbarkeit — die Oberfläche bleibt trotzdem sanft.
   }
 }
 
 function initTopbar() {
+  initHelp(document.getElementById("helpBtn"));
   document.getElementById("q").placeholder = STRINGS.searchPlaceholder;
   const adminBtn = document.getElementById("adminBtn");
   adminBtn.title = STRINGS.tooltipAdmin;

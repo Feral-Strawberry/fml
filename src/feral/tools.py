@@ -14,8 +14,21 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess  # noqa: F401  (Aufrufer übergeben **NO_WINDOW an subprocess)
 import sys
 from pathlib import Path
+
+# Windows: Konsolen-Werkzeuge (ffmpeg/ffprobe) OHNE eigenes Konsolenfenster
+# starten (#187). Läuft fml ohne Konsole (pythonw, Windows-Paket), bekäme
+# sonst jeder Aufruf ein eigenes, kurz aufblitzendes cmd-Fenster. Jeder
+# subprocess-Aufruf eines Konsolen-Werkzeugs übergibt ``**NO_WINDOW``
+# (Wächter: tests/test_no_window.py). 0x08000000 = CREATE_NO_WINDOW; die
+# Konstante gibt es in ``subprocess`` nur unter Windows.
+def no_window(platform: str = sys.platform) -> dict[str, int]:
+    return {"creationflags": 0x08000000} if platform == "win32" else {}
+
+
+NO_WINDOW = no_window()
 
 _cache: dict[str, str | None] = {}
 

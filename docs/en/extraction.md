@@ -7,7 +7,7 @@
 > not interpreted is still stored completely.
 
 **Status:** implemented are **PNG** (own stdlib reader),
-**JPEG/WEBP/TIFF/GIF/BMP** (via Pillow), **PSD/PSB** (own reader) and
+**JPEG/WEBP/TIFF/GIF/BMP** (via Pillow), **PSD/PSB** and **Kodak Photo CD** (own readers) and
 **video WEBM/MKV/MP4/MOV** (via the system program `ffprobe`). PDF is
 *detected* but not extracted (deliberately dropped, ADR 0051). The
 interpretation of the values is done by [layer 2](interpretation.md).
@@ -86,6 +86,26 @@ layer 2's XMP parser applies automatically), **EXIF**, **IPTC** and the
 grids, guides) are not metadata and are skipped. Collections cataloged
 before this extension existed: run **Admin → Maintenance → "Re-scan all
 locations"** once.
+
+## What is read from Kodak Photo CD (own reader)
+
+fml recognizes Photo CD files (`.PCD`, "Image Pac", about 1992–2004) by the
+`PCD_IPI` signature at byte 2048. The **IPI header** is taken over
+byte-exact (source label `"pcd:ipi"`), plus its text fields: film type
+(`product_type`), scanner (`scanner_vendor`, `scanner_product`,
+`scanner_firmware`, `scanner_serial`), maker of the writing station
+(`piw_manufacturer`) and the photo lab (`photofinisher`). The **scan time**
+is available as `CreateDate` — so it becomes the image's creation date,
+even when the file stamp was lost long ago.
+
+A Photo CD file contains the picture in several sizes. fml shows the
+largest one present: **16Base with 3072×2048 pixels** (or 4Base with
+1536×1024), in gallery, loupe and single view. The first full-size view
+takes one or two seconds; fml then stores the picture losslessly as PNG
+(default `cache/preview` next to the database, about 11 MB per picture),
+after that it appears instantly. The folder may be deleted at any time,
+the pictures are recreated on the next view.
+Portrait shots are rotated as noted on the CD.
 
 ## What is read from video (via ffprobe)
 

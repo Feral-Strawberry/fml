@@ -32,9 +32,9 @@ from concurrent.futures import Future, ProcessPoolExecutor, wait
 from pathlib import Path
 
 from .db.manual import has_embedded_picture
-from .extract import psd
+from .extract import pcd, psd
 from .messages import dump as msg_dump
-from .tools import find_binary, media_input
+from .tools import NO_WINDOW, find_binary, media_input
 from PIL import Image, UnidentifiedImageError
 
 DEFAULT_SIZE = 320
@@ -184,6 +184,10 @@ def _image_thumbnail(source: str | Path, tmp: Path, size: int) -> tuple[bool, st
         with Image.open(source) as img:
             if img.format == "PSD" and not psd.has_real_composite(source):
                 return False, _PSD_NO_COMPOSITE
+            if img.format == "PCD":
+                # Base (768×512) genügt bis zu dieser Kantenlänge, größere
+                # Thumbnails dekodieren 16Base (#208).
+                img = pcd.render(source, max_factor=1 if size <= pcd.BASE_W else 4)
             # Animierte Formate: Frame 0 ist der Poster-Frame.
             img.thumbnail((size, size))
             img.convert("RGB").save(tmp, "JPEG", quality=85)
@@ -193,7 +197,7 @@ def _image_thumbnail(source: str | Path, tmp: Path, size: int) -> tuple[bool, st
 
 
 def render_preview(source: str | Path) -> tuple[bytes | None, str]:
-    """Bilddatei in voller Größe als JPEG rendern (TIFF/PSD-Anzeige, ADR 0052).
+    """Bilddatei in voller Größe als JPEG rendern (TIFF/PSD/PCD-Anzeige, ADR 0052).
 
     Gibt ``(jpeg_bytes, "")`` bei Erfolg zurück, ``(None, grund)`` bei
     Fehlschlag — wirft nicht (defensiv wie die Thumbnail-Strecke). Bei PSD
@@ -204,12 +208,43 @@ def render_preview(source: str | Path) -> tuple[bytes | None, str]:
         with Image.open(source) as img:
             if img.format == "PSD" and not psd.has_real_composite(source):
                 return None, _PSD_NO_COMPOSITE
+            if img.format == "PCD":
+                img = pcd.render(source)    # 16Base statt Pillows Base (#208)
             img.load()
             buf = io.BytesIO()
             img.convert("RGB").save(buf, "JPEG", quality=90)
         return buf.getvalue(), ""
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         return None, f"Pillow: {exc.__class__.__name__}: {exc}"
+
+
+# Anzeigebilder, deren Rendern spürbar dauert (Photo CD 16Base ≈ 1,6 s),
+# werden einmal verlustfrei als PNG abgelegt (#208) — TIFF/PSD rendern
+# schnell genug on the fly.
+PREVIEW_CACHED_MIMES = frozenset({"image/x-photo-cd"})
+
+
+def preview_cache_file(cache_dir: str | Path, file_hash: str) -> Path:
+    """``<cache>/<hash[:2]>/<hash>.png`` (sharded wie die Thumbnails)."""
+    return Path(cache_dir) / file_hash[:2] / f"{file_hash}.png"
+
+
+def write_preview(source: str | Path, dest: Path) -> str:
+    """Anzeigebild einmal verlustfrei ablegen (PNG, atomar); ``""`` bei
+    Erfolg, sonst der Grund. Läuft im Thumbnail-Pool (picklebar)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + f".tmp{os.getpid()}")
+    try:
+        with Image.open(source) as img:
+            if img.format == "PCD":
+                img = pcd.render(source)
+            img.convert("RGB").save(tmp, "PNG", compress_level=3)
+        os.replace(tmp, dest)
+        return ""
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        return f"Pillow: {exc.__class__.__name__}: {exc}"
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _video_thumbnail(source: str | Path, tmp: Path, size: int) -> tuple[bool, str]:
@@ -224,6 +259,7 @@ def _video_thumbnail(source: str | Path, tmp: Path, size: int) -> tuple[bool, st
             ],
             capture_output=True,
             timeout=_FFMPEG_TIMEOUT,
+            **NO_WINDOW,
         )
     except FileNotFoundError:
         return False, msg_dump("thumbNoFfmpeg")

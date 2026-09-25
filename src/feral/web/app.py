@@ -48,7 +48,10 @@ from ..db import connect, folders as folders_db, manual, optimize
 from ..db import rankings as rankings_db
 from ..interpret import a1111_graph
 from .. import reveal
-from ..thumbs import DEFAULT_SIZE, ThumbPool, fail_reason, render_preview, thumb_path
+from ..thumbs import (
+    DEFAULT_SIZE, PREVIEW_CACHED_MIMES, ThumbPool, fail_reason, preview_cache_file,
+    render_preview, thumb_path, write_preview,
+)
 from .. import audio_analysis
 from . import admin as admin_lib
 from . import bulk as bulk_lib
@@ -414,6 +417,7 @@ def create_app(
     *,
     thumb_cache: str | Path | None = None,
     audio_cache: str | Path | None = None,
+    preview_cache: str | Path | None = None,
     thumb_size: int = DEFAULT_SIZE,
     thumb_workers: int | None = None,
     thumb_low_priority: bool = True,
@@ -423,8 +427,12 @@ def create_app(
     allowed_hosts: list[str] | None = None,
     log_dir: str | Path | None = None,
     slow_request_ms: float = SLOW_REQUEST_MS,
+    help_dir: str | Path | None = None,
 ) -> FastAPI:
     db_path = str(db_path)
+    # Optionaler Hilfe-Ordner (--help-dir, ADR 0091): ausgeliefert unter
+    # /hilfe/, nur wenn er eine index.html hat.
+    help_mounted = bool(help_dir) and (Path(help_dir) / "index.html").is_file()
     # Serverlog (#64, ADR 0067): Ordner neben der Datenbank; der Web-Prozess
     # schreibt fml-web.log (Aufbau in __main__), der Worker fml-worker.log.
     log_dir = Path(log_dir) if log_dir else Path(db_path).resolve().parent / "logs"
@@ -436,6 +444,8 @@ def create_app(
     # Abgeleitete Audio-Daten (A4 #161): Analyse + Wiedergabe-Proxy, eigener
     # Ordner neben dem Thumbnail-Cache ([cache] audio).
     audio_cache = Path(audio_cache) if audio_cache else Path(db_path).resolve().parent / "cache" / "audio"
+    # Verlustfrei abgelegte Anzeigebilder (Photo CD, #208, [cache] preview).
+    preview_cache = Path(preview_cache) if preview_cache else Path(db_path).resolve().parent / "cache" / "preview"
     # Ein Prozess-Pool für ALLE Thumbnail-Generierung (ADR 0020) — On-Demand
     # aus /api/thumb und der Warmer teilen ihn sich; entsteht lazy.
     thumb_pool = ThumbPool(workers=thumb_workers, low_priority=thumb_low_priority)
@@ -578,6 +588,7 @@ def create_app(
                                    label=exc.label)},
         )
     app.state.engine = engine
+    app.state.idle_watch = None   # --exit-when-idle setzt ihn (ADR 0091, idle.py)
     app.state.thumb_pool = thumb_pool
     app.state.slow_counts = slow_counts
     # Langsam-Schwelle (#110): die Middleware liest sie je Anfrage von hier,
@@ -752,6 +763,9 @@ def create_app(
         # Modul-Schalter Audio (ADR 0083): die UI blendet Audio-Oberfläche
         # (Zähler, typ:-Wert) nur mit Modul ein.
         payload["audio"] = cfg_audio_enabled(cfg)
+        # Hilfe (--help-dir, ADR 0091): „?“ in der Kopfzeile nur, wenn ein
+        # Hilfe-Ordner ausgeliefert wird.
+        payload["hilfe"] = help_mounted
         return payload
 
     @app.get("/api/models")
@@ -1622,6 +1636,20 @@ def create_app(
             # kann (Safari) — dann das Original, keine Kopie (ADR 0086).
             spielt = frozenset(f.strip().lower() for f in (native or "").split(",") if f.strip())
             return _audio_preview(file_hash, resolved, *audio, native=spielt)
+        if resolved[1] in PREVIEW_CACHED_MIMES:
+            # Teures Rendern (Photo CD 16Base) nur einmal: verlustfreies PNG
+            # auf der Platte, erzeugt beim ersten Anzeigen (#208).
+            cached = preview_cache_file(preview_cache, file_hash)
+            if not cached.is_file():
+                future = thumb_pool.submit_call(f".png:{file_hash}", write_preview,
+                                                resolved[0], cached)
+                try:
+                    future.result(timeout=_PROXY_WAIT)
+                except TimeoutError:
+                    pass                    # dann on the fly wie bisher
+            if cached.is_file():
+                return MediaFileResponse(cached, media_type="image/png", cache_control=(
+                    "public, max-age=31536000, immutable"))
         data, reason = render_preview(resolved[0])
         if data is None:
             # reason kann Meldungs-JSON sein (PSD ohne Composite) — als
@@ -1765,6 +1793,8 @@ def create_app(
 
     @app.get("/api/status")
     def status() -> dict:
+        if app.state.idle_watch is not None:
+            app.state.idle_watch.touch()   # Lebenszeichen einer offenen Seite
         return engine.status()
 
     # -- Watch-Quellen (ADR 0030) -------------------------------------------
@@ -2244,6 +2274,8 @@ def create_app(
     # -- Statische Dateien (CSS/JS der neuen Shell, Block 3.0) ---------------
 
     app.mount("/static", StaticFiles(directory=_STATIC), name="static")
+    if help_mounted:
+        app.mount("/hilfe", StaticFiles(directory=help_dir, html=True), name="hilfe")
     app.state.started_at = time.time()   # Laufzeit für die Übersicht (ADR 0074)
     # Installierte Laufzeit-Pakete neben ihrem Pin (ADR 0080): einmal beim
     # Start — Versionen ändern sich nicht, solange der Prozess läuft.

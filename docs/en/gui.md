@@ -21,7 +21,12 @@ Then open in the browser: **http://127.0.0.1:8765**
 Options: `--config config.toml` (which instance), `--port`, `--host
 127.0.0.1` (default: only locally reachable), `--db` (overrides the DB
 path from the config), `--browser` (open as soon as the server responds —
-used by the start scripts). The port can live permanently in the config
+used by the start scripts), `--exit-when-idle MINUTES` (the server shuts
+itself down once no fml page has been open for that long and no task is
+running or waiting; at least 2 minutes, because browsers throttle hidden
+tabs. Meant for installs without a console), `--help-dir DIR` (a folder with
+an `index.html`, e.g. a user guide: fml then shows a **?** at the top right
+that opens it in a window above the library; Esc closes it). The port can live permanently in the config
 (`[web] port`; precedence: `--port` > `$PORT` > config > 8765).
 **Several instances running in parallel** (per instance its own config +
 DB + port, started via `start.bat --config name.toml`):
@@ -711,9 +716,9 @@ affected files ([interpretation.md](interpretation.md#video-codec-and-playabilit
   `codec: prores` in the search field or the
   [diagnostic command](scanning.md#diagnostics-video-codecs-in-the-catalog);
   on ingest the issue appears under Admin → Issues (kind `playback`).
-- **TIFF and PSD** are not displayed natively by any browser — gallery,
+- **TIFF, PSD and Kodak Photo CD** are not displayed natively by any browser — gallery,
   loupe and single view render a JPEG server-side for them (the original
-  stays untouched). PSD uses the embedded composite. PSDs saved
+  stays untouched), Photo CD in its largest size (3072×2048). PSD uses the embedded composite. PSDs saved
   **without "maximize compatibility"** carry no composite (only the
   layers) — they honestly show "No preview available" instead of a wrong
   white image. To see them, re-save them once in Photoshop with

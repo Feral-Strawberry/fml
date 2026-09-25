@@ -137,7 +137,7 @@ test("Sidebar in der Audioansicht: Songtext statt LoRA/Format/Medienart, Alle = 
   }
   assert.ok(!group("lyrics").classList.contains("offview"));
   const labels = group("lyrics").querySelectorAll(".sblabel").map((l) => l.textContent);
-  assert.deepEqual(labels, ["mit Gesang", "instrumental"]);
+  assert.deepEqual(labels, ["mit Songtext", "ohne Songtext"]);
   assert.equal(document.getElementById("sbAllCount").textContent, "3");
   assert.ok(mockApi.callsTo("/api/sidebar").every((c) => c.params.get("view") === "audio"));
 });

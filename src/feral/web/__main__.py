@@ -20,13 +20,15 @@ from ..config import (
     slow_request_ms,
     thumbnail_cache_path,
     audio_cache_path,
+    preview_cache_path,
     thumbnail_low_priority,
     thumbnail_size,
     thumbnail_workers,
     web_port,
 )
-from ..logsetup import WEB_LOG, setup_logging
+from ..logsetup import WEB_LOG, setup_logging, tolerant_console
 from .app import create_app
+from .idle import IdleWatch, start_watchdog
 
 
 def _open_browser_when_ready(url: str, host: str, port: int,
@@ -53,6 +55,7 @@ def _open_browser_when_ready(url: str, host: str, port: int,
 
 
 def main(argv: list[str] | None = None) -> int:
+    tolerant_console()
     parser = argparse.ArgumentParser(
         prog="python -m feral.web",
         description="Starts the local web interface (scan control & catalog).",
@@ -71,6 +74,15 @@ def main(argv: list[str] | None = None) -> int:
         "--browser", action="store_true",
         help="open the browser once the server is reachable (used by start.bat)",
     )
+    parser.add_argument(
+        "--help-dir", default=None, metavar="DIR",
+        help="folder with an index.html shown behind a '?' in the top bar (e.g. a user guide)",
+    )
+    parser.add_argument(
+        "--exit-when-idle", type=float, default=None, metavar="MINUTES",
+        help="shut down after MINUTES without any open page and without tasks "
+             "(at least 2; for installs without a console)",
+    )
     args = parser.parse_args(argv)
 
     config = load_config(args.config)
@@ -81,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     db = args.db or database_path(config)
     thumb_cache = thumbnail_cache_path(config, db)
     audio_cache = audio_cache_path(config, db)
+    preview_cache = preview_cache_path(config, db)
     # Serverlog (#64): logs/ neben der Datenbank, rotierend; Konsole nur
     # Warnungen. uvicorn bekommt keine eigene Log-Konfiguration mehr, seine
     # Warnungen laufen über den Root-Logger in dieselbe Datei.
@@ -96,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         db,
         thumb_cache=thumb_cache,
         audio_cache=audio_cache,
+        preview_cache=preview_cache,
         thumb_size=thumbnail_size(config),
         thumb_workers=thumbnail_workers(config),
         thumb_low_priority=thumbnail_low_priority(config),
@@ -105,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         allowed_hosts=None if loopback else ["*"],
         log_dir=log_dir,
         slow_request_ms=slow_request_ms(config),
+        help_dir=args.help_dir,
     )
     print(f"\n🍓 Feral Media Library is running at http://{args.host}:{port}")
     print(f"   Database:   {db}")
@@ -119,7 +134,15 @@ def main(argv: list[str] | None = None) -> int:
             args=(f"http://{probe_host}:{port}", probe_host, port),
             daemon=True,
         ).start()
-    uvicorn.run(app, host=args.host, port=port, log_level="warning", log_config=None)
+    server = uvicorn.Server(uvicorn.Config(
+        app, host=args.host, port=port, log_level="warning", log_config=None))
+    if args.exit_when_idle is not None:
+        # Selbst-Beenden (ADR 0091): Fenster zu = keine Status-Abrufe mehr.
+        watch = IdleWatch(args.exit_when_idle * 60)
+        app.state.idle_watch = watch
+        engine = app.state.engine
+        start_watchdog(watch, engine.status, lambda: setattr(server, "should_exit", True))
+    server.run()
     return 0
 
 

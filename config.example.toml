@@ -99,6 +99,10 @@ thumbnails = "./cache/thumbnails"
 # copies of formats browsers cannot play (AIFF, ALAC, CAF). Regenerated on
 # demand; safe to delete. Default when unset: "cache/audio" next to the database.
 #audio = "./cache/audio"
+# Full-size display images of Kodak Photo CD files, stored once as lossless
+# PNG (about 11 MB each) on first view. Regenerated on demand; safe to
+# delete. Default when unset: "cache/preview" next to the database.
+#preview = "./cache/preview"
 # Longest edge of the thumbnails in pixels.
 thumbnail_size = 320
 # Processes for thumbnail generation. Without a value: cores − 2 (full

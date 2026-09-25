@@ -104,8 +104,11 @@ internet: never trust it blindly.
   folders). That is intended, but one more reason not to expose the
   server.
 - **New formats = new review.** The TIFF/PSD preview goes through Pillow
-  (a server-side rendered JPEG, the original untouched); PDF is only
-  cataloged; audio goes through fml's own tag parser and ffmpeg (see
+  (a server-side rendered JPEG, the original untouched); fml decodes
+  Kodak Photo CD itself, capped: at most 16 MiB are read, the number of
+  image rows per level is bounded, and the search for the row markers
+  runs in C, so a crafted file cannot keep the thumbnail processes busy
+  for minutes; PDF is only cataloged; audio goes through fml's own tag parser and ffmpeg (see
   above). For every further parser the same rules apply (cap the
   parsers, escape the output).
 

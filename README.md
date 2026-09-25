@@ -124,7 +124,8 @@ apart, including separate size figures.
   three locations (a duplicates view lists exactly these cases). Ratings
   and tags attach to the content and survive renames.
 - **Metadata in two layers:** layer 1 reads the embedded raw metadata
-  losslessly from PNG, JPEG, WEBP, GIF, BMP, TIFF and video containers
+  losslessly from PNG, JPEG, WEBP, GIF, BMP, TIFF, PSD, Kodak Photo CD
+  and video containers
   (WEBM/MP4/MOV - videos carry ComfyUI workflows too). Layer 2 interprets
   it into searchable fields: prompt, negative, model, LoRAs, seed,
   sampler, steps, input image and more, with parsers for ComfyUI,

@@ -21,7 +21,7 @@ GitHub organization).
   supply chain.
 - [Metadata extraction (layer 1)](extraction.md) — reads all embedded raw
   metadata from a media file: PNG, JPEG/WEBP/GIF/BMP/TIFF/PSD (Pillow),
-  video (ffprobe) and with the audio module MP3, FLAC, Ogg, WAV, AIFF, CAF
+  Kodak Photo CD, video (ffprobe) and with the audio module MP3, FLAC, Ogg, WAV, AIFF, CAF
   and M4A.
 - [Metadata interpretation (layer 2)](interpretation.md) — turns the raw
   metadata into searchable fields (prompt, model, seed, …); runs during

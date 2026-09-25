@@ -51,7 +51,7 @@ the same numbers in the interface language.)
 | **newly added** / **already known** | hash was new or already in the DB (duplicate or re-scan) |
 | **with metadata** | embedded metadata was found |
 | **interpreted** | [layer 2](interpretation.md) recognized structured fields (prompt, seed, model, …) |
-| **extractor pending** | recognized, but the extractor is not built yet (currently PSD and PDF). The file is still **cataloged** and gets its metadata automatically once the extractor exists |
+| **extractor pending** | recognized, but the extractor is not built yet (currently PDF and camera RAW such as ARW, NEF, CR2, DNG). The file is still **cataloged** and gets its metadata automatically once the extractor exists |
 | **skipped (no container)** | no known container (e.g. `.txt`, macOS `._` files) |
 | **filtered** / **blocked** | left out by the import rules or the block list |
 | **failed** | file unreadable etc. — listed at the end of the run |

@@ -17,8 +17,8 @@ import { dotsHtml } from "./curate.js";
 import { galleryItemAt, galleryTotal, listComparing } from "./gallery.js";
 import { emit, on } from "./main.js";
 import {
-  analysisOf, currentHash, isFailed, matchOn, nudge, onRepaint, overrideMatch, paintWave, playAll,
-  playingHash, seek, toggle, toggleMatch,
+  analysisOf, btnState, currentHash, matchOn, nudge, onRepaint, overrideMatch, paintWave, playAll,
+  playingHash, seek, setText, toggle, toggleMatch,
 } from "./player.js";
 import { rulerTicks } from "./waveform.js";
 import { commentsOf, seedComments } from "./comments.js";
@@ -125,27 +125,21 @@ export function paintRow(el) {
   const on = playingHash() === hash;
   el.classList.toggle("playing", on);
   el.classList.toggle("current", currentHash() === hash);
-  const btn = el.querySelector(".pbtn");
-  if (btn) {
-    const bad = isFailed(hash);
-    btn.disabled = bad;
-    btn.textContent = on ? "❚❚" : "▶";
-    btn.title = bad ? STRINGS.audioPlayFailed : on ? STRINGS.audioPause : STRINGS.audioPlay;
-  }
+  btnState(el.querySelector(".pbtn"), hash);   // nur bei Änderung (#211)
   const dur = parseFloat(el.dataset.dur) || 0;
   paintWave(el.querySelector(".wv"), hash, { axis, duration: dur });
   const rc = el.querySelector(".rcom");
   if (rc) {
     const n = commentsOf(hash).length;
-    rc.textContent = n ? String(n) : "–";
+    setText(rc, n ? String(n) : "–");
     rc.classList.toggle("has", n > 0);
   }
   const a = analysisOf(hash);
   const l = el.querySelector(".rlufs");
   if (l) {
     const v = a?.loudness?.integrated;
-    l.textContent = v == null ? (a === false ? "–" : "") : v.toLocaleString(STRINGS.locale,
-      { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    setText(l, v == null ? (a === false ? "–" : "") : v.toLocaleString(STRINGS.locale,
+      { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
   }
 }
 

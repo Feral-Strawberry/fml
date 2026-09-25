@@ -138,3 +138,17 @@ def tail(path: str | Path, lines: int = 100, *, min_level: int | None = None) ->
     if min_level is not None:
         all_lines = filter_level(all_lines, min_level)
     return all_lines[-lines:]
+
+
+def tolerant_console(streams=None) -> None:
+    """Konsolen-Ausgabe darf den Server nie abstürzen lassen (#187): Unter
+    Windows schreibt Python in eine UMGELEITETE Ausgabe (Datei, Pipe) im
+    ANSI-Zeichensatz (cp1252), der z. B. die 🍓 der Startzeile nicht kennt;
+    ohne das hier bricht ``print`` mit UnicodeEncodeError ab. Nicht
+    darstellbare Zeichen werden ersetzt statt zu werfen."""
+    for stream in (sys.stdout, sys.stderr) if streams is None else streams:
+        if stream is not None and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(errors="backslashreplace")
+            except (ValueError, OSError):
+                pass

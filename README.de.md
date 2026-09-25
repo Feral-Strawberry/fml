@@ -130,8 +130,8 @@ Größenangaben.
   genau diese Fälle). Bewertungen und Tags hängen am Inhalt und überleben
   Umbenennungen.
 - **Metadaten in zwei Schichten:** Schicht 1 liest die eingebetteten
-  Roh-Metadaten verlustfrei aus PNG, JPEG, WEBP, GIF, BMP, TIFF und
-  Video-Containern (WEBM/MP4/MOV - auch Videos tragen ComfyUI-Workflows).
+  Roh-Metadaten verlustfrei aus PNG, JPEG, WEBP, GIF, BMP, TIFF, PSD,
+  Kodak Photo CD und Video-Containern (WEBM/MP4/MOV - auch Videos tragen ComfyUI-Workflows).
   Schicht 2 interpretiert daraus durchsuchbare Felder: Prompt, Negativ,
   Modell, LoRAs, Seed, Sampler, Steps, Eingangsbild u. a., mit Parsern
   für ComfyUI, A1111/Forge und XMP (Midjourney, Lightroom-Bewertungen).

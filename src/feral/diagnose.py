@@ -28,7 +28,8 @@ from typing import Any, Callable
 from .db import connect
 from .extract.video_ffprobe import video_stream_facts
 from .interpret.video import browser_support
-from .tools import find_binary, media_input
+from .tools import NO_WINDOW, find_binary, media_input
+from .logsetup import tolerant_console
 
 _TIMEOUT_SECONDS = 30
 _SIZE_UNITS = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
@@ -129,7 +130,7 @@ def probe_video_stream(path: str, *, run: Callable[..., Any] = subprocess.run) -
         proc = run(
             [find_binary("ffprobe") or "ffprobe", "-v", "error", "-print_format", "json",
              "-show_streams", "-select_streams", "v:0", *media_input(path)],
-            capture_output=True, timeout=_TIMEOUT_SECONDS,
+            capture_output=True, timeout=_TIMEOUT_SECONDS, **NO_WINDOW,
         )
     except FileNotFoundError as exc:
         raise RuntimeError("ffprobe nicht gefunden (siehe DEPENDENCIES.md)") from exc
@@ -209,6 +210,7 @@ def video_codec_report_from_db(conn: sqlite3.Connection, *, min_size: int = 0) -
 
 
 def main(argv: list[str] | None = None) -> int:
+    tolerant_console()   # umgeleitete Ausgabe unter Windows (#187)
     parser = argparse.ArgumentParser(
         prog="python -m feral.diagnose",
         description="Diagnostic commands over the catalog (writes nothing).",

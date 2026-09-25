@@ -11,9 +11,11 @@ from ..db import connect
 from . import comfyui, loras
 from .registry import PARSERS, interpret_items
 from .reparse import ReparseReport, raw_items_for, reparse_database
+from ..logsetup import tolerant_console
 
 
 def main(argv: list[str] | None = None) -> int:
+    tolerant_console()   # umgeleitete Ausgabe unter Windows (#187)
     parser = argparse.ArgumentParser(
         prog="python -m feral.interpret",
         description=(

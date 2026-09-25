@@ -118,3 +118,18 @@ def test_tail_sanitizes_older_files_on_display(tmp_path) -> None:
     (line,) = tail(p, 10)
     assert "\x1b" not in line and "\u202e" not in line
     assert "\\x1b[2J" in line and "\\u202e" in line
+
+
+def test_tolerant_console_survives_characters_the_codepage_lacks():
+    """#187: umgeleitete Ausgabe unter Windows ist cp1252; die 🍓 der
+    Startzeile ließ den Server abstürzen."""
+    import io
+
+    from feral.logsetup import tolerant_console
+
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252")
+    tolerant_console([stream, None])
+    print("\U0001f353 Feral Media Library", file=stream)
+    stream.flush()
+    assert raw.getvalue().startswith(b"\\U0001f353 Feral")

@@ -246,7 +246,7 @@ img.pe-icon {
 }
 /* Sprachumschalter (ADR 0054) und Dark/Light (#123): dezent wie der
    Sortier-Knopf; der eine zeigt DE/EN, der andere Mond/Sonne. */
-#langBtn, #themeBtn {
+#langBtn, #themeBtn, #helpBtn {
   height: 30px;
   padding: 0 8px;
   font-size: 12px;
@@ -255,8 +255,8 @@ img.pe-icon {
   color: var(--dim);
   flex: none;
 }
-#langBtn:hover, #themeBtn:hover { color: var(--text); border-color: var(--accent-line); }
-#themeBtn { padding: 0; width: 30px; display: inline-flex; align-items: center; justify-content: center; }
+#langBtn:hover, #themeBtn:hover, #helpBtn:hover { color: var(--text); border-color: var(--accent-line); }
+#themeBtn, #helpBtn { padding: 0; width: 30px; display: inline-flex; align-items: center; justify-content: center; }
 
 /* Sortier-Knopf + Popover (ADR 0039): ersetzt das System-<select>. */
 #sort {
@@ -1623,3 +1623,17 @@ body.list-compare #pbar { display: none; }
 .coverbox .sdactions { align-items: center; }
 .coverbox .sdactions .sdhint { margin-right: auto; }
 #single.song #svZoom { display: none; }
+
+/* Hilfe-Dialog (ADR 0091): die mitgelieferte Anleitung über der Bibliothek */
+.helpbox {
+  width: min(1000px, 94vw); height: 90vh;
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  overflow: hidden; box-shadow: 0 18px 50px rgba(0, 0, 0, .45);
+}
+.helphead {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px 8px 16px; border-bottom: 1px solid var(--border);
+}
+.helpclose { width: 30px; height: 30px; padding: 0; }
+.helpframe { flex: 1; width: 100%; border: 0; background: #fff; }

@@ -1,6 +1,6 @@
 [project]
 name = "feral-media-library"
-version = "2026.09.2"
+version = "2026.09.3"
 description = "Feral Media Library (fml): schlanke Medienverwaltung für AI-generierte Bilder und Videos"
 requires-python = ">=3.12"
 # Laufzeit-Abhängigkeiten werden bewusst in requirements.txt gepinnt geführt

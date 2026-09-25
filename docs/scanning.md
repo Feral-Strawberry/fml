@@ -51,7 +51,7 @@ Scan finished for: /media/ai-bilder
 | **newly added** / **already known** | Hash war neu bzw. schon in der DB (Dublette oder Re-Scan) |
 | **with metadata** | es wurden eingebettete Metadaten gefunden |
 | **interpreted** | [Schicht 2](interpretation.md) hat strukturierte Felder erkannt (Prompt, Seed, Modell, …) |
-| **extractor pending** | erkannt, aber der Extraktor ist noch nicht gebaut (aktuell PSD und PDF). Die Datei ist trotzdem **katalogisiert** und bekommt ihre Metadaten automatisch, sobald der Extraktor da ist |
+| **extractor pending** | erkannt, aber der Extraktor ist noch nicht gebaut (aktuell PDF und Kamera-RAW wie ARW, NEF, CR2, DNG). Die Datei ist trotzdem **katalogisiert** und bekommt ihre Metadaten automatisch, sobald der Extraktor da ist |
 | **skipped (no container)** | kein bekannter Container (z. B. `.txt`, macOS `._`-Dateien) |
 | **filtered** / **blocked** | Import-Regeln bzw. Sperrliste haben die Datei ausgelassen |
 | **failed** | Datei nicht lesbar o. ä. — wird unten im Lauf aufgelistet |

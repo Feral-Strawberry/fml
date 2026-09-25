@@ -102,7 +102,11 @@ Internet: nie blind vertrauen.
   auf dem ganzen Rechner auflisten (für die Auswahl von Quell-/Zielordnern). Das
   ist gewollt, aber ein Grund mehr, den Server nicht nach außen zu öffnen.
 - **Neue Formate = neue Prüfung.** Die TIFF/PSD-Vorschau läuft über Pillow
-  (serverseitig gerendertes JPEG, Original unangetastet); PDF wird nur
+  (serverseitig gerendertes JPEG, Original unangetastet); Kodak Photo CD
+  dekodiert fml selbst, gedeckelt: höchstens 16 MiB werden gelesen, die
+  Zahl der Bildzeilen je Stufe ist begrenzt, und die Suche nach den
+  Zeilenmarken läuft in C, damit eine präparierte Datei die
+  Thumbnail-Prozesse nicht minutenlang beschäftigt; PDF wird nur
   katalogisiert; Audio läuft über den eigenen Tag-Parser und ffmpeg (siehe
   oben). Für jeden weiteren Parser gelten dieselben Regeln (Parser
   deckeln, Ausgabe escapen).

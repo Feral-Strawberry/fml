@@ -134,8 +134,10 @@ Ansicht verschwinden (LoRA, Format, Auflösung, Eingangsbild, Rankings in
 der Audioansicht; die Medienart hätte dort nur eine Zeile). Songs gehören
 nie in ein [Ranking](rankings.md), auch nicht mit Cover: zum Vergleichen
 und Bewerten gibt es hier eigene Werkzeuge. Neu in der
-Audioansicht ist die Gruppe **Songtext**: „mit Gesang" (`has: lyrics`) und
-„instrumental" (`-has: lyrics`). Auch das „+ Kriterium"-Popover zeigt nur
+Audioansicht ist die Gruppe **Songtext**: „mit Songtext" (`has: lyrics`) und
+„ohne Songtext" (`-has: lyrics`). Sie sagt nur, ob ein Songtext in der Datei
+hinterlegt ist, nicht, ob gesungen wird: Viele Songs mit Gesang tragen
+keinen Songtext. Auch das „+ Kriterium"-Popover zeigt nur
 die passenden Kategorien. Eine **Sammel-Aktion** aufs Suchergebnis trifft
 genau das, was die Ansicht zeigt.
 

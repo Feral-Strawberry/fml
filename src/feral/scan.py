@@ -35,6 +35,7 @@ from .interpret import interpret_items
 from .interpret.types import Interpretation
 from .interpret.video import playback_issue
 from .messages import dump as msg_dump
+from .logsetup import tolerant_console
 
 
 @dataclass
@@ -316,6 +317,7 @@ def _process_file(
 
 
 def main(argv: list[str] | None = None) -> int:
+    tolerant_console()   # umgeleitete Ausgabe unter Windows (#187)
     parser = argparse.ArgumentParser(
         prog="python -m feral.scan",
         description="Scan a folder recursively and add all media to the database.",

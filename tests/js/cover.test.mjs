@@ -179,11 +179,11 @@ test("Dialog: ein nacktes Wort ist Text — live beim Tippen und als Chip mit En
   emit("cover-pick", { hash: SONG, name: "Regenzeit final", tags: [], cover: null });
   await flush();
   const input = dlg().querySelector(".cvinput");
-  input.value = "pyromania";
+  input.value = "festival";
   input.dispatchEvent(new DomEvent("input", { bubbles: true }));
   await new Promise((r) => setTimeout(r, 400));
   await flush();
-  assert.equal(mockApi.callsTo("/api/items").at(-1).params.get("filter"), "typ: bild text: pyromania");
+  assert.equal(mockApi.callsTo("/api/items").at(-1).params.get("filter"), "typ: bild text: festival");
   keydown("Enter", { target: input });
   await flush();
   assert.equal(dlg().querySelector(".sderr").hidden, true, "kein Grammatikfehler");

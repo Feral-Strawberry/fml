@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from .messages import dump as msg_dump
-from .tools import find_binary, media_input
+from .tools import NO_WINDOW, find_binary, media_input
 
 # Format-Version der Analyse-Datei. Anheben, wenn sich Inhalt oder Form
 # ändern: ältere Dateien gelten dann als fehlend und werden neu erzeugt.
@@ -240,7 +240,7 @@ def analyze(source: str | Path) -> tuple[dict[str, Any] | None, str]:
     ]
     try:
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, **NO_WINDOW)
     except FileNotFoundError:
         return None, msg_dump("thumbNoFfmpeg")
 
@@ -336,7 +336,7 @@ def generate_proxy(source: str | Path, dest: Path) -> bool:
                 [find_binary("ffmpeg") or "ffmpeg", "-nostdin", "-v", "error", "-y",
                  *media_input(source), "-map", "0:a:0", "-map_metadata", "-1",
                  "-c:a", "flac", "-f", "flac", str(tmp)],
-                capture_output=True, timeout=_TIMEOUT,
+                capture_output=True, timeout=_TIMEOUT, **NO_WINDOW,
             )
         except FileNotFoundError:
             return False, msg_dump("thumbNoFfmpeg")

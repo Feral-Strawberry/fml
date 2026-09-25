@@ -535,7 +535,7 @@ export const mediaUrl = (hash) => `/api/media/${hash}`;
 
 /** Container, die der Browser nicht nativ rendert — die Anzeige nutzt das
  *  serverseitig gerenderte JPEG statt der Originalbytes (ADR 0052). */
-const RENDERED_CONTAINERS = new Set(["tiff", "psd"]);
+const RENDERED_CONTAINERS = new Set(["tiff", "psd", "pcd"]);
 
 // Formate mit Wiedergabe-Proxy, die manche Browser selbst spielen (Safari:
 // AIFF und ALAC; CAF spielt keiner — Recherche §10). Name = das, was der
@@ -554,7 +554,7 @@ function playsNatively(fmt) {
 }
 
 /** Anzeige-URL eines Items ({file_hash, container, media_kind}): das
- *  Original — oder für TIFF/PSD die gerenderte /api/preview-Ansicht. Audio
+ *  Original — oder für TIFF/PSD/PCD die gerenderte /api/preview-Ansicht. Audio
  *  spielt IMMER über /api/preview (A4 #161): der Server liefert das
  *  Original, wo der Browser es kann, sonst den FLAC-Proxy (AIFF/ALAC/CAF),
  *  erzeugt beim ersten Abspielen. Ob ALAC im M4A steckt, weiß nur der

@@ -6,6 +6,63 @@ Was sich zwischen den Snapshot-Releases geändert hat, aus Sicht der
 Nutzer. Versionen sind Datums-Versionen (`JJJJ.MM` oder `JJJJ.MM.N`);
 die laufende Instanz zeigt ihre Version in Admin → Übersicht.
 
+## 2026.09.3 (2026-09-25)
+
+fml liest jetzt **Kodak Photo CD**: die Bilder von den Foto-CDs der
+90er, in voller Auflösung. Dazu zwei Korrekturen im Audio-Modul und mehr
+Robustheit unter Windows.
+
+### Nach dem Update
+
+1. **Wie gewohnt mit `start.sh` bzw. `start.bat` starten.** Abhängigkeiten
+   und Datenbank-Schema sind unverändert.
+2. **Photo-CD-Dateien, die bisher aussortiert wurden** (Ausgangs-Ordner
+   „unbekanntes Format" des Watch-Ordners), einfach noch einmal in den
+   Watch-Ordner legen bzw. den Scan-Ort neu scannen.
+
+### Neu: Kodak Photo CD
+
+- **`.PCD`-Dateien** werden erkannt, katalogisiert und angezeigt, in der
+  größten Stufe der Datei: **3072×2048** (bzw. 1536×1024). Hochformate
+  werden gedreht, wie auf der CD vermerkt.
+- **Erstelldatum aus der CD:** Der Scanzeitpunkt steht im Kopf der Datei
+  und wird zum Datum des Bildes, auch wenn der Dateistempel längst
+  verloren ist. Im Detailpanel stehen dazu Scanner, Filmtyp und Fotolabor.
+- **Schnell ab dem zweiten Mal:** Das große Bild rechnet fml beim ersten
+  Öffnen (ein bis zwei Sekunden) und legt es dann verlustfrei als PNG im
+  Cache ab (`cache/preview` neben der Datenbank, rund 11 MB je Bild;
+  jederzeit löschbar, Ort über `[cache] preview`).
+
+### Fehlerbehebungen
+
+- **Audio: Der Pause-Knopf** in der Liste und in der Abspielleiste
+  reagiert während der Wiedergabe zuverlässig. Vorher ging ein Klick auf
+  ❚❚ oft ins Leere, die Leertaste funktionierte.
+- **Audio: Die Seitenleisten-Gruppe „Songtext"** heißt jetzt „mit Songtext"
+  / „ohne Songtext" statt „mit Gesang" / „instrumental": Sie sagt nur, ob
+  ein Songtext in der Datei steckt, nicht, ob gesungen wird.
+- **Windows:** ffmpeg und ffprobe öffnen keine kurz aufblitzenden
+  Konsolenfenster mehr, und der Server stürzt nicht mehr ab, wenn seine
+  Ausgabe umgeleitet ist (etwa beim Start ohne Konsole).
+- **Übersichtsmodus:** Admin → Quellen zeigt keine falsche Warnung
+  „kein Import-Ziel" mehr.
+
+### Für Installationen ohne Konsole
+
+- **`--exit-when-idle MINUTEN`:** Der Server beendet sich selbst, wenn so
+  lange keine fml-Seite mehr offen war und keine Aufgabe läuft oder wartet
+  (mindestens 2 Minuten).
+- **`--help-dir ORDNER`:** Ein Ordner mit `index.html`, etwa eine eigene
+  Anleitung: fml zeigt dann oben rechts ein **?**, das sie in einem Fenster
+  über der Bibliothek öffnet.
+
+### Sicherheit
+
+- **Photo CD liest fml mit eigenem, gedeckeltem Decoder:** höchstens
+  16 MiB je Datei, begrenzte Zeilenzahl, die Suche nach Zeilenmarken läuft
+  in C. Eine präparierte Datei endet schnell, statt die Thumbnail-Prozesse
+  zu blockieren. Dauerhafter Test mit verbogenen Dateien.
+
 ## 2026.09.2 (2026-09-24)
 
 fml kann jetzt auch **Musik**: Das neue **Audio-Modul** nimmt Songs von

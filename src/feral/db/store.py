@@ -33,6 +33,7 @@ _MEDIA_KIND = {
     "cr2": "image",
     "dng": "image",
     "psd": "image",
+    "pcd": "image",
     "pdf": "document",
     "matroska": "video",
     "isobmff": "video",

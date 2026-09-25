@@ -7,7 +7,7 @@
 > ist trotzdem vollständig gespeichert.
 
 **Stand:** Umgesetzt sind **PNG** (Eigenbau), **JPEG/WEBP/TIFF/GIF/BMP** (über
-Pillow), **PSD/PSB** (Eigenbau) und **Video WEBM/MKV/MP4/MOV** (über das
+Pillow), **PSD/PSB** und **Kodak Photo CD** (je Eigenbau) und **Video WEBM/MKV/MP4/MOV** (über das
 System-Programm `ffprobe`). PDF wird *erkannt*, aber nicht extrahiert
 (bewusst gestrichen, ADR 0051). Die Deutung der Werte macht
 [Schicht 2](interpretation.md).
@@ -86,6 +86,25 @@ Eingebettete Vorschau-Thumbnails und Werkzeug-Einstellungen (Druck, Raster,
 Hilfslinien) sind keine Metadaten und werden übersprungen. Bestände, die vor
 dieser Erweiterung katalogisiert wurden: einmal **Admin → Wartung →
 „Re-Scan aller Fundorte"** ausführen.
+
+## Was bei Kodak Photo CD gelesen wird (Eigenbau)
+
+Photo-CD-Dateien (`.PCD`, „Image Pac", ca. 1992–2004) erkennt fml an der
+Kennung `PCD_IPI` bei Byte 2048. Übernommen wird der **IPI-Kopf** byte-exakt
+(Quell-Label `"pcd:ipi"`), dazu seine Textfelder: Filmtyp (`product_type`),
+Scanner (`scanner_vendor`, `scanner_product`, `scanner_firmware`,
+`scanner_serial`), Hersteller der Brennstation (`piw_manufacturer`) und das
+Fotolabor (`photofinisher`). Die **Scanzeit** steht als `CreateDate` bereit —
+sie wird damit zum Erstelldatum des Bildes, auch wenn der Dateistempel
+längst verloren ist.
+
+Eine Photo-CD-Datei enthält das Bild in mehreren Größen. fml zeigt die
+größte vorhandene Stufe: **16Base mit 3072×2048 Pixeln** (bzw. 4Base mit
+1536×1024), in Galerie, Lupe und Einzelbildansicht. Das erste Öffnen in
+voller Größe braucht ein bis zwei Sekunden; dabei legt fml das Bild
+verlustfrei als PNG ab (Standard `cache/preview` neben der Datenbank, rund
+11 MB je Bild), danach erscheint es sofort. Der Ordner darf jederzeit
+gelöscht werden, die Bilder entstehen beim nächsten Öffnen neu. Hochformat-Aufnahmen werden gedreht, wie auf der CD vermerkt.
 
 ## Was bei Video gelesen wird (über ffprobe)
 
