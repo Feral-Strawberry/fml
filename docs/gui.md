@@ -415,6 +415,9 @@ Dateien extrahiert wurde.
   vergebene Tags holt **Admin → Wartung → Re-Scan aller Fundorte** nach;
   im Finder entfernte Tags bleiben in fml stehen (✕ entfernt sie).
 - **Notizen:** Freitext im Panel; speichert beim Verlassen des Feldes.
+- **Musik-Angaben (nur Songs):** Titel, Interpret, Album und weitere
+  Felder unter KURATIERT, siehe
+  [Musik-Angaben von Hand](audio.md#musik-angaben-von-hand).
 - **Datum von Hand:** Feld unter KURATIERT, für alle Medienarten. Gedacht
   für Dateien, deren eigenes Datum falsch ist (frisch gerippte alte CDs,
   eingescannte Fotos): `1997`, `1997-05` oder `1997-05-12`, auch
@@ -447,7 +450,7 @@ Knopf **⚡ Sammel-Aktion** rechts in der Kopfzeile über der Galerie (neben
 „Filter zurücksetzen"). Er öffnet einen Dialog, der
 zeigt, was getroffen wird (die Chips + Trefferzahl), und sechs Aktionen
 anbietet - egal ob 50 oder 20.000 Treffer (in der Audioansicht kommt
-„Zeitkommentare → Exportieren" dazu, siehe
+„Austausch → Exportieren" dazu, siehe
 [Audio](audio.md#kommentare-mit-einem-anderen-fml-austauschen)):
 
 - **Basisbewertung** (1-5 ★): füllt **nur Unbewertete** - bereits vergebene

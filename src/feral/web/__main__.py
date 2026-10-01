@@ -142,8 +142,20 @@ def main(argv: list[str] | None = None) -> int:
         app.state.idle_watch = watch
         engine = app.state.engine
         start_watchdog(watch, engine.status, lambda: setattr(server, "should_exit", True))
-    server.run()
+    _run_until_stopped(server)
     return 0
+
+
+def _run_until_stopped(server: "uvicorn.Server") -> None:
+    """Server laufen lassen, bis er beendet wird. Strg+C ist das normale
+    Ende: uvicorn fährt dabei sauber herunter (Watcher, Worker, gesicherte
+    Warteschlange) und reicht das Signal danach weiter, asyncio macht daraus
+    ``KeyboardInterrupt``. Ohne das hier sähe ein sauberes Beenden wie ein
+    Absturz aus (Traceback, #254)."""
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":

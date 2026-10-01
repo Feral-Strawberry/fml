@@ -217,6 +217,7 @@ export function initAdvanced() {
   on("annotation-changed", invalidate);
   on("model-changed", invalidate);
   on("date-changed", invalidate);
+  on("fields-changed", invalidate);
   on("items-rejected", invalidate);
   on("audio-enabled", (d) => { audioEnabled = !!d?.enabled; });
   // Ansichtswechsel (ADR 0085): andere Zähl-Basis, andere Kategorien.

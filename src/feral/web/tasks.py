@@ -402,6 +402,30 @@ def reparse_task(conn, params, progress, ctx) -> dict[str, Any]:
                            total=report.items_total, fields=report.fields_written)}
 
 
+@task("music_fields")
+def music_fields_task(conn, params, progress, ctx) -> dict[str, Any]:
+    """Musik-Angaben von Hand für eine große Auswahl setzen (ADR 0101
+    Punkt 4): schreiben, die Songs aus ihren Roh-Blobs neu interpretieren,
+    ein Commit je Schub. Kein Dateizugriff außer dem Stempel fürs Datum,
+    wenn das Jahr geleert wird."""
+    from ..db import manual_fields
+    from ..importer import rule_min_date
+    from ..interpret.reparse import reinterpret
+
+    hashes, changes = params["hashes"], params["changes"]
+    min_date = rule_min_date(params.get("rules"))
+    done = 0
+    for start in range(0, len(hashes), 100):
+        touched = manual_fields.set_fields(conn, hashes[start:start + 100], changes)
+        reinterpret(conn, touched, dates="year" in changes, min_date=min_date)
+        conn.commit()
+        done += len(touched)
+        index = min(start + 100, len(hashes))
+        progress(current=msg("progressMusicFields", index=index, total=len(hashes)),
+                 report=_counters(scanned_files=index, media_files=len(hashes), new_items=done))
+    return {"summary": msg("sumMusicFields", n=done)}
+
+
 @task("integrity")
 def integrity_task(conn, params, progress, ctx) -> dict[str, Any]:
     verdict = conn.execute("PRAGMA integrity_check").fetchone()[0]

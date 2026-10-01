@@ -71,7 +71,7 @@
    result with time). Below them the **Cache** card (what is cached on
    disk, per kind with Delete) and cards of their own with the same logic
    in three steps: **Move rejected out**, **Import rules on the
-   collection**, with the audio module **Import time comments**, and
+   collection**, with the audio module **Import exchange file**, and
    **Clean up orphaned locations** — see "Maintenance actions".
 5. **Issues** (`/admin/issues`) — one card per error kind with an honest
    counter, the most recent entries and "dismiss all N of this kind"; the
@@ -361,13 +361,17 @@ The same three steps as the two cards above:
    "Clean up N locations"; the result stays in the card and the key
    figure of the raw-files card is refreshed.
 
-### Import time comments (its own card, only with the audio module)
+### Import exchange file (its own card, only with the audio module)
 
-Takes over the comment file of another fml: choose the file and enter
-the origin → preview (found, new, already there, not found; matches
-only by Suno song ID listed separately) → take over. Changes comments
-only, never files. Details and the file format:
-[Audio module → Exchanging comments](audio.md#exchanging-comments-with-another-fml).
+Takes over the exchange file of another fml with time comments and music
+details set by hand: choose the file and enter the origin → preview
+(found, new, already there, not found; matches only by Suno song ID
+listed separately; for the music details new, identical, differing) →
+take over. Your own differing details stay unless the checkbox
+"Overwrite my own differing details" is ticked. Changes comments and
+details only, never files. Details and the file format:
+[Audio module → Exchanging comments](audio.md#exchanging-comments-with-another-fml)
+and [Exchanging details](audio.md#exchanging-details-with-another-fml).
 
 ## Issues and block list
 

@@ -786,6 +786,7 @@ export function initSidebar() {
   on("annotation-changed", () => { loadCounts(); loadFolders(); });
   on("model-changed", () => { loadCounts(); loadFolders(); });  // ADR 0022
   on("date-changed", () => { loadCounts(); loadFolders(); });   // ADR 0096
+  on("fields-changed", () => { loadCounts(); loadFolders(); }); // ADR 0101: Interpret/Album/Genre
   on("items-rejected", () => { loadCounts(); loadFolders(); }); // ADR 0041
   on("cover-changed", () => { loadCounts(); loadFolders(); });  // Song kommt/geht (#165)
   on("folders-changed", loadFolders);

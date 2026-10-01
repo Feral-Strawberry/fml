@@ -51,11 +51,12 @@ internet: never trust it blindly.
 - **A parser error stays with its file.** If an interpretation parser
   fails on the metadata of a file, it drops out for that file; scan and
   "Re-interpret" keep running, the raw metadata stays stored.
-- **Comment files from another fml** (Import time comments) are untrusted
-  input: at most 20 MB, checked before reading, a fixed format with
-  length and quantity limits (2,000 comments per song), only as
-  `application/json`. Only comment text, position and origin are taken
-  over; the import does not touch files.
+- **Exchange files from another fml** (Import exchange file) are
+  untrusted input: at most 20 MB, checked before reading, a fixed format
+  with length and quantity limits (2,000 comments per song, a fixed list
+  of music detail fields with the same limits as entering them by hand),
+  only as `application/json`. Only comment text, position, music details
+  and origin are taken over; the import does not touch files.
 - **ffmpeg/ffprobe** (videos, audio) receive every file as a local file:
   `-protocol_whitelist file` and an absolute `file:` path. A crafted file
   (such as a hidden playlist) cannot make ffmpeg access the network, and a

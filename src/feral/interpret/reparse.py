@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Sequence
 
-from ..db import store_interpretations
+from ..db import manual_fields, store_interpretations
 from ..db.store import now_iso
 from ..extract.types import RawMetadataItem
 from . import suno
@@ -115,12 +115,48 @@ def _audio_media_date(
         if when is not None and when <= upper:
             set_media_date(conn, file_hash, when, "metadaten")
             return
+    # Jahr von Hand (ADR 0101) vor dem Tag-Jahr und ohne Untergrenze;
+    # ``set_media_date`` setzt es an die Stelle des Tag-Jahrs.
+    if manual_fields.year_of(conn, file_hash) is not None:
+        set_media_date(conn, file_hash, None, TAG_YEAR)
+        return
     year = next((f.value for i in interpretations if i.parser == "audio"
                  for f in i.fields if f.field == "year"), None)
     if year is not None:
         tag = datetime(int(year), 1, 1, tzinfo=timezone.utc)
         if (min_date or DEFAULT_MIN_DATE) <= tag <= upper:
             set_media_date(conn, file_hash, tag, TAG_YEAR)
+
+
+def reinterpret(
+    conn: sqlite3.Connection, hashes: Sequence[str], *,
+    dates: bool = False, min_date: datetime | None = None,
+) -> int:
+    """Songs aus ihren gespeicherten Roh-Blobs neu interpretieren, ohne
+    Dateizugriff: der Weg, auf dem eine Änderung an den Angaben von Hand
+    wirksam wird (ADR 0101 Punkt 4). ``store_interpretations`` legt die
+    Angaben von Hand darüber; Leeren holt so den Tag-Wert zurück.
+
+    ``dates`` (das Jahr wurde geändert): das abgeleitete Datum neu rechnen,
+    wie beim Leeren eines Datums von Hand (ADR 0096); ein Datum von Hand
+    bleibt unberührt. Läuft in der offenen Transaktion des Aufrufers."""
+    from ..importer import DEFAULT_MIN_DATE, derived_media_date   # Lazy: importer → interpret
+    ts = now_iso()
+    for file_hash in hashes:
+        store_interpretations(
+            conn, file_hash=file_hash,
+            interpretations=interpret_items(raw_items_for(conn, file_hash)),
+            now=ts, commit=False,
+        )
+        if dates:
+            conn.execute(
+                """UPDATE items SET media_date = ?
+                    WHERE file_hash = ? AND file_hash NOT IN (
+                        SELECT file_hash FROM annotations WHERE media_date IS NOT NULL)""",
+                (derived_media_date(conn, file_hash, min_date=min_date or DEFAULT_MIN_DATE),
+                 file_hash),
+            )
+    return len(hashes)
 
 
 def reparse_database(
@@ -165,6 +201,9 @@ def reparse_database(
             if interpretations:
                 report.items_interpreted += 1
                 report.fields_written += sum(len(i.fields) for i in interpretations)
+            # Angaben von Hand (ADR 0101) VOR dem Vergleich darüberlegen:
+            # der Bestand enthält sie schon als Parser ``manual``.
+            interpretations = manual_fields.overlay(conn, file_hash, interpretations)
             if _existing_rows(conn, file_hash) == _planned_rows(interpretations):
                 report.items_unchanged += 1
                 continue

@@ -252,6 +252,12 @@ export const saveWatchSources = (sources) => postJSON("/api/watch/save", { sourc
 export const batchAnnotate = (hashes, fields) =>
   postJSON("/api/batch/annotate", { hashes, ...fields });
 
+/** Musik-Angaben von Hand (ADR 0101): Stand der acht Felder für eine Auswahl
+ *  ({fields: {feld: {value, mixed, manual, source}}}) und Setzen; "" entfernt
+ *  die Angabe von Hand. Antwort {updated, fields} oder {queued, count}. */
+export const getMusicFields = (hashes) => postJSON("/api/fields/state", { hashes });
+export const setMusicFields = (hashes, fields) => postJSON("/api/fields", { hashes, fields });
+
 /** Sammel-Aktion aufs Suchergebnis (ADR 0040): hashes ODER filter als Scope.
  *  fields: {rating?, add_tag?, model?, note?, reject?} — rating füllt nur
  *  Unbewertete, note hängt an, reject läuft allein (ADR 0041). Antwort:
@@ -259,14 +265,16 @@ export const batchAnnotate = (hashes, fields) =>
 export const bulkApply = (scope, fields) =>
   postJSON("/api/batch/apply", { ...scope, ...fields, view: _view });
 
-/** Zeitkommentare austauschen (#228, ADR 0098): Export im Scope der
- *  Sammel-Aktion → Austauschdatei; Import erst als Vorschau, dann echt. */
-export const exportComments = (scope) =>
-  postJSON("/api/comments/export", { ...scope, view: _view });
-export const previewCommentImport = (data) =>
-  postJSON("/api/admin/comments/preview", { data });
-export const importComments = (data, source, includeSongId) =>
-  postJSON("/api/admin/comments/import", { data, source, include_song_id: includeSongId });
+/** Austausch (#228, ADR 0098; Musik-Angaben ADR 0101): Export im Scope der
+ *  Sammel-Aktion → Austauschdatei, `parts` = {comments, fields} (die beiden
+ *  Häkchen); Import erst als Vorschau, dann echt. */
+export const exportExchange = (scope, parts) =>
+  postJSON("/api/exchange/export", { ...scope, ...parts, view: _view });
+export const previewExchangeImport = (data) =>
+  postJSON("/api/admin/exchange/preview", { data });
+export const importExchange = (data, source, { includeSongId = false, overwriteFields = false } = {}) =>
+  postJSON("/api/admin/exchange/import",
+           { data, source, include_song_id: includeSongId, overwrite_fields: overwriteFields });
 
 /** Ablehnen (ADR 0041, ersetzt Löschen): Items + Metadaten raus, Hashes
  *  gesperrt — die Dateien bleiben unangetastet. */

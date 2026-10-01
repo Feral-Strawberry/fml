@@ -35,6 +35,11 @@ Das liest die bereits gespeicherten Roh-Metadaten aus der Datenbank, lässt alle
 Parser darüber laufen und ersetzt die strukturierten Felder. Kein Datei-Zugriff,
 darum auch für 70.000 Items schnell. Der Lauf ist beliebig wiederholbar.
 
+Musik-Angaben von Hand (Titel, Interpret, Album …, siehe
+[Audio-Modul](audio.md#musik-angaben-von-hand)) bleiben dabei stehen: Sie
+werden nach den Parsern über die Werte aus den Tags gelegt und erscheinen
+bei den Feldern mit dem Parser-Namen `manual`.
+
 ## Suchen über die Felder
 
 In der [Web-GUI](gui.md) versteht die Suche zwei Formen:

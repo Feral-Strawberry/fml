@@ -11,7 +11,7 @@
 // Server-Antwort + 'bulk-applied' (Grid und Sidebar frischen auf).
 
 import { STRINGS } from "./strings.js";
-import { bulkApply, exportComments, getTags, getModels, libraryView } from "./api.js";
+import { bulkApply, exportExchange, getTags, getModels, libraryView } from "./api.js";
 import { emit, on } from "./main.js";
 import { registerDialog } from "./overlays.js";
 import { chipText } from "./search.js";
@@ -109,7 +109,11 @@ export function initBulkDialog() {
         ${libraryView() === "audio" ? `
           <div class="bulkrow">
             <label>${STRINGS.bulkComments}</label>
-            <button type="button" class="bulkexport">${STRINGS.bulkExport}</button>
+            <span class="bulkexparts">
+              <label><input type="checkbox" class="bulkexcomments" checked> ${STRINGS.bulkExportComments}</label>
+              <label title="${STRINGS.bulkExportFieldsTitle}"><input type="checkbox" class="bulkexfields" checked> ${STRINGS.bulkExportFields}</label>
+              <button type="button" class="bulkexport">${STRINGS.bulkExport}</button>
+            </span>
             <span class="sdhint bulkexportmsg">${STRINGS.bulkExportHint}</span>
           </div>` : ""}
         <div class="bulkrow">
@@ -207,14 +211,19 @@ export function initBulkDialog() {
     }
   }
 
-  // Zeitkommentare exportieren (#228): nur lesend, darum ohne Scharfstellen;
-  // die Antwort wird im Browser zur Datei.
+  // Austausch exportieren (#228, ADR 0101): Zeitkommentare und/oder
+  // Musik-Angaben von Hand. Nur lesend, darum ohne Scharfstellen; die
+  // Antwort wird im Browser zur Datei.
   async function exportNow(btn) {
     const sel = selectionHashes();
+    const parts = { comments: overlay.querySelector(".bulkexcomments").checked,
+                    fields: overlay.querySelector(".bulkexfields").checked };
+    if (!parts.comments && !parts.fields) { showError(STRINGS.bulkExportPick); return; }
     btn.disabled = true;
     try {
-      const data = await exportComments(useSelection() ? { hashes: sel } : { filter: current.expression });
-      const count = data.items.reduce((n, it) => n + it.comments.length, 0);
+      const data = await exportExchange(useSelection() ? { hashes: sel } : { filter: current.expression }, parts);
+      const count = data.items.reduce((n, it) => n + (it.comments?.length || 0), 0);
+      const fields = data.items.reduce((n, it) => n + Object.keys(it.fields || {}).length, 0);
       if (!data.items.length) { showError(STRINGS.bulkExportNone); return; }
       const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: "application/json" }));
       const a = document.createElement("a");
@@ -225,7 +234,8 @@ export function initBulkDialog() {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
       overlay.querySelector(".bulkexportmsg").textContent =
-        STRINGS.bulkExportDone.replace("{items}", fmt(data.items.length)).replace("{comments}", fmt(count));
+        STRINGS.bulkExportDone.replace("{items}", fmt(data.items.length))
+          .replace("{comments}", fmt(count)).replace("{fields}", fmt(fields));
     } catch (err) {
       showError(err.message);
     } finally {

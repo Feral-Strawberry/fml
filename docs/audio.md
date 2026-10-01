@@ -126,8 +126,35 @@ Abspielkopf**. Wer eine andere startet, pausiert die erste; sie merkt
 sich ihre Stelle, beim nächsten ▶ geht es dort weiter. So lassen sich vier
 Fassungen Refrain gegen Refrain anhören: jede einmal an den Refrain
 setzen, dann reihum ▶. Die Pfeiltasten verschieben den Abspielkopf der
-ausgewählten Zeile auch, wenn sie gerade nicht spielt. S/M/L oben in der
-Kopfzeile ändert die Zeilenhöhe.
+ausgewählten Zeile auch, wenn sie gerade nicht spielt.
+
+**Welle oder Angaben.** Der Regler **☰ S M L** oben in der Kopfzeile
+bestimmt die Darstellung der Liste. Es leuchtet immer genau ein Knopf:
+
+- **S, M, L** zeigen die Zeile wie oben beschrieben, mit Wellenform in
+  kleiner, mittlerer oder großer Höhe („Welle"). Das ist zum Hören und
+  zum Vergleichen von Fassungen da.
+- **☰** („Angaben") zeigt flache Zeilen ohne Wellenform, dafür mit eigenen
+  Spalten: Titel, Interpret, Album, Nr., Jahr, Genre, Dauer, Bewertung
+  und die Zahl der Zeitkommentare. Es passen zwei- bis dreimal so viele
+  Songs auf den Bildschirm. Sie ist zum Durchsehen und Verwalten einer
+  Sammlung da.
+
+In „Angaben" steht in der ersten Spalte der **Titel aus der Datei**;
+fehlt er, der Dateiname. Der Dateiname steht immer im Tooltip. Fehlt der
+Interpret, stehen in seiner Spalte abgesetzt Modell oder Werkzeug, damit
+KI-Songs nicht leer aussehen. Die Lautheit und das Abdunkeln gleicher
+Namensanfänge gibt es nur in „Welle". Ein Klick auf S, M oder L holt die
+Wellenform zurück. In der Galerie gibt es ☰ nicht, dort regelt S/M/L wie
+bisher die Kachelgröße und behält seine Wahl.
+
+Alles andere bleibt gleich: ▶ in der Zeile, Auswahl, Bewerten, Ablehnen,
+„Alle abspielen" und die Tasten. Zum Springen im Song dient in „Angaben"
+die Wellenform der Abspielleiste, dort stehen auch die Zeitkommentare.
+**C** vergleicht auch aus „Angaben" heraus: Der Vergleich zeigt immer
+Wellenformen, nach Esc ist die Liste wieder flach. Wird die Mitte eng,
+weichen zuerst Genre, Jahr und Nr., dann das Album. Die Wahl merkt sich
+der Browser.
 
 **▶ Alle abspielen** (oben rechts in der Audioansicht) spielt die ganze
 Liste in der aktuellen Sortierung, jeden Song von vorn, wie eine CD. Die
@@ -226,7 +253,10 @@ Zu sehen ist das an drei Stellen:
 - **Auf der Welle jeder Listenzeile** markieren schmale Beschriftungen die
   Abschnitte; liegen zwei dicht beieinander, wird die erste gekürzt (voller
   Name im Tooltip). Der Abschnitt, in dem der Abspielkopf steht, erscheint
-  ganz und in Akzentfarbe. Instrumentale Abschnitte (Solo, Lead-Gitarre,
+  ganz und in Akzentfarbe. Wie viel davon zu sehen ist, hängt an der Größe:
+  **L** zeigt Marken und Beschriftung, **M** nur die gestrichelten Marken,
+  **S** keine Abschnitte. Den Namen des laufenden Abschnitts zeigt immer
+  die Abspielleiste. Instrumentale Abschnitte (Solo, Lead-Gitarre,
   Intro) haben bei Suno keine eigene Zeit, sie tragen die des nächsten
   gesungenen Worts; fml schätzt ihren Anfang an das Ende der letzten
   gesungenen Zeile davor (nach **Neu interpretieren**).
@@ -332,6 +362,79 @@ wurden (einmal „Re-Scan aller Fundorte", weil der Baustein erst seitdem
 gesichert wird), und der Songtext mit Zeiten aus der Untertitel-Spur
 (holt fml von selbst nach, siehe oben).
 
+## Musik-Angaben von Hand
+
+Neue Songs (etwa aus Suno) tragen weder Interpret noch Album, ältere
+Rips manchmal falsche. Im Detailpanel stehen deshalb bei Songs unter
+**KURATIERT** acht Felder: **Titel, Interpret, Album-Interpret, Album,
+Nr., CD, Jahr, Genre**. Sie sind mit dem geltenden Wert vorbelegt und
+stehen nur dort, nicht noch einmal bei den übrigen Metadaten.
+
+- **Setzen:** Wert eintippen, dann Enter oder das Feld verlassen (Tab
+  springt ins nächste Feld). Der Wert überdeckt den aus der Datei und
+  trägt danach **✎ von Hand**.
+- **Zurücknehmen:** das Feld leeren oder auf **✎ von Hand** klicken. Dann
+  gilt wieder der Wert aus der Datei.
+- **Mehrere Werte** bei Interpret und Genre mit `;` trennen
+  (`Anna; Bert`).
+- **Mehrere Songs auf einmal:** Zeilen auswählen (Shift- oder
+  Strg/⌘-Klick), dann wirkt eine Eingabe auf alle. Felder, deren Werte in
+  der Auswahl voneinander abweichen, zeigen „(verschieden)" und bleiben
+  unberührt, solange man nichts eintippt. Am bequemsten geht das in der
+  Darstellung „Angaben". Bei mehr als 200 Songs läuft die Änderung als
+  Aufgabe im Hintergrund, die Liste frischt sich danach auf.
+
+Die geänderten Zeilen der Liste zeigen den neuen Wert sofort. Die
+**Reihenfolge und der Filter** der Liste bleiben dabei stehen, auch wenn
+ein Song nach der Änderung woanders einsortiert wäre oder nicht mehr zur
+Suche passte: So bleibt die Auswahl beim Nachpflegen, wo sie ist. Mit dem
+nächsten Laden (neue Suche, andere Sortierung) stimmt die Liste wieder.
+
+**Die Datei bleibt unverändert.** fml schreibt nichts in die Tags, die
+Angaben liegen im Katalog. Überall sonst gilt der gesetzte Wert wie ein
+Wert aus der Datei: in der Liste, in der Seitenleiste (Interpret, Album,
+Genre), in der Suche (`artist:`, `album:`, `genre:`, `interpret:`,
+Volltext) und in der Sortierung „Album". „Neu interpretieren" und ein
+Re-Scan lassen die Angaben stehen. Wird ein Song abgelehnt, gehen seine
+Angaben mit.
+
+Ein Wert, den die Datei mitbringt, lässt sich überdecken, aber nicht
+ersatzlos ausblenden: Ein geleertes Feld zeigt wieder den Wert aus der
+Datei.
+
+Erlaubt sind Nummern von 1 bis 9999, ein vierstelliges Jahr und Text bis
+300 Zeichen. Das **Jahr von Hand** wird zum Datum des Songs, siehe
+[Datum eines Songs](#datum-eines-songs).
+
+### Angaben mit einem anderen fml austauschen
+
+Was einmal nachgepflegt ist, wandert als Datei in ein anderes fml, auf
+demselben Weg wie die Zeitkommentare (siehe
+[Kommentare mit einem anderen fml austauschen](#kommentare-mit-einem-anderen-fml-austauschen)):
+
+**Exportieren:** Songs auswählen oder eine Suche eingrenzen, die
+**Sammel-Aktion** öffnen, in der Zeile „Austausch" das Häkchen
+**Musik-Angaben** setzen (auf Wunsch zusätzlich **Zeitkommentare**) und
+auf **Exportieren** klicken. In der Datei stehen **nur Angaben von
+Hand**, nie Werte aus den Tags: Die stecken ohnehin in der Musikdatei.
+
+**Importieren:** auf der anderen Seite **Admin → Wartung → Austausch
+importieren**. Die Vorschau zählt je Song und Feld:
+
+- **neu**: hier steht noch keine Angabe von Hand. Wird übernommen, auch
+  wenn die Datei hier einen anderen Tag-Wert trägt (ihn zu überdecken ist
+  der Zweck).
+- **gleich**: hier steht schon derselbe Wert von Hand. Wird übersprungen.
+- **abweichend**: hier steht ein **anderer** Wert von Hand. Der eigene
+  Wert bleibt stehen; die Vorschau listet diese Fälle mit beiden Werten.
+  Nur mit dem Häkchen **„Abweichende eigene Angaben überschreiben"**
+  gewinnt die Datei.
+
+Übernommene Angaben tragen im Panel **✎ von Hand**, der Tooltip nennt die
+Herkunft. Derselbe Import zweimal ändert nichts. Die Songs werden wie bei
+den Kommentaren über die Datei selbst gefunden, Suno-Songs notfalls über
+die Suno-Song-ID (nur mit Häkchen).
+
 ## Eigene Reihenfolge einer gespeicherten Suche
 
 Zum Probehören einer geplanten Playlist lässt sich die Reihenfolge der
@@ -406,9 +509,11 @@ Das Datum eines Songs (Sortierung „Erstellt", Seitenleiste „Nach Jahr",
 1. **von Hand gesetzt** (Feld unter KURATIERT oder Zeile „Datum" der
    Sammel-Aktion, siehe [Oberfläche](gui.md)) — gewinnt immer;
 2. ein **eingebettetes Datum**, z. B. Sunos Erstellzeit;
-3. das **Jahr aus den Tags** (ID3 `TDRC`/`TYER`, Vorbis `DATE`, M4A
-   `©day`), meist das Erscheinungsjahr. Es gilt nur als Jahr: die Anzeige
-   ist „1987", nicht „1987-01-01";
+3. das **Jahr**: von Hand gesetzt (siehe
+   [Musik-Angaben von Hand](#musik-angaben-von-hand)), sonst aus den Tags
+   (ID3 `TDRC`/`TYER`, Vorbis `DATE`, M4A `©day`), meist das
+   Erscheinungsjahr. Es gilt nur als Jahr: die Anzeige ist „1987", nicht
+   „1987-01-01";
 4. der **Dateistempel**.
 
 Die [Datumsregel](import.md) gilt auch für das Tag-Jahr: Ein Jahr vor dem
@@ -418,6 +523,11 @@ entsprechend zurück („Ältestes plausibles Datum" unter Admin →
 Konfiguration → Media Library)
 und lässt danach **Neu interpretieren** laufen. Beim Import mit Kopieren
 landet ein Song mit Tag-Jahr im Ordner `1987/01/01` der Library.
+
+Für ein **Jahr von Hand** gilt die Datumsregel nicht: Eine bewusste
+Eingabe zählt auch vor dem ältesten plausiblen Datum. Es steht an der
+Stelle des Tag-Jahrs, verliert also gegen ein eingebettetes Datum (Sunos
+Erstellzeit). Wer dort ein anderes Datum will, setzt das Datum von Hand.
 
 ## Dauer (auch für Videos)
 
@@ -558,13 +668,15 @@ Zwei Leute mit je eigenem fml können sich Kommentare schicken, als Datei
 (Mail, USB-Stick, Cloud-Ablage).
 
 **Exportieren:** In der Audioansicht die Songs auswählen oder eine Suche
-eingrenzen, dann die **Sammel-Aktion** öffnen und bei „Zeitkommentare"
-auf **Exportieren** klicken. Es entsteht eine Datei
-`fml-kommentare-JJJJ-MM-TT.json` mit allen Kommentaren dieser Songs.
-Hier ändert sich dabei nichts.
+eingrenzen, dann die **Sammel-Aktion** öffnen und in der Zeile
+„Austausch" auf **Exportieren** klicken (Häkchen „Zeitkommentare"
+gesetzt). Es entsteht eine Datei `fml-austausch-JJJJ-MM-TT.json` mit allen
+Kommentaren dieser Songs. Hier ändert sich dabei nichts. Dieselbe Datei
+kann auch die Musik-Angaben von Hand mitnehmen, siehe
+[Angaben mit einem anderen fml austauschen](#angaben-mit-einem-anderen-fml-austauschen).
 
 **Importieren** geht auf der anderen Seite unter **Admin → Wartung →
-Zeitkommentare importieren**, in drei Schritten:
+Austausch importieren**, in drei Schritten:
 
 1. **Datei und Herkunft:** die Datei wählen und eintragen, von wem die
    Kommentare stammen (z. B. einen Namen).
@@ -588,13 +700,19 @@ und Kommentare, die hin- und zurückgeschickt werden, verdoppeln sich
 nicht.
 
 **Das Dateiformat** (für Neugierige): JSON mit `"format":
-"fml-time-comments"` und `"version": 1`; je Song `file_hash`, `name`
-(nur als Hinweis), `duration`, gegebenenfalls `suno_ids` und die Liste
-`comments` mit `at_ms` (Stelle in Millisekunden), `text`, `created_at`,
-`updated_at`; ganz oben stehen außerdem `exported_at` und die Liste
-`items` mit den Songs. fml nimmt höchstens 20 MB, 50.000 Songs und 200.000
-Kommentare je Datei, 2.000 Kommentare je Song und Kommentartexte bis
-2.000 Zeichen.
+"fml-exchange"` und `"version": 1`; je Song `file_hash`, `name`
+(nur als Hinweis), `duration`, gegebenenfalls `suno_ids`, dazu wahlweise
+die Liste `comments` mit `at_ms` (Stelle in Millisekunden), `text`,
+`created_at`, `updated_at` und der Abschnitt `fields` mit den
+Musik-Angaben von Hand (`{"artist": ["…"], "album": ["…"]}`); ganz oben
+stehen außerdem `exported_at` und die Liste `items` mit den Songs. fml
+nimmt höchstens 20 MB, 50.000 Songs und 200.000 Kommentare je Datei, 2.000
+Kommentare je Song und Kommentartexte bis 2.000 Zeichen; für die
+Musik-Angaben gelten dieselben Grenzen wie bei der Eingabe von Hand.
+
+Dateien im älteren Format `fml-time-comments` (nur Kommentare, bis fml
+2026.10) lassen sich weiterhin importieren. Umgekehrt liest ein älteres
+fml das neue Format nicht: Beide Seiten brauchen den aktuellen Stand.
 
 ## Vergleichen
 

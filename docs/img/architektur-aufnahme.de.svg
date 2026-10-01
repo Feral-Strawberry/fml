@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1250" height="420" viewBox="0 0 1250 420" role="img" aria-label="Aufnahme-Kette: Quelle, Erkennen, Import-Regeln, SHA-256, optional Kopie und Prüfung, Katalog, optional Quelle leeren. Katalogisieren schreibt Schicht 1 byte-treu in raw_metadata, Schicht 2 interpretiert daraus Felder, beides landet im Volltextindex. Neu interpretieren läuft ohne Dateizugriff über raw_metadata.">
+<svg xmlns="http://www.w3.org/2000/svg" width="1250" height="420" viewBox="0 0 1250 420" role="img" aria-label="Aufnahme-Kette: Quelle, Erkennen, Import-Regeln, SHA-256, optional Kopie und Prüfung, Katalog, optional Quelle leeren. Katalogisieren schreibt Schicht 1 byte-treu in raw_metadata, Schicht 2 interpretiert daraus Felder, beides landet im Volltextindex. Neu interpretieren läuft ohne Dateizugriff über raw_metadata. Musik-Angaben von Hand aus der manuellen Schicht überdecken in Schicht 2 die Werte aus den Tags.">
         <style>
   svg { --surface: #FFFFFF; --bg-2: #F6F8FA; --ink: #17202B; --ink-2: #4A5665; --ink-3: #7B8794;
         --line: #D6DCE4; --line-strong: #AEB8C4; --accent: #B02A4C; --l1: #1F7A7E; --l2: #4653B8; --man: #A66A12; }
@@ -26,11 +26,15 @@
   .l1 { stroke: var(--l1); stroke-width: 1.6; } .tl1 { fill: var(--l1); }
   .l2 { stroke: var(--l2); stroke-width: 1.6; } .tl2 { fill: var(--l2); }
   .man { stroke: var(--man); stroke-width: 1.6; } .tman { fill: var(--man); }
+  .lm { fill: none; stroke: var(--man); stroke-width: 1.6; }
+  .ahm { fill: var(--man); }
+  .lblm { fill: var(--man); font-size: 11.5px; font-weight: 600; }
 </style>
         <rect class="ground" x="0" y="0" width="1250" height="420" rx="8"/>
         <defs>
           <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
           <marker id="wB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahw"/></marker>
+          <marker id="mB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahm"/></marker>
         </defs>
         <text x="16" y="26" class="lbl">Aufnahme, ein Durchlauf je Datei</text>
 
@@ -77,9 +81,9 @@
 
         <rect x="16" y="200" width="220" height="96" rx="6" class="bx l1"/>
         <text x="126" y="224" text-anchor="middle" class="t tl1">Schicht 1 · Extraktor</text>
-        <text x="126" y="244" text-anchor="middle" class="s">PNG: eigener Chunk-Leser</text>
+        <text x="126" y="244" text-anchor="middle" class="s">PNG · Audio-Tags: eigene Leser</text>
         <text x="126" y="262" text-anchor="middle" class="s">JPEG · WEBP · TIFF: Pillow</text>
-        <text x="126" y="280" text-anchor="middle" class="s">PSD · Video: ffprobe</text>
+        <text x="126" y="280" text-anchor="middle" class="s">PSD · Video · Audio: ffprobe</text>
         <line x1="236" y1="248" x2="296" y2="248" class="ln" marker-end="url(#aB)"/>
         <text x="266" y="240" text-anchor="middle" class="lbl">speichert</text>
 
@@ -93,8 +97,8 @@
 
         <rect x="536" y="200" width="220" height="96" rx="6" class="bx l2"/>
         <text x="646" y="224" text-anchor="middle" class="t tl2">Schicht 2 · Parser</text>
-        <text x="646" y="244" text-anchor="middle" class="s mono">a1111 · comfyui · xmp</text>
-        <text x="646" y="262" text-anchor="middle" class="s mono">topaz · provenance · video</text>
+        <text x="646" y="244" text-anchor="middle" class="s mono">a1111 · comfyui · xmp · topaz</text>
+        <text x="646" y="262" text-anchor="middle" class="s mono">provenance · video · audio</text>
         <text x="646" y="280" text-anchor="middle" class="s">darf unvollständig sein</text>
         <line x1="756" y1="248" x2="816" y2="248" class="ln" marker-end="url(#aB)"/>
         <text x="786" y="240" text-anchor="middle" class="lbl">schreibt</text>
@@ -123,4 +127,8 @@
         <text x="1146" y="384" text-anchor="middle" class="s">nur vom Menschen gesetzt</text>
         <line x1="1146" y1="340" x2="1146" y2="298" class="ln" marker-end="url(#aB)"/>
         <text x="1138" y="324" text-anchor="end" class="lbl">indexiert</text>
+        <!-- Musik-Angaben von Hand überdecken die Tag-Werte (Schicht 2) -->
+        <path d="M1056,370 H906 V298" class="lm" marker-end="url(#mB)"/>
+        <text x="898" y="326" text-anchor="end" class="lblm">Musik-Angaben von Hand</text>
+        <text x="898" y="342" text-anchor="end" class="lblm">überdecken die Tag-Werte</text>
       </svg>

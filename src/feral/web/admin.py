@@ -22,7 +22,7 @@ from typing import Any, Callable, Iterator
 from importlib import metadata
 import re
 
-from ..db import connect
+from ..db import connect, manual_fields
 from ..interpret import PARSERS
 from ..messages import load as msg_load
 
@@ -511,6 +511,12 @@ def maintenance_stats(conn: sqlite3.Connection) -> dict[str, Any]:
     ).fetchall())
     parsers = [{"parser": p.NAME, "version": p.VERSION, "items": counts.pop(p.NAME, 0)}
                for p in PARSERS]
+    # Musik-Angaben von Hand (ADR 0101) stehen als Parser ``manual`` in der
+    # Tabelle: kein Parser der Registry, aber auch kein verschwundener.
+    by_hand = counts.pop(manual_fields.PARSER, 0)
+    if by_hand:
+        parsers.append({"parser": manual_fields.PARSER,
+                        "version": manual_fields.PARSER_VERSION, "items": by_hand})
     # Parser, die es nicht mehr gibt (Alt-Zeilen): ehrlich mitzeigen.
     parsers += [{"parser": name, "version": None, "items": n} for name, n in counts.items()]
     parsers.sort(key=lambda p: (-p["items"], p["parser"]))

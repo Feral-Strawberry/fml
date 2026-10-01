@@ -35,7 +35,7 @@ Am Ende steht eine Zeile wie:
 
 - **passed** = bestanden. Die genaue Zahl wächst mit dem Projekt; wichtig ist:
   **0 failed, 0 errors**. Die Zeile zählt gut 1000 Python-Tests und jede
-  der 42 Testdateien der Oberfläche (Gruppe 9) als **einen** Test; in
+  der 44 Testdateien der Oberfläche (Gruppe 9) als **einen** Test; in
   diesen Dateien stecken zusammen rund 270 Einzelprüfungen. Daher „gut
   1200" in der Einleitung und eine kleinere Zahl hier.
 - **skipped** ist in Ordnung: einige Tests brauchen die Werkzeuge
@@ -175,8 +175,9 @@ welche Herkunft hat.
 | Testdatei | Prüft |
 |---|---|
 | `test_manual_date.py` | Datum von Hand (`1997`, `1997-05`, `12.05.1997`) gewinnt immer, Leeren holt das abgeleitete Datum zurück; das Jahr aus den Musik-Tags steht in der Datums-Kaskade vor dem Dateistempel. |
+| `test_manual_fields.py` | Musik-Angaben von Hand: Eingabeprüfung, der Wert von Hand überdeckt den Tag und Leeren holt ihn zurück, „Neu interpretieren" lässt die Angaben stehen, Jahr von Hand im Datum, Listenzeile mit Titel, Nr., Jahr und Genre, Schnittstelle und Aufgabe für große Auswahl. |
 | `test_time_comments.py` | Zeitkommentare an Songs: anlegen, ändern, löschen, in der Suche, in der Listenzeile und im Detail. |
-| `test_exchange.py` | Zeitkommentare zwischen zwei fml austauschen: Export und Import als Rundreise, derselbe Import zweimal ändert nichts, Zuordnung über die Song-ID nur mit Bestätigung, kaputte und zu große Dateien werden abgewiesen. |
+| `test_exchange.py` | Zeitkommentare und Musik-Angaben von Hand zwischen zwei fml austauschen: Export und Import als Rundreise, derselbe Import zweimal ändert nichts, Zuordnung über die Song-ID nur mit Bestätigung, abweichende eigene Angaben bleiben außer auf Ansage, das alte Kommentar-Format bleibt lesbar, kaputte und zu große Dateien werden abgewiesen. |
 | `test_cover.py` | Cover eines Songs: ein Verweis auf ein katalogisiertes Bild, kein Upload; Songs mit Cover erscheinen in der Galerie, Ablehnen des Bildes nimmt sie wieder heraus. |
 | `test_folder_order.py` | Eigene Reihenfolge einer gespeicherten Suche: Verschieben, neue Songs am Ende, Löschen der Suche räumt die Reihenfolge mit ab. |
 
@@ -251,6 +252,7 @@ der Browser-Seite aus (`tests/js/`), pytest startet sie mit
 | `tests/js/theme.test.mjs`, `tests/js/help.test.mjs`, `tests/js/background.test.mjs` | Kopfzeile: Hell/Dunkel wird gemerkt; „?" erscheint nur mit Hilfe-Ordner; Leistung und Anhalten sind zwei unabhängige Knöpfe mit Zustand vom Server. |
 | `tests/js/media.test.mjs`, `tests/js/audioview.test.mjs`, `tests/js/artwork.test.mjs`, `tests/js/cover.test.mjs` | Audio in der Oberfläche: eine Weiche entscheidet Bild, Video oder Ton; der Umschalter zur Audioansicht behält die Chips, Leertaste spielt statt Lupe; eingebettetes Bild als Miniatur; Cover setzen und entfernen. |
 | `tests/js/player.test.mjs`, `tests/js/listcompare.test.mjs` | Der eigene Player: Abspielkopf je Zeile, Lautheitsangleich, Loop, Tempo, „Alle abspielen", Medientasten; Vergleichen engt die Liste auf 2 bis 6 Songs ein und bringt sie mit Esc unverändert zurück. |
+| `tests/js/liststyle.test.mjs`, `tests/js/musicfields.test.mjs` | Darstellung der Audioliste (Regler „☰ S M L", flache Zeilen mit Spalten, Vergleich zeigt weiter Wellen) und die Musik-Angaben von Hand im Panel (vorbelegt, „(verschieden)", Setzen und Zurücknehmen für die Auswahl). |
 | `tests/js/comments.test.mjs`, `tests/js/lyrics.test.mjs`, `tests/js/manualorder.test.mjs` | Zeitkommentare (Taste K, Pins auf der Welle, Herkunfts-Etikett), Songtext mit Zeiten (aktuelle Zeile in der Leiste, Abschnittsmarken, mitlaufendes Panel) und die Sortierung „Manuell" einer gespeicherten Suche. |
 
 **„Erwartet rot":** Einige dieser Tests beschreiben Verhalten, das erst noch

@@ -14,7 +14,8 @@ import { STRINGS } from "./strings.js";
 import { getItemPosition, getItems, loadThumb, fmtDuration, kindLabel, libraryView, moveInFolder } from "./api.js";
 import { emit, on } from "./main.js";
 import {
-  CMP_MAX, CMP_MIN, listHeadHtml, paintRow, rowHtml, seekAt, seekTo, setTimeAxis, timeAxis, togglePlay,
+  CMP_MAX, CMP_MIN, infoRows, listHeadHtml, listStyle, paintRow, rowFacts, rowHtml, seekAt, seekTo,
+  setListStyle, setTimeAxis, timeAxis, togglePlay,
 } from "./audiolist.js";
 import { pinTime } from "./comments.js";
 import { onRepaint, playingHash } from "./player.js";
@@ -24,6 +25,7 @@ import { viewKinds } from "./libview.js";
 const PAGE = 200;              // Items pro API-Seite (wie alte Seite)
 const BUFFER_ROWS = 3;         // Pufferzeilen ober-/unterhalb des Sichtfensters
 const DENSITY_KEY = "feral-density";
+const LISTSTYLE_KEY = "feral-liststyle";   // Audioliste: "wave" | "info" (#258)
 const DENSITIES = ["s", "m", "l"];
 const SORT_KEY = "feral-sort"; // zuletzt im Menü gewählte Sortierung (ADR 0057)
 
@@ -110,6 +112,7 @@ export function initGallery() {
   const grid = document.getElementById("grid");         // CSS-Grid, wird verschoben
   const sortSel = document.getElementById("sort");
   const densityBox = document.getElementById("density");
+  const infoBtn = densityBox.querySelector("button[data-liststyle]");   // ☰ = „Angaben" (#258)
 
   let total = 0;
   let items = new Map();        // Item-Index -> Item (seitenweise befüllt)
@@ -370,7 +373,7 @@ export function initGallery() {
       if (el.dataset.hash) { delete el.dataset.hash; delete el.dataset.sig; el.innerHTML = ""; }
       return;
     }
-    const sig = `row:${item.file_hash}:${item.rating || 0}:${prev?.file_hash || ""}:${item.cover || ""}:${item.artwork ? 1 : 0}:${item.colors || ""}`;
+    const sig = `row:${item.file_hash}:${item.rating || 0}:${prev?.file_hash || ""}:${item.cover || ""}:${item.artwork ? 1 : 0}:${item.colors || ""}:${rowFacts(item)}`;
     if (el.dataset.sig !== sig) {
       el.dataset.sig = sig;
       el.dataset.hash = item.file_hash;
@@ -745,19 +748,37 @@ export function initGallery() {
   grid.addEventListener("dragend", () => { dragHash = null; clearDrop(); });
 
   // Dichte S/M/L: rein clientseitig (CSS-Klasse), Wahl überlebt in localStorage.
+  let density = "m";
   function applyDensity(d) {
-    const density = DENSITIES.includes(d) ? d : "m";
+    density = DENSITIES.includes(d) ? d : "m";
     DENSITIES.forEach((k) => grid.classList.toggle(`density-${k}`, k === density));
     localStorage.setItem(DENSITY_KEY, density);
-    for (const btn of densityBox.querySelectorAll("button[data-density]")) {
-      btn.classList.toggle("active", btn.dataset.density === density);
-    }
+    paintScale();
     measureLayout();   // Kachelgröße hat sich geändert → neu messen
     renderGrid();
   }
+  // EIN Regler (#258): in der Audioliste heißt er „wie viel Welle" — ☰ =
+  // keine (Darstellung „Angaben"), S/M/L = Welle in dieser Höhe. Es leuchtet
+  // genau ein Knopf; die Galerie kennt nur S/M/L und behält ihre Wahl.
+  function paintScale() {
+    const info = listMode && infoRows();
+    for (const btn of densityBox.querySelectorAll("button[data-density]")) {
+      btn.classList.toggle("active", !info && btn.dataset.density === density);
+    }
+    if (infoBtn) {
+      infoBtn.hidden = !listMode || !!cmp;   // der Vergleich zeigt immer Wellen
+      infoBtn.classList.toggle("active", info);
+    }
+  }
   densityBox.addEventListener("click", (e) => {
+    if (e.target.closest("button[data-liststyle]")) {
+      if (listStyle() !== "info") applyListStyle("info");
+      return;
+    }
     const btn = e.target.closest("button[data-density]");
-    if (btn) applyDensity(btn.dataset.density);
+    if (!btn) return;
+    applyDensity(btn.dataset.density);
+    if (listMode && listStyle() === "info") applyListStyle("wave");   // S/M/L holt die Welle zurück
   });
 
   // Der EINE Suchzustand (Block S3, ADR 0035): Chips/Live-Text kommen als
@@ -789,11 +810,42 @@ export function initGallery() {
   function applyListMode() {
     grid.classList.toggle("list", listMode);
     listHead.hidden = !listMode;
-    if (listMode) {
+    headInfo = null;                  // Listenkopf neu aufbauen
+    syncListStyle();
+  }
+
+  // Darstellung der Liste (#258): „Welle" oder „Angaben" (flache Zeilen mit
+  // Spalten), je Browser gemerkt und getrennt von S/M/L. Der Vergleich zeigt
+  // immer Wellen; solange er läuft, ist ☰ ausgeblendet.
+  let headInfo = null;   // Darstellung, in der der Listenkopf gerade steht
+  function syncListStyle() {
+    const info = listMode && infoRows();
+    grid.classList.toggle("info", info);
+    listHead.classList.toggle("info", info);
+    paintScale();
+    if (listMode && headInfo !== info) {
+      headInfo = info;
       listHead.innerHTML = listHeadHtml();
       paintManualNote();
     }
   }
+  function applyListStyle(s) {
+    if (cmp) return;
+    // Die erste sichtbare Zeile bleibt oben: die Zeilenhöhe ändert sich um ein Mehrfaches.
+    const first = rowH ? computeWindow({
+      scrollTop: wrap.scrollTop, viewportH: wrap.clientHeight,
+      padTop, rowH, gap, cols, total, buffer: 0,
+    }).first : 0;
+    setListStyle(s);
+    try { localStorage.setItem(LISTSTYLE_KEY, listStyle()); } catch { /* privat */ }
+    syncListStyle();
+    measureLayout();
+    renderGrid();                      // Spacer-Höhe steht, bevor gescrollt wird
+    wrap.scrollTop = first * (rowH + gap);
+    renderGrid();
+  }
+  if (infoBtn) infoBtn.title = STRINGS.listInfoTitle;
+  try { setListStyle(localStorage.getItem(LISTSTYLE_KEY)); } catch { /* privat */ }
   on("library-view-changed", (d) => {
     dropCompare();
     listMode = d.view === "audio";
@@ -827,11 +879,29 @@ export function initGallery() {
   });
   on("bulk-applied", refreshLater);  // Sammel-Aktion (ADR 0040): Punkte frisch
   on("cover-changed", refreshLater); // Cover (#165): Song kommt in die Galerie oder geht
+  // Musik-Angaben von Hand (ADR 0101): die geänderten Zeilen an Ort und
+  // Stelle ersetzen, NICHT neu laden. Sortierung und Filter zögen die Songs
+  // sonst unter der Auswahl weg, und die nächste Eingabe träfe einen
+  // fremden Song. Die Reihenfolge stimmt wieder mit dem nächsten Laden.
+  on("fields-changed", (d) => {
+    if (!d.items) { refreshLater(); return; }
+    const fresh = new Map(d.items.map((it) => [it.file_hash, it]));
+    const patch = (map) => {
+      for (const [i, it] of map) {
+        const now = it && fresh.get(it.file_hash);
+        if (now) map.set(i, now);
+      }
+    };
+    patch(items);
+    if (cmp) patch(cmp.items);
+    renderGrid();
+  });
 
   // -- Vergleich in der Liste (A7, ADR 0089) ----------------------------------------------
 
   function announceCompare() {
     grid.classList.toggle("compare", !!cmp);
+    syncListStyle();                             // der Vergleich zeigt immer Wellen (#258)
     grid.classList.toggle("pinlabels", !!cmp);   // Kommentartexte stehen (comments.js)
     document.body.classList.toggle("list-compare", !!cmp);   // Zeilen sind der Player: Leiste weg
     emit("list-compare-changed", { on: !!cmp, n: cmp ? total : 0 });

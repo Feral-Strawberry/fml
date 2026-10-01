@@ -20,7 +20,7 @@ step. Every installed package is named with an exact version and checksum.
 Two processes, one database. The web process answers every request and
 stays fluid because everything long-running happens in a second process.
 **The two write paths are shown in red:** short changes (rating, tags,
-notes, duels) are written by the web process itself under a lock,
+notes, music details, duels) are written by the web process itself under a lock,
 everything long-running (scan, import, re-interpret, thumbnails) is
 written by the worker. The worker is started with `spawn`, gets one task
 at a time and reports progress through a second queue; if it dies, the
@@ -39,7 +39,7 @@ that and continues afterwards.
 
 ## How a file gets into the catalog
 
-![Intake chain: source, detect, import rules, SHA-256, optional copy and verify, catalog, optional empty source. Cataloging stores layer 1 byte-exact in raw_metadata, layer 2 interprets fields from it, both end up in the full-text index. Re-interpreting runs over raw_metadata without file access.](../img/architektur-aufnahme.en.svg)
+![Intake chain: source, detect, import rules, SHA-256, optional copy and verify, catalog, optional empty source. Cataloging stores layer 1 byte-exact in raw_metadata, layer 2 interprets fields from it, both end up in the full-text index. Re-interpreting runs over raw_metadata without file access. Music details set by hand in the manual layer cover the values from the tags in layer 2.](../img/architektur-aufnahme.en.svg)
 
 Every file runs through the same chain once, whether it arrives by
 import, watch folder or cataloging. The mode only decides the dashed
@@ -51,9 +51,18 @@ only a location. Layer 1 understands containers, not conventions, and
 stores every metadata entry unchanged. Layer 2 turns them into fields and
 may have gaps. **Because the raw blob is kept,** a new or improved parser
 runs over the whole collection without opening a single file. Ratings,
-tags and notes are stored separately and are never overwritten by a
-parser. Details: [Extraction](extraction.md),
-[Interpretation](interpretation.md).
+tags, notes and time comments are stored separately and are never
+overwritten by a parser.
+
+There is exactly one bridge in the opposite direction: the **music
+details set by hand** (title, artist, album, number, year, genre). They
+live in the manual layer too, but are **laid over the values from the
+tags** when layer 2 is written. That way search, sidebar, sort order and
+full text see the value in effect without any special case. The origin
+stays visible on the value, the file stays unchanged, and clearing the
+detail brings the tag value back. Details: [Extraction](extraction.md),
+[Interpretation](interpretation.md),
+[Audio module](audio.md#music-details-by-hand).
 
 ## From search to gallery
 
@@ -95,8 +104,9 @@ updates directly on the lock. Details: [Security](security.md),
   when moving rejected files out. Out of the box it runs in read-only
   mode: never copy, move or delete.
 - **Everything derived is reproducible:** layer 2, thumbnails, creation
-  date and full-text index can be recomputed from hash and raw blobs,
-  without re-importing.
+  date, full-text index and the audio analysis (loudness, waveform) can
+  be recomputed from hash, raw blobs and the manual layer, without
+  re-importing.
 - **One writer per kind of task:** the worker writes long-running tasks,
   the web process short changes. SQLite in WAL mode, never on a network
   drive.

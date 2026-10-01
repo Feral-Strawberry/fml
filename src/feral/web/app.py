@@ -48,10 +48,11 @@ from ..config import (
     thumbnail_size,
     update_config_file,
 )
-from ..db import connect, folders as folders_db, manual, optimize
+from ..db import connect, folders as folders_db, manual, manual_fields, optimize
 from ..processes import effective_workers
 from ..db import rankings as rankings_db
 from ..interpret import a1111_graph
+from ..interpret.reparse import reinterpret
 from .. import reveal
 from ..thumbs import (
     DEFAULT_SIZE, PREVIEW_CACHED_MIMES, ThumbPool, fail_reason, preview_cache_file,
@@ -261,12 +262,36 @@ class BatchAnnotateRequest(BaseModel):
     media_date: str | None = None
 
 
-class CommentExportRequest(BaseModel):
-    """Zeitkommentare exportieren (#228): Scope wie bei den Sammel-Aktionen."""
+class MusicFieldsState(BaseModel):
+    """Stand der Musik-Angaben für eine Auswahl (ADR 0101)."""
+
+    hashes: list[str]
+
+
+class MusicFieldsUpdate(BaseModel):
+    """Musik-Angaben von Hand für eine Auswahl setzen (ADR 0101): nur
+    gesendete Felder ändern sich, ``""`` entfernt die Angabe von Hand
+    (der Tag-Wert gilt wieder)."""
+
+    hashes: list[str]
+    fields: dict[str, str]
+
+
+# Bis hierhin läuft die Änderung als kurzer Schreibgriff, darüber als
+# Aufgabe (ADR 0101 Punkt 4).
+MUSIC_FIELDS_INLINE = 200
+
+
+class ExchangeExportRequest(BaseModel):
+    """Austauschdatei exportieren (#228, ADR 0101): Scope wie bei den
+    Sammel-Aktionen; ``comments``/``fields`` sind die beiden Häkchen
+    (Zeitkommentare, Musik-Angaben von Hand)."""
 
     filter: str = ""
     hashes: list[str] | None = None
     view: str | None = None
+    comments: bool = True
+    fields: bool = True
 
 
 class BulkApplyRequest(BaseModel):
@@ -1564,6 +1589,55 @@ def create_app(
         return engine.run_write(msg("taskBatch", n=len(req.hashes)), fn,
                                 timeout=60.0)
 
+    @app.post("/api/fields/state")
+    def music_fields_state(req: MusicFieldsState) -> dict:
+        # Stand der acht Musik-Felder für die Auswahl im Panel (ADR 0101).
+        if not req.hashes or len(req.hashes) > 2000:
+            raise HTTPException(status_code=400, detail=msg("errBatchSize"))
+        for file_hash in req.hashes:
+            _require_hash(file_hash)
+        with read_conn() as conn:
+            return {"fields": manual_fields.state(conn, req.hashes), "count": len(req.hashes)}
+
+    @app.post("/api/fields")
+    def music_fields_update(req: MusicFieldsUpdate) -> dict:
+        # Musik-Angaben von Hand (ADR 0101): manual_fields schreiben und die
+        # Songs aus ihren Roh-Blobs neu interpretieren, in EINEM Schreibgriff
+        # bzw. bei großer Auswahl als Aufgabe.
+        if not req.hashes or len(req.hashes) > 2000:
+            raise HTTPException(status_code=400, detail=msg("errBatchSize"))
+        for file_hash in req.hashes:
+            _require_hash(file_hash)
+        if not req.fields:
+            raise HTTPException(status_code=400, detail=msg("errNoAction"))
+        try:
+            changes = manual_fields.parse_changes(req.fields)   # vor dem Writer prüfen
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=_err(err))
+        if len(req.hashes) > MUSIC_FIELDS_INLINE:
+            engine.enqueue("music_fields",
+                           {"hashes": req.hashes, "changes": changes,
+                            "rules": configured_rules()},
+                           msg("taskMusicFields", n=len(req.hashes)))
+            return {"queued": True, "count": len(req.hashes)}
+        min_date = configured_min_date()
+
+        def fn(conn, _p):
+            with conn:
+                touched = manual_fields.set_fields(conn, req.hashes, changes)
+                reinterpret(conn, touched, dates="year" in changes, min_date=min_date)
+            return {"updated": len(touched),
+                    "fields": manual_fields.state(conn, req.hashes),
+                    # Frische Listenzeilen: die Liste ersetzt sie an Ort und
+                    # Stelle, statt neu zu laden (die Auswahl bleibt stehen).
+                    "items": library.items_by_hash(conn, touched)}
+
+        result = engine.run_write(msg("taskMusicFields", n=len(req.hashes)), fn, timeout=60.0)
+        if "updated" not in result:
+            raise HTTPException(status_code=500,
+                                detail=result.get("summary") or msg("errBulkFailed"))
+        return result
+
     @app.post("/api/batch/apply")
     def batch_apply(req: BulkApplyRequest) -> dict:
         # Sammel-Aktion auf das ganze Suchergebnis (ADR 0040): der Server
@@ -1624,10 +1698,10 @@ def create_app(
                                 detail=result.get("summary") or msg("errBulkFailed"))
         return result
 
-    # -- Zeitkommentare austauschen (#228, ADR 0098) --------------------------------
+    # -- Austausch: Zeitkommentare (#228, ADR 0098), Musik-Angaben (ADR 0101) -------
 
-    @app.post("/api/comments/export")
-    def comments_export(req: CommentExportRequest) -> dict:
+    @app.post("/api/exchange/export")
+    def exchange_export(req: ExchangeExportRequest) -> dict:
         # Nur lesend; das Frontend speichert die Antwort als Datei.
         if req.hashes is not None:
             if not req.hashes or len(req.hashes) > 2000:
@@ -1636,9 +1710,10 @@ def create_app(
                 _require_hash(file_hash)
         try:
             with read_conn() as conn:
-                return exchange.export_comments(
+                return exchange.export_exchange(
                     conn, hashes=req.hashes, filter_expr=req.filter,
-                    view_preds=view_preds(conn, req.view, None))
+                    view_preds=view_preds(conn, req.view, None),
+                    comments=req.comments, fields=req.fields)
         except ValueError as err:
             raise HTTPException(status_code=400, detail=_err(err))
 
@@ -1671,8 +1746,8 @@ def create_app(
         except ValueError as err:
             raise HTTPException(status_code=400, detail=_err(err))
 
-    @app.post("/api/admin/comments/preview")
-    async def comments_import_preview(request: Request) -> dict:
+    @app.post("/api/admin/exchange/preview")
+    async def exchange_import_preview(request: Request) -> dict:
         items = _exchange_items(await _exchange_body(request))
 
         def run() -> dict:
@@ -1680,8 +1755,8 @@ def create_app(
                 return exchange.preview_import(conn, items)
         return await run_in_threadpool(run)
 
-    @app.post("/api/admin/comments/import")
-    async def comments_import(request: Request) -> dict:
+    @app.post("/api/admin/exchange/import")
+    async def exchange_import(request: Request) -> dict:
         payload = await _exchange_body(request)
         items = _exchange_items(payload)
         try:
@@ -1690,10 +1765,13 @@ def create_app(
         except ValueError as err:
             raise HTTPException(status_code=400, detail=_err(err))
         include = payload.get("include_song_id") is True
+        overwrite = payload.get("overwrite_fields") is True
+        min_date = configured_min_date()
         result = await run_in_threadpool(
-            engine.run_write, msg("taskCommentImport"),
-            lambda conn, _p: exchange.apply_import(conn, items, source=source,
-                                                   include_song_id=include))
+            engine.run_write, msg("taskExchangeImport"),
+            lambda conn, _p: exchange.apply_import(
+                conn, items, source=source, include_song_id=include,
+                overwrite_fields=overwrite, min_date=min_date))
         if "added" not in result:
             raise HTTPException(status_code=500,
                                 detail=result.get("summary") or msg("errBulkFailed"))

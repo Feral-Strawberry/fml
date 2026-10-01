@@ -35,7 +35,7 @@ At the end there is a line like:
 
 - **passed** = passed. The exact number grows with the project; what
   matters is: **0 failed, 0 errors**. The line counts a good 1000 Python
-  tests and each of the 42 test files of the interface (group 9) as
+  tests and each of the 44 test files of the interface (group 9) as
   **one** test; together those files hold around 270 individual checks.
   Hence "a good 1200" in the introduction and a smaller number here.
 - **skipped** is fine: some tests need the tools `ffmpeg`/`ffprobe` and
@@ -174,8 +174,9 @@ it stay visible which information has which origin.
 | Test file | Checks |
 |---|---|
 | `test_manual_date.py` | A date set by hand (`1997`, `1997-05`, `12.05.1997`) always wins, clearing it brings back the derived date; the year from the music tags comes before the file timestamp in the date cascade. |
+| `test_manual_fields.py` | Music details by hand: input validation, the value by hand covers the tag and clearing brings it back, "Re-interpret" leaves the details in place, year by hand in the date, list row with title, no., year and genre, API and the task for large selections. |
 | `test_time_comments.py` | Time comments on songs: create, change, delete, in the search, in the list row and in the detail panel. |
-| `test_exchange.py` | Exchanging time comments between two fml: export and import as a round trip, the same import twice changes nothing, matching by song ID only with confirmation, broken and oversized files are rejected. |
+| `test_exchange.py` | Exchanging time comments and music details by hand between two fml: export and import as a round trip, the same import twice changes nothing, matching by song ID only with confirmation, your own differing details stay unless told otherwise, the old comment format stays readable, broken and oversized files are rejected. |
 | `test_cover.py` | Cover of a song: a reference to a cataloged image, no upload; songs with a cover appear in the gallery, rejecting the image takes them out again. |
 | `test_folder_order.py` | Your own order of a saved search: moving, new songs at the end, deleting the search clears the order along with it. |
 
@@ -250,6 +251,7 @@ the suite runs as usual.
 | `tests/js/theme.test.mjs`, `tests/js/help.test.mjs`, `tests/js/background.test.mjs` | Header: light/dark is remembered; "?" only appears with a help folder; power and pause are two independent buttons with their state from the server. |
 | `tests/js/media.test.mjs`, `tests/js/audioview.test.mjs`, `tests/js/artwork.test.mjs`, `tests/js/cover.test.mjs` | Audio in the interface: one switch decides image, video or sound; the toggle to the audio view keeps the chips, Space plays instead of opening the loupe; embedded picture as a miniature; setting and removing a cover. |
 | `tests/js/player.test.mjs`, `tests/js/listcompare.test.mjs` | fml's own player: playhead per row, loudness matching, loop, tempo, "Play all", media keys; Compare narrows the list to 2 to 6 songs and brings it back unchanged with Esc. |
+| `tests/js/liststyle.test.mjs`, `tests/js/musicfields.test.mjs` | List style of the audio view (control "☰ S M L", flat rows with columns, comparing still shows waveforms) and the music details by hand in the panel (prefilled, "(mixed)", setting and taking back for the selection). |
 | `tests/js/comments.test.mjs`, `tests/js/lyrics.test.mjs`, `tests/js/manualorder.test.mjs` | Time comments (K key, pins on the waveform, origin label), lyrics with timings (current line in the bar, section marks, panel that follows along) and the "Manual" sorting of a saved search. |
 
 **"Expected red":** some of these tests describe behaviour that is still to

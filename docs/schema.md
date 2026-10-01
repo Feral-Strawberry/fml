@@ -101,6 +101,14 @@ erDiagram
     text updated_at
     text source
   }
+  manual_fields {
+    text file_hash PK, FK
+    text field PK
+    integer ordinal PK
+    text value
+    text source
+    text updated_at
+  }
   covers {
     text file_hash PK, FK
     text cover_hash FK
@@ -204,6 +212,7 @@ erDiagram
   tags ||--o{ item_tags : "tag_id"
   items ||--o{ item_tags : "file_hash"
   items ||--o{ time_comments : "file_hash"
+  items ||--o{ manual_fields : "file_hash"
   items ||--o{ covers : "cover_hash"
   items ||--o| covers : "file_hash"
   items ||--o{ folder_order : "file_hash"
@@ -340,6 +349,19 @@ Indexe: `idx_item_tags_tag`
 | `source` | text |  |  |  |
 
 Indexe: `idx_time_comments_item`
+
+#### `manual_fields` · PK `file_hash, field, ordinal`
+
+| Spalte | Typ | Schlüssel | Pflicht | Standard |
+| --- | --- | --- | --- | --- |
+| `file_hash` | text | PK · FK → `items.file_hash` | ja |  |
+| `field` | text | PK | ja |  |
+| `ordinal` | integer | PK | ja | `0` |
+| `value` | text |  | ja |  |
+| `source` | text |  |  |  |
+| `updated_at` | text |  | ja |  |
+
+Indexe: keine
 
 #### `covers` · PK `file_hash`
 
@@ -526,16 +548,33 @@ rechnen (Admin → Wartung → „Neu interpretieren").
 
 **Schicht 2: Interpretation.** `interpreted_metadata` sind Schlüssel-Wert-
 Zeilen im kanonischen Feldvokabular (`prompt`, `model`, `seed`, `lora`,
-`tool`, `video_codec` …), je Parser mit Version; `ordinal` trägt
-Mehrfachwerte (mehrere LoRAs, mehrere Sampler-Pässe). Der Covering-Index
+`tool`, `video_codec`, bei Musik `title`, `artist`, `album`, `genre`,
+`lyrics` …), je Parser mit Version; `ordinal` trägt Mehrfachwerte (mehrere
+LoRAs, mehrere Sampler-Pässe, mehrere Interpreten). Der Covering-Index
 über `(field, value_text, file_hash)` bedient Facetten und Chip-Filter.
+Zeilen mit dem Parser `manual` sind keine Parser-Ergebnisse, sondern die
+Musik-Angaben von Hand aus `manual_fields`: Sie ersetzen beim Schreiben
+die Parser-Zeilen desselben Feldes, damit jede Abfrage den geltenden Wert
+sieht.
 
 **Manuelle Schicht.** Was der Mensch setzt, strikt getrennt vom
 Extrahierten: `annotations` (genau eine Zeile je Item: Bewertung 1–5,
 Notizen, manuelles Modell, das das erkannte in Facette und Filter
-übersteuert), `tags` und `item_tags` (Vokabular und Zuordnung),
+übersteuert, und ein Datum von Hand, das nach `items.media_date`
+durchgeschrieben wird), `tags` und `item_tags` (Vokabular und Zuordnung;
+`color` und `source` tragen Farbe und Herkunft der Finder-Tags),
 `smart_folders` (gespeicherte Suchen: Name plus Filterausdruck, die
-Sortierung steckt im Ausdruck).
+Sortierung steckt im Ausdruck) und `folder_order` (die eigene Reihenfolge
+einer gespeicherten Suche, Sortierung „Manuell").
+
+Zum Audio-Modul gehören drei weitere Tabellen der manuellen Schicht:
+`time_comments` (Kommentare an einer Stelle im Song, `at_ms` in
+Millisekunden), `manual_fields` (Musik-Angaben von Hand: je Song und Feld
+ein Wert, bei Interpret und Genre mehrere über `ordinal`; sie überdecken
+die Tag-Werte in Schicht 2) und `covers` (das Bild der Bibliothek, das
+einem Song als Cover zugeordnet ist). In `time_comments` und
+`manual_fields` ist `source` das Herkunfts-Etikett eines Imports aus der
+Austauschdatei, leer bei eigenen Eingaben.
 
 **Ranking-Modul.** `rankings` ist eine benannte Suche, über die Duelle
 laufen. `ranking_duels` ist das append-only Duell-Log und die Rohwahrheit
@@ -549,7 +588,7 @@ wird.
 **Volltextindex.** `search_index` ist eine FTS5-Tabelle mit fünf Spalten,
 damit die Standardsuche gezielt ausklammern kann, was Nutzer nicht meinen:
 `interp` (Schicht-2-Werte ohne Negativ-Prompt), `names` (Basenamen der
-Fundorte), `manuell` (Tags, Notizen, manuelles Modell), `negativ` (nur per
+Fundorte), `manuell` (Tags, Notizen, manuelles Modell, Zeitkommentare), `negativ` (nur per
 `negative_prompt:`), `raw` (Roh-Texte, nur per `raw:`). Jederzeit neu
 aufbaubar (Admin → Wartung → „Suchindex neu aufbauen").
 
@@ -559,9 +598,12 @@ Grund und den zuletzt bekannten Pfaden (fürs Rausverschieben).
 Datei mit Ausgang, Ziel, Hash und Datumsquelle. `scan_memory` merkt sich
 Größe und Änderungszeit der von Watchordnern katalogisierten Dateien, damit
 Neustarts Unverändertes überspringen. `scan_issues` sind die Probleme aus
-Admin → Probleme (`kind`: `failed`, `warning`, `thumbnail`, `playback`;
-`resolved` = quittiert). `app_state` ist eine kleine Schlüssel-Wert-Ablage
-für gemerkte Admin-Kennzahlen mit Herkunftsstempel des Rechners.
+Admin → Probleme (`kind`: `failed`, `warning`, `thumbnail`, `playback`,
+`audio`; `resolved` = quittiert). `app_state` ist eine kleine
+Schlüssel-Wert-Ablage für gemerkte Admin-Kennzahlen mit Herkunftsstempel
+des Rechners. `task_queue` ist die gesicherte Warteschlange der
+Langläufer: Was wartet oder an einer Dateigrenze angehalten wurde,
+übersteht einen Neustart (`params` und `label` als JSON).
 
 Wie gespeichert und abgefragt wird, mit Beispiel-Queries:
 [persistence.md](persistence.md).

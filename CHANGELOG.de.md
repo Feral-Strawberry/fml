@@ -6,6 +6,92 @@ Was sich zwischen den Snapshot-Releases geändert hat, aus Sicht der
 Nutzer. Versionen sind Datums-Versionen (`JJJJ.MM` oder `JJJJ.MM.N`);
 die laufende Instanz zeigt ihre Version in Admin → Übersicht.
 
+## 2026.10.1 (2026-10-02)
+
+Das Audio-Modul ist damit vollständig: **Musik-Angaben von Hand**
+(Titel, Interpret, Album und mehr) lassen sich im Panel nachpflegen und
+mit einem anderen fml **austauschen**, und die Audioliste hat eine zweite
+Darstellung **„Angaben"** zum Verwalten einer Sammlung.
+
+### Nach dem Update
+
+1. **Wie gewohnt mit `start.sh` bzw. `start.bat` starten.** Die
+   Abhängigkeiten sind unverändert.
+2. **Datenbank:** wird beim ersten Start automatisch auf Schema 34
+   migriert (eine neue Migration). Vorher ein Backup der `feral.sqlite`
+   anlegen, wie bei jedem Update.
+3. **Austausch mit einem anderen fml:** Die Austauschdatei hat ein neues
+   Format. Dateien aus älteren Versionen (nur Zeitkommentare) lassen sich
+   weiter importieren. Umgekehrt liest eine ältere Version die neuen
+   Dateien nicht: **Beide Seiten brauchen 2026.10.1.**
+4. Ein Re-Scan oder „Neu interpretieren" ist nicht nötig.
+
+### Neu im Audio-Modul
+
+- **Musik-Angaben von Hand:** Bei Songs stehen im Detailpanel unter
+  KURATIERT acht Felder: Titel, Interpret, Album-Interpret, Album, Nr.,
+  CD, Jahr, Genre, vorbelegt mit dem geltenden Wert. Eintippen und Enter
+  (oder Tab ins nächste Feld) setzt den Wert, er trägt danach „✎ von
+  Hand". Feld leeren oder ein Klick auf „✎ von Hand" holt den Wert aus der
+  Datei zurück. Gedacht für neue Songs ohne Tags (etwa aus Suno) und für
+  Rips mit falschen Tags.
+- **Mehrere Songs auf einmal:** Sind mehrere Zeilen ausgewählt, wirkt eine
+  Eingabe auf alle; Felder mit unterschiedlichen Werten zeigen
+  „(verschieden)" und bleiben unberührt, solange nichts getippt wird. Bei
+  mehr als 200 Songs läuft die Änderung als Aufgabe im Hintergrund.
+- **Die Dateien bleiben unverändert:** fml schreibt nichts in die Tags.
+  Der gesetzte Wert gilt überall wie ein Wert aus der Datei: in der Liste,
+  in der Seitenleiste (Interpret, Album, Genre), in der Suche, im Volltext
+  und in der Sortierung „Album". „Neu interpretieren" und ein Re-Scan
+  lassen die Angaben stehen.
+- **Jahr von Hand:** Es wird zum Datum des Songs, an der Stelle des Jahres
+  aus den Tags, und gilt auch vor dem „ältesten plausiblen Datum". Gegen
+  ein eingebettetes Datum (Sunos Erstellzeit) verliert es; dafür gibt es
+  das Datum von Hand.
+- **Angaben austauschen:** Sammel-Aktion → Zeile **„Austausch"** mit den
+  Häkchen „Zeitkommentare" und „Musik-Angaben" → **Exportieren**. In der
+  Datei stehen nur Angaben von Hand, nie Werte aus den Dateien. Auf der
+  anderen Seite übernimmt Admin → Wartung → **„Austausch importieren"**
+  (bisher „Zeitkommentare importieren") die Datei. Die Vorschau zählt je
+  Song und Feld **neu**, **gleich** und **abweichend**; abweichende
+  eigene Angaben bleiben stehen, außer das Häkchen „Abweichende eigene
+  Angaben überschreiben" ist gesetzt. Übernommene Angaben tragen ihre
+  Herkunft.
+- **Audioliste, Darstellung „Angaben":** Der Regler in der Kopfzeile
+  heißt in der Audioansicht jetzt **☰ S M L**. S, M und L zeigen wie
+  bisher die Zeile mit Wellenform in dieser Höhe. **☰** zeigt flache
+  Zeilen ohne Wellenform mit eigenen Spalten: Titel, Interpret, Album,
+  Nr., Jahr, Genre, Dauer, Bewertung, Zahl der Zeitkommentare. Es passen
+  zwei- bis dreimal so viele Songs auf den Bildschirm. Die erste Spalte
+  zeigt den Titel aus der Datei, sonst den Dateinamen. Der Vergleich (C)
+  zeigt weiter Wellenformen; die Wahl merkt sich der Browser.
+- **Songabschnitte je nach Größe:** L zeigt die Marken auf der Welle mit
+  Beschriftung, M nur die gestrichelten Marken, S keine. Den Namen des
+  laufenden Abschnitts zeigt immer die Abspielleiste.
+
+### Geändert
+
+- **Detailpanel bei Songs:** Titel, Interpret, Album und die übrigen
+  Musik-Angaben stehen nur noch bearbeitbar unter KURATIERT, nicht mehr
+  zusätzlich bei den übrigen Metadaten.
+- **Exportdatei:** heißt jetzt `fml-austausch-JJJJ-MM-TT.json`
+  (Format `fml-exchange`).
+
+### Fehlerbehebungen
+
+- **Beenden mit Strg+C:** fml endet ohne Fehlermeldung im Terminal. Vorher
+  stand nach dem sauberen Herunterfahren jedes Mal ein
+  `KeyboardInterrupt` mit Aufrufliste da.
+- **Doku:** Das Architektur-Diagramm zur Aufnahme und die Erläuterungen
+  zum Datenbank-Schema kennen jetzt das Audio-Modul.
+
+### Sicherheit und Robustheit
+
+- **Austauschdatei:** Der Abschnitt mit den Musik-Angaben ist fremde
+  Eingabe wie die Kommentare: feste Feldliste, dieselben Längen- und
+  Mengengrenzen wie bei der Eingabe von Hand, unbekannte Felder machen die
+  Datei ungültig. Angaben landen nur an Songs.
+
 ## 2026.10 (2026-10-01)
 
 fml arbeitet jetzt **leise im Hintergrund** und lässt sich **anhalten**;

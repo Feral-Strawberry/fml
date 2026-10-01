@@ -213,7 +213,9 @@ def store_interpretations(
 
     Ersetzt alle vorhandenen interpretierten Felder des Items vollständig
     (idempotent) — die Roh-Metadaten (Schicht 1) bleiben unangetastet. Eine
-    leere Liste löscht entsprechend nur den Altbestand.
+    leere Liste löscht entsprechend nur den Altbestand. Musik-Angaben von
+    Hand (``manual_fields``, ADR 0101) werden dabei über die Parser-Zeilen
+    gelegt und stehen als Parser ``manual`` in der Tabelle.
 
     ``commit=False`` (ADR 0067): in der offenen Transaktion des Aufrufers
     schreiben — der Reparse bündelt so hunderte Items je Commit (der Commit
@@ -228,6 +230,10 @@ def store_interpretations(
 
 
 def _write_interpretations(conn, file_hash, interpretations, ts) -> None:
+    # Angaben von Hand überdecken die Tag-Werte (ADR 0101): hier, an der
+    # einen Schreibstelle, damit jede Lesestelle den geltenden Wert sieht.
+    from . import manual_fields   # Lazy: manual_fields → store (now_iso)
+    interpretations = manual_fields.overlay(conn, file_hash, interpretations)
     conn.execute(
         "DELETE FROM interpreted_metadata WHERE file_hash = ?", (file_hash,)
     )

@@ -101,6 +101,14 @@ erDiagram
     text updated_at
     text source
   }
+  manual_fields {
+    text file_hash PK, FK
+    text field PK
+    integer ordinal PK
+    text value
+    text source
+    text updated_at
+  }
   covers {
     text file_hash PK, FK
     text cover_hash FK
@@ -204,6 +212,7 @@ erDiagram
   tags ||--o{ item_tags : "tag_id"
   items ||--o{ item_tags : "file_hash"
   items ||--o{ time_comments : "file_hash"
+  items ||--o{ manual_fields : "file_hash"
   items ||--o{ covers : "cover_hash"
   items ||--o| covers : "file_hash"
   items ||--o{ folder_order : "file_hash"
@@ -340,6 +349,19 @@ Indexes: `idx_item_tags_tag`
 | `source` | text |  |  |  |
 
 Indexes: `idx_time_comments_item`
+
+#### `manual_fields` · PK `file_hash, field, ordinal`
+
+| Column | Type | Key | Required | Default |
+| --- | --- | --- | --- | --- |
+| `file_hash` | text | PK · FK → `items.file_hash` | yes |  |
+| `field` | text | PK | yes |  |
+| `ordinal` | integer | PK | yes | `0` |
+| `value` | text |  | yes |  |
+| `source` | text |  |  |  |
+| `updated_at` | text |  | yes |  |
+
+Indexes: none
 
 #### `covers` · PK `file_hash`
 
@@ -525,16 +547,31 @@ can be recomputed from this table at any time without touching a file
 
 **Layer 2: interpretation.** `interpreted_metadata` are key-value rows in
 the canonical field vocabulary (`prompt`, `model`, `seed`, `lora`, `tool`,
-`video_codec` …), per parser with version; `ordinal` carries multiple
-values (several LoRAs, several sampler passes). The covering index over
-`(field, value_text, file_hash)` serves facets and chip filters.
+`video_codec`, for music `title`, `artist`, `album`, `genre`, `lyrics`
+…), per parser with version; `ordinal` carries multiple values (several
+LoRAs, several sampler passes, several artists). The covering index over
+`(field, value_text, file_hash)` serves facets and chip filters. Rows with
+the parser `manual` are not parser results but the music details set by
+hand from `manual_fields`: on writing they replace the parser rows of the
+same field, so every query sees the value in effect.
 
 **Manual layer.** What a person sets, strictly separated from the
 extracted: `annotations` (exactly one row per item: rating 1–5, notes,
-manual model that overrides the detected one in facet and filter), `tags`
-and `item_tags` (vocabulary and assignment), `smart_folders` (saved
-searches: name plus filter expression, the sort order is part of the
-expression).
+manual model that overrides the detected one in facet and filter, and a
+date set by hand that is written through to `items.media_date`), `tags`
+and `item_tags` (vocabulary and assignment; `color` and `source` carry
+colour and origin of the Finder tags), `smart_folders` (saved searches:
+name plus filter expression, the sort order is part of the expression)
+and `folder_order` (your own order of a saved search, sort "Manual").
+
+Three more tables of the manual layer belong to the audio module:
+`time_comments` (comments at a position in the song, `at_ms` in
+milliseconds), `manual_fields` (music details set by hand: one value per
+song and field, several for artist and genre via `ordinal`; they cover
+the tag values in layer 2) and `covers` (the library image assigned to a
+song as its cover). In `time_comments` and `manual_fields`, `source` is
+the origin label of an import from the exchange file, empty for your own
+entries.
 
 **Ranking module.** `rankings` is a named search that duels run over.
 `ranking_duels` is the append-only duel log and the raw truth (`outcome`:
@@ -548,7 +585,7 @@ item is rejected.
 **Full-text index.** `search_index` is an FTS5 table with five columns so
 the default search can deliberately leave out what users do not mean:
 `interp` (layer-2 values without the negative prompt), `names` (base names
-of the locations), `manuell` (tags, notes, manual model), `negativ` (only
+of the locations), `manuell` (tags, notes, manual model, time comments), `negativ` (only
 via `negative_prompt:`), `raw` (raw texts, only via `raw:`). Can be rebuilt
 at any time (Admin → Maintenance → "Rebuild search index").
 
@@ -558,9 +595,11 @@ every file touched by import or move-out with outcome, target, hash and
 date source. `scan_memory` remembers size and modification time of files
 cataloged by watch folders so restarts skip the unchanged. `scan_issues`
 are the issues from Admin → Issues (`kind`: `failed`, `warning`,
-`thumbnail`, `playback`; `resolved` = acknowledged). `app_state` is a small
-key-value store for remembered admin figures with the machine's origin
-stamp.
+`thumbnail`, `playback`, `audio`; `resolved` = acknowledged). `app_state`
+is a small key-value store for remembered admin figures with the
+machine's origin stamp. `task_queue` is the saved queue of long-running
+tasks: whatever is waiting or was halted at a file boundary survives a
+restart (`params` and `label` as JSON).
 
 How data is stored and queried, with example queries:
 [persistence.md](persistence.md).

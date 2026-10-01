@@ -37,6 +37,11 @@ parsers over it and replaces the structured fields. No file access, which
 is why it is fast even for 70,000 items. The run can be repeated any
 number of times.
 
+Music details set by hand (title, artist, album …, see
+[Audio module](audio.md#music-details-by-hand)) stay in place: they are
+laid over the values from the tags after the parsers have run and show up
+among the fields under the parser name `manual`.
+
 ## Searching over the fields
 
 In the [web GUI](gui.md) the search understands two forms:

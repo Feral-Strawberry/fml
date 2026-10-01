@@ -281,3 +281,39 @@ test("Gemerkter Stand (#118): Meter zeigen Stand + Zeit; „Fundorte prüfen“/
   assert.equal(cacheMh.querySelector("b").textContent, "?");
   assert.equal(cacheMh.querySelector("span").textContent, "noch nicht gezählt");
 });
+
+test("Austausch importieren (ADR 0101): Vorschau zeigt Musik-Angaben; abweichende eigene nur auf Ansage", async () => {
+  const { DomEvent } = await import("./dom.mjs");
+  const empty = { items: 0, new: 0, known: 0, fields_new: 0, fields_same: 0, fields_differing: 0 };
+  let preview = { items: 2, comments: 1, fields: 3,
+    by_hash: { items: 2, new: 0, known: 1, fields_new: 0, fields_same: 2, fields_differing: 1 },
+    by_song_id: empty, song_id_items: [], missing: 0, missing_names: [],
+    differing: [{ name: "demo.mp3", field: "artist", here: "Ihr", file: "<b>Wir</b>", song_id: false }] };
+  mockApi.post("/api/admin/exchange/preview", () => preview);
+  const sent = [];
+  mockApi.post("/api/admin/exchange/import", ({ body }) => {
+    sent.push(body);
+    return { added: 0, known: 1, fields_set: 1, fields_same: 2, fields_kept: 0 };
+  });
+  const el = (id) => document.getElementById(id);
+  el("ciFile").files = [{ size: 10, text: async () => JSON.stringify({ format: "fml-exchange" }) }];
+  el("ciFile").dispatchEvent(new DomEvent("change", { bubbles: true }));
+  await flush(10);
+  const prev = el("ciPrev");
+  assert.ok(prev.textContent.includes("demo.mp3") && prev.textContent.includes("Interpret"), "abweichende Angabe mit Song und Feld");
+  assert.ok(prev.innerHTML.includes("&lt;b&gt;Wir"), "Werte aus der Datei sind fremde Eingabe: escaped");
+  assert.equal(el("ciOverLbl").hidden, false, "Häkchen erscheint nur bei Abweichungen");
+  el("ciSource").value = "Anna";
+  el("ciSource").dispatchEvent(new DomEvent("input", { bubbles: true }));
+  assert.equal(el("ciGo").disabled, true, "nichts Neues: ohne Häkchen gibt es nichts zu übernehmen");
+  el("ciOver").checked = true;
+  el("ciOver").dispatchEvent(new DomEvent("change", { bubbles: true }));
+  assert.equal(el("ciGo").disabled, false, "mit Häkchen gewinnt die Datei");
+  preview = { ...preview, differing: [], by_hash: { ...preview.by_hash, fields_same: 3, fields_differing: 0 } };
+  click(el("ciGo"));
+  await flush(10);
+  assert.equal(sent.length, 1);
+  assert.deepEqual([sent[0].source, sent[0].overwrite_fields, sent[0].include_song_id], ["Anna", true, false]);
+  assert.ok(el("ciMsg").textContent.includes("1"), "Zusammenfassung nennt die übernommenen Angaben");
+  assert.equal(el("ciOverLbl").hidden, true, "nach dem Import ist nichts mehr abweichend");
+});

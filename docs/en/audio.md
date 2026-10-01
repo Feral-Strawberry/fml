@@ -122,7 +122,33 @@ Starting another pauses the first; it remembers its position, the next ▶
 continues there. This way four versions can be heard chorus against
 chorus: set each one to its chorus once, then ▶ in turn. The arrow keys
 move the playhead of the selected row even while it is not playing.
-S/M/L at the top of the header changes the row height.
+
+**Wave or details.** The control **☰ S M L** at the top of the header
+sets the style of the list. Exactly one button is lit:
+
+- **S, M, L** show the row as described above, with the waveform at a
+  small, medium or large height ("Wave"). This is for listening and for
+  comparing versions.
+- **☰** ("Details") shows flat rows without a waveform, with columns of their
+  own instead: title, artist, album, no., year, genre, duration, rating
+  and the number of time comments. Two to three times as many songs fit
+  on the screen. It is for browsing and managing a collection.
+
+In "Details" the first column shows the **title from the file**; if
+there is none, the file name. The file name is always in the tooltip.
+Without an artist, the column shows the model or the tool in a muted
+style, so AI songs do not look empty. Loudness and the dimming of equal
+name beginnings exist in "Wave" only. A click on S, M or L brings the
+waveform back. The gallery has no ☰; there S/M/L sets the tile size as
+before and keeps its own choice.
+
+Everything else stays the same: ▶ in the row, selection, rating,
+rejecting, "Play all" and the keys. For jumping within a song, "Details"
+relies on the waveform of the playback bar, which also carries the time
+comments. **C** compares from "Details" as well: comparing always shows
+waveforms, after Esc the list is flat again. When the middle gets narrow,
+genre, year and no. give way first, then the album. The browser remembers
+the choice.
 
 **▶ Play all** (top right in the audio view) plays the whole list in the
 current sort order, every song from the start, like a CD. The order is
@@ -219,7 +245,10 @@ three places:
 - **On the waveform of every list row**, narrow labels mark the sections;
   when two lie close together, the first is shortened (full name in the
   tooltip). The section the playhead is in appears in full and in the
-  accent colour. Instrumental sections (solo, lead guitar, intro) have no
+  accent colour. How much of it shows depends on the size: **L** shows
+  marks and labels, **M** only the dashed marks, **S** no sections. The
+  name of the current section is always shown by the playback bar.
+  Instrumental sections (solo, lead guitar, intro) have no
   time of their own at Suno, they carry that of the next sung word; fml
   estimates their start at the end of the last sung line before them
   (after **Re-interpret**).
@@ -323,6 +352,78 @@ locations" once, because that building block is only stored since then),
 and the lyrics with timings from the subtitle track (fml fetches them by
 itself, see above).
 
+## Music details by hand
+
+New songs (from Suno, for example) carry neither artist nor album, older
+rips sometimes wrong ones. For songs the detail panel therefore has eight
+fields under **CURATED**: **title, artist, album artist, album, no.,
+disc, year, genre**. They are prefilled with the value in effect and
+appear only there, not a second time among the other metadata.
+
+- **Setting:** type the value, then Enter or leave the field (Tab moves
+  to the next field). The value covers the one from the file and is then
+  marked **✎ by hand**.
+- **Taking it back:** clear the field or click **✎ by hand**. The value
+  from the file applies again.
+- **Several values** for artist and genre are separated with `;`
+  (`Anna; Bert`).
+- **Several songs at once:** select rows (Shift- or Ctrl/⌘-click), then
+  one entry applies to all of them. Fields whose values differ within the
+  selection show "(mixed)" and stay untouched as long as nothing is
+  typed. This is most comfortable in the "Details" list style. With more
+  than 200 songs the change runs as a background task, and the list
+  refreshes afterwards.
+
+The changed rows of the list show the new value right away. The **order
+and the filter** of the list stay as they are, even if a song would now
+sort elsewhere or no longer match the search: that way the selection
+stays put while you fill things in. With the next load (new search,
+different sort order) the list is in order again.
+
+**The file stays unchanged.** fml writes nothing into the tags, the
+details live in the catalog. Everywhere else the value set by hand counts
+like a value from the file: in the list, in the sidebar (artist, album,
+genre), in the search (`artist:`, `album:`, `genre:`, `albumartist:`,
+full text) and in the sort order "Album". "Re-interpret" and a re-scan
+leave the details in place. If a song is rejected, its details go with
+it.
+
+A value the file brings along can be covered, but not hidden without a
+replacement: a cleared field shows the value from the file again.
+
+Allowed are numbers from 1 to 9999, a year with four digits and text up
+to 300 characters. The **year by hand** becomes the date of the song, see
+[Date of a song](#date-of-a-song).
+
+### Exchanging details with another fml
+
+What has been filled in once travels to another fml as a file, the same
+way as the time comments (see
+[Exchanging comments with another fml](#exchanging-comments-with-another-fml)):
+
+**Export:** select songs or narrow down a search, open the **batch
+action**, tick **Music details** in the "Exchange" row (and **Time
+comments** too if wanted) and click **Export**. The file contains **only
+details set by hand**, never values from the tags: those are in the music
+file anyway.
+
+**Import:** on the other side **Admin → Maintenance → Import exchange
+file**. The preview counts per song and field:
+
+- **new**: no detail by hand is set here yet. It is taken over, even if
+  the file here carries a different tag value (covering it is the point).
+- **identical**: the same value by hand is already set here. It is
+  skipped.
+- **differing**: a **different** value by hand is set here. Your own
+  value stays; the preview lists these cases with both values. Only with
+  the checkbox **"Overwrite my own differing details"** does the file
+  win.
+
+Imported details are marked **✎ by hand** in the panel, the tooltip names
+the origin. Running the same import twice changes nothing. Songs are
+found by the file itself as with the comments, Suno songs if need be by
+their Suno song ID (only with the checkbox).
+
 ## Your own order of a saved search
 
 To audition a planned playlist, the order of the songs can be set **by
@@ -393,9 +494,11 @@ this order:
 1. **set by hand** (field under CURATED or the "Date" row of the bulk
    action, see [Interface](gui.md)) — always wins;
 2. an **embedded date**, e.g. Suno's creation time;
-3. the **year from the tags** (ID3 `TDRC`/`TYER`, Vorbis `DATE`, M4A
-   `©day`), usually the release year. It only counts as a year: it shows
-   as "1987", not "1987-01-01";
+3. the **year**: set by hand (see
+   [Music details by hand](#music-details-by-hand)), otherwise from the
+   tags (ID3 `TDRC`/`TYER`, Vorbis `DATE`, M4A `©day`), usually the
+   release year. It only counts as a year: it shows as "1987", not
+   "1987-01-01";
 4. the **file stamp**.
 
 The [date rule](import.md) applies to the tag year too: a year before the
@@ -405,6 +508,11 @@ accordingly ("Oldest plausible date" under Admin → Configuration → Media
 library) and then
 runs **Re-interpret**. When importing with copying, a song with a tag
 year lands in the library folder `1987/01/01`.
+
+The date rule does not apply to a **year by hand**: a deliberate entry
+counts even before the oldest plausible date. It takes the place of the
+tag year, so it loses to an embedded date (Suno's creation time). To get
+a different date there, set the date by hand.
 
 ## Duration (also for videos)
 
@@ -538,12 +646,15 @@ Two people with their own fml each can send each other comments as a
 file (mail, USB stick, cloud folder).
 
 **Export:** in the audio view select the songs or narrow down a search,
-open the **batch action** and click **Export** next to "Time comments".
-This creates a file `fml-comments-YYYY-MM-DD.json` with all comments of
-these songs. Nothing changes here.
+open the **batch action** and click **Export** in the "Exchange" row
+(with "Time comments" ticked). This creates a file
+`fml-exchange-YYYY-MM-DD.json` with all comments of these songs. Nothing
+changes here. The same file can also carry the music details set by
+hand, see
+[Exchanging details with another fml](#exchanging-details-with-another-fml).
 
 **Import** happens on the other side under **Admin → Maintenance →
-Import time comments**, in three steps:
+Import exchange file**, in three steps:
 
 1. **File and origin:** choose the file and enter who the comments are
    from (e.g. a name).
@@ -566,13 +677,19 @@ skipped. Running the same import twice changes nothing, and comments
 sent back and forth don't double up.
 
 **The file format** (for the curious): JSON with `"format":
-"fml-time-comments"` and `"version": 1`; per song `file_hash`, `name`
-(only as a hint), `duration`, `suno_ids` if present and the list
-`comments` with `at_ms` (position in milliseconds), `text`,
-`created_at`, `updated_at`; at the very top there are also `exported_at`
-and the list `items` with the songs. fml accepts at most 20 MB, 50,000
-songs and 200,000 comments per file, 2,000 comments per song and comment
-texts up to 2,000 characters.
+"fml-exchange"` and `"version": 1`; per song `file_hash`, `name`
+(only as a hint), `duration`, `suno_ids` if present, plus optionally the
+list `comments` with `at_ms` (position in milliseconds), `text`,
+`created_at`, `updated_at` and the section `fields` with the music
+details set by hand (`{"artist": ["…"], "album": ["…"]}`); at the very
+top there are also `exported_at` and the list `items` with the songs.
+fml accepts at most 20 MB, 50,000 songs and 200,000 comments per file,
+2,000 comments per song and comment texts up to 2,000 characters; the
+music details follow the same limits as entering them by hand.
+
+Files in the older format `fml-time-comments` (comments only, up to fml
+2026.10) can still be imported. The other way round, an older fml does
+not read the new format: both sides need the current version.
 
 ## Comparing
 

@@ -55,9 +55,53 @@ export function commonPrefix(a, b) {
   return cut > 0 ? cut + 1 : 0;
 }
 
+// -- Darstellung: Welle | Angaben (#258) ------------------------------------------------
+//
+// „Welle" ist die Zeile mit Wellenform (Hören, Vergleichen), „Angaben" die
+// flache Zeile mit eigenen Spalten für Titel, Interpret, Album, Nummer, Jahr
+// und Genre (Verwalten). gallery.js hält die Wahl und die Zeilenhöhe.
+
+let style = "wave";
+
+export const listStyle = () => style;
+export function setListStyle(s) { style = s === "info" ? "info" : "wave"; }
+/** Flache Zeilen? Im Vergleich nie: der zeigt immer Wellen. */
+export const infoRows = () => style === "info" && !listComparing();
+
+/** Was eine Zeile außer Hash und Bewertung zeigt, für die Zeilen-Signatur. */
+export const rowFacts = (item) =>
+  [infoRows() ? "i" : "w", item.title, item.artist, item.album, item.track, item.year, item.genre]
+    .map((v) => v || "").join("\u0001");
+
+/** Zeile der Darstellung „Angaben": Titel aus der Datei, sonst der Dateiname;
+ *  ohne Interpret stehen Modell oder Tool in der Spalte. */
+function infoRowHtml(item) {
+  const name = item.name || item.file_hash.slice(0, 12);
+  const who = item.artist || item.model || item.tool || "";
+  const playable = canPlay(item);
+  const cell = (cls, text) => `<span class="${cls}" title="${esc(text || "")}">${esc(text || "")}</span>`;
+  return `
+    <div class="rtop">
+      <button type="button" class="pbtn"${playable ? "" : " disabled"}
+              title="${esc(playable ? STRINGS.audioPlay : STRINGS.audioUnplayable)}">▶</button>
+      <div class="rname" title="${esc(name)}">${colorDotsHtml(item.colors)}${item.cover || item.artwork ? `<img class="rcov" alt="" title="${esc(item.cover ? STRINGS.coverFinalTitle : STRINGS.artworkTitle)}">` : ""}<b>${esc(item.title || splitName(name).stem)}</b></div>
+      ${cell(item.artist ? "rcell" : "rcell rgen", who)}
+      ${cell("rcell c-album", item.album)}
+      <span class="rnum c-track">${esc(item.track || "")}</span>
+      <span class="rnum c-year">${esc(item.year || "")}</span>
+      ${cell("rcell c-genre", item.genre)}
+      <span class="rdur">${fmtDuration(item.duration)}</span>
+      <span class="rdots">${dotsHtml(item.rating)}</span>
+      <span class="rcom" title="${esc(STRINGS.listColCommentsTitle)}"></span>
+    </div>`;
+}
+
 /** Innenleben einer Listenzeile (Kachel mit Klasse .arow). `prev` = Item der
  *  Vorzeile (gemeinsamer Anfang), undefined am Anfang oder beim Nachladen. */
 export function rowHtml(item, prev) {
+  seedComments(item.file_hash, item.comments);   // Zeitkommentare kommen mit der Zeile (#163)
+  seedSections(item.file_hash, item.sections);   // Songabschnitte ebenso (#234)
+  if (infoRows()) return infoRowHtml(item);
   const { stem, ext } = splitName(item.name || item.file_hash.slice(0, 12));
   const p = commonPrefix(stem, prev ? splitName(prev.name).stem : "");
   // Musiksammlung (#224): Interpret · Album aus den Tags, sonst wie bisher
@@ -66,8 +110,6 @@ export function rowHtml(item, prev) {
   const who = music || item.model || item.tool || "";
   const whoTitle = music || [item.tool, item.model].filter(Boolean).join(" · ");
   const playable = canPlay(item);
-  seedComments(item.file_hash, item.comments);   // Zeitkommentare kommen mit der Zeile (#163)
-  seedSections(item.file_hash, item.sections);   // Songabschnitte ebenso (#234)
   return `
     <div class="rtop">
       <button type="button" class="pbtn"${playable ? "" : " disabled"}
@@ -88,6 +130,19 @@ let axis = 0;   // Sekunden der vollen Wellenbreite (0 = unbekannt: je Zeile die
 
 /** Spaltenköpfe der Liste mit Lineal der gemeinsamen Zeitachse. */
 export function listHeadHtml() {
+  // „Angaben" (#258): Spaltenköpfe ohne Legende und Lineal.
+  if (infoRows()) {
+    return `<div class="cmpnote" hidden></div><div class="manualnote" hidden></div><span></span>
+    <span class="mlabel" title="${esc(STRINGS.listColTitleTitle)}">${STRINGS.listColTitle}</span>
+    <span class="mlabel">${STRINGS.listColArtist}</span>
+    <span class="mlabel c-album">${STRINGS.listColAlbum}</span>
+    <span class="mlabel num c-track">${STRINGS.listColTrack}</span>
+    <span class="mlabel num c-year">${STRINGS.listColYear}</span>
+    <span class="mlabel c-genre">${STRINGS.listColGenre}</span>
+    <span class="mlabel num">${STRINGS.listColDuration}</span>
+    <span class="mlabel num">${STRINGS.listColRating}</span>
+    <span class="mlabel num" title="${esc(STRINGS.listColCommentsTitle)}">💬</span>`;
+  }
   return `<div class="cmpnote" hidden></div><div class="manualnote" hidden></div><span></span><span class="mlabel">${STRINGS.listColName}</span>
     <span class="mlabel h-tool">${STRINGS.listColTool}</span>
     <span class="mlabel num">${STRINGS.listColDuration}</span>
@@ -139,9 +194,11 @@ export function paintRow(el) {
     setText(rc, n ? String(n) : "–");
     rc.classList.toggle("has", n > 0);
   }
-  const a = analysisOf(hash);
+  // Lautheit nur, wo die Zeile sie zeigt: „Angaben" (#258) fragt die
+  // Analyse gar nicht erst an.
   const l = el.querySelector(".rlufs");
   if (l) {
+    const a = analysisOf(hash);
     const v = a?.loudness?.integrated;
     setText(l, v == null ? (a === false ? "–" : "") : v.toLocaleString(STRINGS.locale,
       { minimumFractionDigits: 1, maximumFractionDigits: 1 }));

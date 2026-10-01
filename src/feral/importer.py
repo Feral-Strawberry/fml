@@ -33,6 +33,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from .db import manual_fields
 from .db.manual import add_finder_tags
 from .db.store import media_kind_for, now_iso, store_extraction, store_interpretations
 from .extract import container
@@ -246,8 +247,16 @@ def set_media_date(
     (unplausibel) lässt die Spalte unangetastet. Das Tag-Jahr (``TAG_YEAR``)
     überschreibt wie Metadaten, gespeichert als ``YYYY`` (ADR 0096). Ein
     manuell gesetztes Datum gewinnt immer: solche Items fasst keine
-    Kaskade an.
+    Kaskade an. Ein Jahr von Hand (ADR 0101) steht an der Stelle des
+    Tag-Jahrs: Es verliert nur gegen ein eingebettetes Datum.
     """
+    if source != "metadaten":
+        year = manual_fields.year_of(conn, file_hash)
+        # Wie in ``_date_candidate``: ein Jahr, das noch nicht begonnen hat
+        # (die Eingabe erlaubt das Folgejahr), wird noch kein Datum.
+        if year is not None and datetime(year, 1, 1, tzinfo=timezone.utc) <= (
+                datetime.now(timezone.utc) + timedelta(days=1)):
+            when, source = datetime(year, 1, 1, tzinfo=timezone.utc), TAG_YEAR
     if when is None:
         return
     value = f"{when:%Y}" if source == TAG_YEAR else f"{when:%Y-%m-%d %H:%M:%S}"
@@ -303,15 +312,17 @@ def _date_candidate(
             return parsed, "metadaten"
     # Tag-Jahr eines Songs (#220) aus Schicht 2 — der Audio-Parser hat es
     # schon aus den gespeicherten Roh-Tags gelesen.
+    # Ein Jahr von Hand (Parser ``manual``, ADR 0101) steht an derselben
+    # Stelle, aber ohne Untergrenze: eine bewusste Eingabe ist plausibel.
     hit = conn.execute(
-        """SELECT m.value_text FROM interpreted_metadata m
+        """SELECT m.value_text, m.parser FROM interpreted_metadata m
              JOIN items i ON i.file_hash = m.file_hash
             WHERE m.file_hash = ? AND m.field = 'year' AND i.media_kind = 'audio'
-            ORDER BY m.ordinal LIMIT 1""", (file_hash,),
+            ORDER BY m.parser = 'manual' DESC, m.ordinal LIMIT 1""", (file_hash,),
     ).fetchone()
     if hit is not None and hit[0].isdigit():
         tag = datetime(int(hit[0]), 1, 1, tzinfo=timezone.utc)
-        if min_date <= tag <= upper:
+        if (hit[1] == manual_fields.PARSER or min_date <= tag) and tag <= upper:
             return tag, TAG_YEAR
     for (path,) in conn.execute(
         "SELECT path FROM file_locations WHERE file_hash = ? ORDER BY id",

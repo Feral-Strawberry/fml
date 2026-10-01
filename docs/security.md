@@ -52,11 +52,13 @@ Internet: nie blind vertrauen.
   Interpretations-Parser an den Metadaten einer Datei, fällt er für diese
   Datei aus; Scan und „Neu interpretieren" laufen weiter, die Roh-Metadaten
   bleiben gespeichert.
-- **Kommentar-Dateien eines anderen fml** (Zeitkommentare importieren)
-  sind fremde Eingabe: höchstens 20 MB, geprüft vor dem Einlesen, festes
-  Format mit Längen- und Mengengrenzen (2.000 Kommentare je Song), nur als
-  `application/json`. Übernommen werden ausschließlich Kommentartext, Stelle
-  und Herkunft; Dateien fasst der Import nicht an.
+- **Austauschdateien eines anderen fml** (Austausch importieren) sind
+  fremde Eingabe: höchstens 20 MB, geprüft vor dem Einlesen, festes
+  Format mit Längen- und Mengengrenzen (2.000 Kommentare je Song, feste
+  Feldliste der Musik-Angaben mit denselben Grenzen wie die Eingabe von
+  Hand), nur als `application/json`. Übernommen werden ausschließlich
+  Kommentartext, Stelle, Musik-Angaben und Herkunft; Dateien fasst der
+  Import nicht an.
 - **ffmpeg/ffprobe** (Videos, Audio) bekommen jede Datei als lokale Datei:
   `-protocol_whitelist file` und ein absoluter `file:`-Pfad. Eine präparierte
   Datei (etwa eine versteckte Playlist) kann ffmpeg nicht zu Netzzugriffen

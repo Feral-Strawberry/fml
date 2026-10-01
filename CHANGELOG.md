@@ -7,6 +7,91 @@ What changed between snapshot releases, from the user's point of view.
 Versions are date versions (`YYYY.MM` or `YYYY.MM.N`); a running
 instance shows its version under Admin → Overview.
 
+## 2026.10.1 (2026-10-02)
+
+This completes the audio module: **music details set by hand** (title,
+artist, album and more) can be filled in from the panel and **exchanged**
+with another fml, and the audio list has a second style, **"Details"**,
+for managing a collection.
+
+### After updating
+
+1. **Start with `start.sh` or `start.bat` as usual.** The dependencies
+   are unchanged.
+2. **Database:** migrated automatically to schema 34 on the first start
+   (one new migration). Make a backup of `feral.sqlite` first, as with
+   every update.
+3. **Exchange with another fml:** the exchange file has a new format.
+   Files from older versions (time comments only) can still be imported.
+   The other way round, an older version does not read the new files:
+   **both sides need 2026.10.1.**
+4. No re-scan and no "Re-interpret" needed.
+
+### New in the audio module
+
+- **Music details by hand:** for songs the detail panel has eight fields
+  under CURATED: title, artist, album artist, album, no., disc, year,
+  genre, prefilled with the value in effect. Typing and Enter (or Tab to
+  the next field) sets the value, which is then marked "✎ by hand".
+  Clearing the field or clicking "✎ by hand" brings back the value from
+  the file. Meant for new songs without tags (from Suno, for example) and
+  for rips with wrong tags.
+- **Several songs at once:** with several rows selected, one entry
+  applies to all of them; fields with differing values show "(mixed)" and
+  stay untouched as long as nothing is typed. With more than 200 songs the
+  change runs as a background task.
+- **The files stay unchanged:** fml writes nothing into the tags. The
+  value set by hand counts everywhere like a value from the file: in the
+  list, in the sidebar (artist, album, genre), in the search, in the full
+  text and in the sort order "Album". "Re-interpret" and a re-scan leave
+  the details in place.
+- **Year by hand:** it becomes the date of the song, in the place of the
+  year from the tags, and counts even before the "oldest plausible date".
+  It loses to an embedded date (Suno's creation time); the date set by
+  hand is there for that.
+- **Exchanging details:** batch action → the **"Exchange"** row with the
+  checkboxes "Time comments" and "Music details" → **Export**. The file
+  contains only details set by hand, never values from the files. On the
+  other side Admin → Maintenance → **"Import exchange file"** (formerly
+  "Import time comments") takes the file over. The preview counts per
+  song and field **new**, **identical** and **differing**; your own
+  differing details stay unless the checkbox "Overwrite my own differing
+  details" is ticked. Imported details carry their origin.
+- **Audio list, "Details" style:** in the audio view the control in the
+  header now reads **☰ S M L**. S, M and L show the row with the
+  waveform at that height, as before. **☰** shows flat rows without a
+  waveform, with columns of their own: title, artist, album, no., year,
+  genre, duration, rating, number of time comments. Two to three times as
+  many songs fit on the screen. The first column shows the title from the
+  file, otherwise the file name. Comparing (C) still shows waveforms; the
+  browser remembers the choice.
+- **Song sections depending on the size:** L shows the marks on the
+  waveform with labels, M only the dashed marks, S none. The name of the
+  current section is always shown by the playback bar.
+
+### Changed
+
+- **Detail panel for songs:** title, artist, album and the other music
+  details now appear only as editable fields under CURATED, no longer a
+  second time among the other metadata.
+- **Export file:** now named `fml-exchange-YYYY-MM-DD.json` (format
+  `fml-exchange`).
+
+### Fixes
+
+- **Quitting with Ctrl+C:** fml ends without an error message in the
+  terminal. Before, a `KeyboardInterrupt` with a traceback appeared every
+  time after the clean shutdown.
+- **Docs:** the architecture diagram of the intake and the explanations
+  of the database schema now know the audio module.
+
+### Security and robustness
+
+- **Exchange file:** the section with the music details is untrusted
+  input like the comments: a fixed list of fields, the same length and
+  quantity limits as entering them by hand, unknown fields make the file
+  invalid. Details only land on songs.
+
 ## 2026.10 (2026-10-01)
 
 fml now works **quietly in the background** and can be **paused**;

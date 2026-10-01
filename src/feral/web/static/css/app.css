@@ -317,6 +317,7 @@ img.pe-icon {
   font-size: 11px;
 }
 #density button.active { color: var(--accent); font-weight: 700; }
+#density button[hidden] { display: none; }   /* ☰ „Angaben": nur in der Audioansicht (#258) */
 
 /* ---------- Sidebar: Gruppen, Zeilen, Footer ---------- */
 #sidebar { display: flex; flex-direction: column; }
@@ -1083,6 +1084,17 @@ body.view-audio #panel .ppreview .audiostage.hascover { padding-bottom: 14px; }
 #pTagInput:focus-visible, #pModel:focus-visible, #pNotes:focus-visible, #pDate:focus-visible { border-color: var(--accent-line); }
 #pNotes { display: block; }
 #pDateErr { margin-top: 5px; font-size: 11px; }
+/* Musik-Angaben von Hand (ADR 0101): Bezeichnung, Feld, „✎ von Hand". */
+#pFields { margin-top: 12px; }
+#pFields .mfhead { font-size: 10px; letter-spacing: .5px; text-transform: uppercase; color: var(--faint); margin-bottom: 2px; }
+#pFields .mfrow { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 6px; align-items: center; margin-top: 5px; }
+#pFields .mflabel { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#pFields input { width: 100%; background: var(--panel2); border: 1px solid var(--border); border-radius: 7px; color: var(--text);
+  font: inherit; font-size: 11.5px; padding: 5px 8px; outline: none; }
+#pFields input:focus-visible { border-color: var(--accent-line); }
+#pFields .mfhand { background: none; border: none; padding: 0; font-size: 10px; color: var(--accent); white-space: nowrap; cursor: pointer; }
+#pFields .mfhand[hidden] { display: none; }
+#pFields .mfnote { margin-top: 6px; font-size: 11px; }
 .multihint { margin: 10px 14px 0; }
 .badgechip.origin-manuell { color: #d9a441; border-color: #d9a44155; }
 
@@ -1161,6 +1173,9 @@ body.panel-folded #body > #panel, body.panel-folded #splitR { display: none; }
 .bulkrow .sdname { flex: 1; min-width: 0; }
 .bulkrow textarea.sdname { resize: vertical; font-family: inherit; }
 .bulkrow .sdhint { flex: none; max-width: 45%; }
+/* Austausch (ADR 0101): zwei Häkchen und der Export-Knopf in einer Reihe */
+.bulkrow .bulkexparts { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bulkrow .bulkexparts label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--dim); white-space: nowrap; }
 .bulkstars { display: flex; flex: none; gap: 1px; }
 .bstar {
   background: none;
@@ -1602,6 +1617,10 @@ body.view-audio #gridwrap { padding: 0; scrollbar-gutter: stable; }
 .wv .sec.on { max-width: none !important; overflow: visible; color: var(--accent); z-index: 2;
   border-left-color: var(--accent-line); }
 .wv .sec i { font-style: normal; }
+/* Drei Stufen nach Wellenhöhe: S ohne Abschnitte, M nur die gestrichelten
+   Marken, L mit Beschriftung (im Vergleich ist die Welle immer hoch genug). */
+#grid.list.density-s:not(.compare) .wv .secs { display: none; }
+#grid.list.density-m:not(.compare) .wv .sec i { display: none; }
 .wv .sec.on i { background: var(--panel); padding: 0 3px; border-radius: 3px; }
 /* Zeile mittig unter der Welle der Leiste, UNTER den Kommentar-Dreiecken
    (die ragen 7 px aus der Welle). Die Leiste ist dafür 108 statt 90 px hoch,
@@ -1675,6 +1694,26 @@ body.list-compare #pbar { display: none; }
 @container (max-width: 620px) {
   .arow .rtop, #listhead { --lcols: 28px minmax(0, 1fr) 54px 64px 26px; }
   .arow .rtool, #listhead .h-tool, .arow .rlufs, #listhead .h-lufs { display: none; }
+}
+/* Darstellung „Angaben" (#258): flache Zeilen ohne Welle, eigene Spalten für
+   Titel, Interpret, Album, Nr., Jahr, Genre. Feste Höhe = Polster 8 +
+   Kopfzeile 26 + Linie 1. Der Vergleich (.compare) zeigt immer Wellen. */
+#grid.list.info .tile.arow { height: 35px; padding: 4px 14px; }
+#grid.list.info .arow .rtop, #listhead.info {
+  --lcols: 28px minmax(120px, 1.6fr) minmax(0, 1.1fr) minmax(0, 1.1fr) 30px 40px minmax(0, .8fr) 54px 64px 26px; }
+.arow .rcell { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.arow .rcell.rgen { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+.arow .rnum { font-family: var(--mono); font-size: 11px; color: var(--dim); text-align: right; }
+/* Enge Mitte: erst weichen Genre, Jahr und Nr., dann das Album. */
+@container (max-width: 740px) {
+  #grid.list.info .arow .rtop, #listhead.info {
+    --lcols: 28px minmax(120px, 1.6fr) minmax(0, 1.1fr) minmax(0, 1.1fr) 54px 64px 26px; }
+  .arow .c-genre, .arow .c-year, .arow .c-track,
+  #listhead.info .c-genre, #listhead.info .c-year, #listhead.info .c-track { display: none; }
+}
+@container (max-width: 620px) {
+  #grid.list.info .arow .rtop, #listhead.info { --lcols: 28px minmax(0, 1.4fr) minmax(0, 1fr) 54px 64px 26px; }
+  .arow .c-album, #listhead.info .c-album { display: none; }
 }
 
 /* ---------- Cover eines Songs (Audio A8, #165, ADR 0090) ---------- */

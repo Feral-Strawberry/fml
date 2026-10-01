@@ -18,6 +18,21 @@ auf deinem Rechner: kein Cloud-Dienst, kein Konto, der Server ist nur unter
 > Hobby-Projekt in aktiver Entwicklung - mach Backups (siehe „Gut zu
 > wissen").
 
+## Neu in 2026.10.1
+
+Das Audio-Modul ist damit vollständig:
+
+- **Musik-Angaben von Hand:** Titel, Interpret, Album, Nummer, Jahr und
+  Genre direkt im Panel setzen, auch für mehrere ausgewählte Songs auf
+  einmal. Die Dateien bleiben unverändert; Liste, Seitenleiste und Suche
+  sehen den gesetzten Wert.
+- **Angaben austauschen:** Was einmal nachgepflegt ist, reist zusammen mit
+  den Zeitkommentaren als Datei in ein anderes fml. Abweichende eigene
+  Angaben bleiben dort stehen, außer man lässt die Datei gewinnen.
+- **Audioliste zum Verwalten:** Der Regler **☰ S M L** schaltet zwischen
+  Zeilen mit Wellenform und flachen Zeilen mit Titel, Interpret, Album,
+  Nummer, Jahr und Genre.
+
 ## Neu in 2026.10
 
 - **Leise arbeiten, anhalten, weitermachen:** zwei Knöpfe in der

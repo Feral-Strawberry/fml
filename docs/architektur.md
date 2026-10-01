@@ -20,7 +20,7 @@ Jedes installierte Paket ist mit fester Version und Prüfsumme benannt.
 Zwei Prozesse, eine Datenbank. Der Web-Prozess beantwortet jede Anfrage
 und bleibt dabei flüssig, weil alles Langlaufende in einem zweiten Prozess
 passiert. **Rot sind die beiden Schreibwege:** kurze Griffe (Bewerten,
-Tags, Notizen, Duelle) schreibt der Web-Prozess selbst unter einer Sperre,
+Tags, Notizen, Musik-Angaben, Duelle) schreibt der Web-Prozess selbst unter einer Sperre,
 alles Langlaufende (Scan, Import, Neu interpretieren, Thumbnails) schreibt
 der Worker. Der Worker wird per `spawn` gestartet, bekommt eine Aufgabe
 auf einmal und meldet Fortschritt über eine zweite Queue; stirbt er,
@@ -40,7 +40,7 @@ danach weiter.
 
 ## Wie eine Datei in den Katalog kommt
 
-![Aufnahme-Kette: Quelle, Erkennen, Import-Regeln, SHA-256, optional Kopie und Prüfung, Katalog, optional Quelle leeren. Katalogisieren schreibt Schicht 1 byte-treu in raw_metadata, Schicht 2 interpretiert daraus Felder, beides landet im Volltextindex. Neu interpretieren läuft ohne Dateizugriff über raw_metadata.](img/architektur-aufnahme.de.svg)
+![Aufnahme-Kette: Quelle, Erkennen, Import-Regeln, SHA-256, optional Kopie und Prüfung, Katalog, optional Quelle leeren. Katalogisieren schreibt Schicht 1 byte-treu in raw_metadata, Schicht 2 interpretiert daraus Felder, beides landet im Volltextindex. Neu interpretieren läuft ohne Dateizugriff über raw_metadata. Musik-Angaben von Hand aus der manuellen Schicht überdecken in Schicht 2 die Werte aus den Tags.](img/architektur-aufnahme.de.svg)
 
 Jede Datei läuft einmal durch dieselbe Kette, egal ob sie per Import,
 Watchordner oder Katalogisieren kommt. Der Modus entscheidet nur über die
@@ -53,9 +53,19 @@ Pfad ist nur ein Fundort. Schicht 1 versteht Container, nicht
 Konventionen, und speichert jeden Metadaten-Eintrag unverändert. Schicht 2
 macht daraus Felder und darf Lücken haben. **Weil der Roh-Blob bleibt,**
 läuft ein neuer oder verbesserter Parser über den ganzen Bestand, ohne
-eine einzige Datei zu öffnen. Bewertungen, Tags und Notizen liegen
-getrennt davon und werden nie von einem Parser überschrieben. Details:
-[Extraktion](extraction.md), [Interpretation](interpretation.md).
+eine einzige Datei zu öffnen. Bewertungen, Tags, Notizen und
+Zeitkommentare liegen getrennt davon und werden nie von einem Parser
+überschrieben.
+
+In der Gegenrichtung gibt es genau eine Brücke: die **Musik-Angaben von
+Hand** (Titel, Interpret, Album, Nummer, Jahr, Genre). Sie liegen
+ebenfalls in der manuellen Schicht, werden aber beim Schreiben von
+Schicht 2 **über die Werte aus den Tags gelegt**. So sehen Suche,
+Seitenleiste, Sortierung und Volltext ohne Sonderfall den geltenden Wert.
+Die Herkunft bleibt am Wert sichtbar, die Datei bleibt unverändert, und
+wer die Angabe leert, bekommt den Tag-Wert zurück. Details:
+[Extraktion](extraction.md), [Interpretation](interpretation.md),
+[Audio-Modul](audio.md#musik-angaben-von-hand).
 
 ## Von der Suche zur Galerie
 
@@ -98,8 +108,9 @@ Dependabot schlägt Sicherheits-Updates direkt auf dem Lock vor. Details:
   Rausverschieben an. Ab Werk läuft der Übersichtsmodus: nie kopieren,
   verschieben oder löschen.
 - **Alles Abgeleitete ist reproduzierbar:** Schicht 2, Thumbnails,
-  Erstelldatum und Volltextindex lassen sich aus Hash und Roh-Blobs neu
-  rechnen, ohne Neuimport.
+  Erstelldatum, Volltextindex und die Audio-Analyse (Lautheit,
+  Wellenform) lassen sich aus Hash, Roh-Blobs und der manuellen Schicht
+  neu rechnen, ohne Neuimport.
 - **Ein Schreiber je Aufgabenart:** Langläufer schreibt der Worker, kurze
   Griffe der Web-Prozess. SQLite im WAL-Modus, nie auf einem Netzlaufwerk.
 - **Herkunft getrennt:** aus der Datei extrahiert, daraus interpretiert

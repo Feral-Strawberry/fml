@@ -74,7 +74,7 @@
    ✓ Ergebnis mit Uhrzeit). Darunter die Karte **Cache** (was auf der
    Platte zwischengespeichert ist, je Art mit Löschen) und eigene Karten
    mit derselben Logik in drei Schritten: **Abgelehnte rausverschieben**,
-   **Import-Regeln auf den Bestand**, mit Audio-Modul **Zeitkommentare
+   **Import-Regeln auf den Bestand**, mit Audio-Modul **Austausch
    importieren**, und **Verwaiste Fundorte aufräumen** — siehe
    „Wartungsaktionen".
 5. **Probleme** (`/admin/issues`) — je Fehlerart eine Karte mit ehrlichem
@@ -373,13 +373,17 @@ darüber:
    „N Fundorte aufräumen"; das Ergebnis steht in der Karte, die Kennzahl
    der Rohdateien-Karte wird nachgezogen.
 
-### Zeitkommentare importieren (eigene Karte, nur mit Audio-Modul)
+### Austausch importieren (eigene Karte, nur mit Audio-Modul)
 
-Übernimmt die Kommentar-Datei eines anderen fml: Datei wählen und
-Herkunft eintragen → Vorschau (gefunden, neu, schon da, nicht gefunden;
-Treffer nur über die Suno-Song-ID eigens) → Übernehmen. Ändert nur
-Kommentare, keine Dateien. Einzelheiten und das Dateiformat:
-[Audio-Modul → Kommentare austauschen](audio.md#kommentare-mit-einem-anderen-fml-austauschen).
+Übernimmt die Austauschdatei eines anderen fml mit Zeitkommentaren und
+Musik-Angaben von Hand: Datei wählen und Herkunft eintragen → Vorschau
+(gefunden, neu, schon da, nicht gefunden; Treffer nur über die
+Suno-Song-ID eigens; bei den Musik-Angaben neu, gleich, abweichend) →
+Übernehmen. Abweichende eigene Angaben bleiben stehen, außer das Häkchen
+„Abweichende eigene Angaben überschreiben" ist gesetzt. Ändert nur
+Kommentare und Angaben, keine Dateien. Einzelheiten und das Dateiformat:
+[Audio-Modul → Kommentare austauschen](audio.md#kommentare-mit-einem-anderen-fml-austauschen)
+und [Angaben austauschen](audio.md#angaben-mit-einem-anderen-fml-austauschen).
 
 ## Probleme und Sperrliste
 

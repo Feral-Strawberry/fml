@@ -18,7 +18,7 @@ from ..hashing import hash_file
 from ..messages import UserError
 from . import filters
 from .cache import EpochCache
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 
 def list_roots() -> list[dict[str, str]]:
@@ -1648,6 +1648,29 @@ _GRID_DISPLAY_SQL = """
                  WHERE m.file_hash = i.file_hash AND +m.field = 'album'
                    AND m.value_text != '' LIMIT 1)
            END AS album,
+           -- Spalten der Darstellung „Angaben" (#258): Titel aus der Datei,
+           -- Titelnummer, Jahr, Genre (mehrere mit „; ").
+           CASE WHEN i.media_kind = 'audio' THEN
+               (SELECT value_text FROM interpreted_metadata m
+                 WHERE m.file_hash = i.file_hash AND +m.field = 'title'
+                   AND m.value_text != '' LIMIT 1)
+           END AS title,
+           CASE WHEN i.media_kind = 'audio' THEN
+               (SELECT value_text FROM interpreted_metadata m
+                 WHERE m.file_hash = i.file_hash AND +m.field = 'track'
+                   AND m.value_text != '' LIMIT 1)
+           END AS track,
+           CASE WHEN i.media_kind = 'audio' THEN
+               (SELECT value_text FROM interpreted_metadata m
+                 WHERE m.file_hash = i.file_hash AND +m.field = 'year'
+                   AND m.value_text != '' LIMIT 1)
+           END AS year,
+           CASE WHEN i.media_kind = 'audio' THEN
+               (SELECT group_concat(value_text, '; ') FROM (
+                   SELECT m.value_text FROM interpreted_metadata m
+                    WHERE m.file_hash = i.file_hash AND +m.field = 'genre'
+                      AND m.value_text != '' ORDER BY m.ordinal))
+           END AS genre,
            -- Abschnitte des getimten Songtexts (#234) für die Welle der Zeile.
            CASE WHEN i.media_kind = 'audio' THEN
                (SELECT value_text FROM interpreted_metadata m
@@ -1655,6 +1678,19 @@ _GRID_DISPLAY_SQL = """
            END AS sections
       FROM items i
     """
+
+
+def items_by_hash(conn: sqlite3.Connection, hashes: Sequence[str]) -> list[dict[str, Any]]:
+    """Frische Anzeige-Zeilen für bestimmte Items (dieselben Spalten wie
+    eine Galerie-Seite) — damit die Liste nach einer Änderung an den
+    Musik-Angaben die betroffenen Zeilen an Ort und Stelle ersetzen kann,
+    ohne neu zu sortieren (ADR 0101, Release-QA 2026.10.1)."""
+    rows: list[sqlite3.Row] = []
+    for start in range(0, len(hashes), 400):
+        chunk = list(hashes[start:start + 400])
+        marks = ",".join("?" * len(chunk))
+        rows += conn.execute(_GRID_DISPLAY_SQL + f" WHERE i.file_hash IN ({marks})", chunk).fetchall()
+    return _item_dicts(rows)
 
 
 def _shows_artwork(row: sqlite3.Row) -> bool:
@@ -1699,6 +1735,7 @@ def _item_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
             **({"artwork": True} if _shows_artwork(r) else {}),
             **({"artist": r["artist"]} if r["artist"] else {}),
             **({"album": r["album"]} if r["album"] else {}),
+            **{k: r[k] for k in ("title", "track", "year", "genre") if r[k]},
         }
         for r in rows
     ]

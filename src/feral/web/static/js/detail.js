@@ -8,7 +8,8 @@
 
 import { STRINGS } from "./strings.js";
 import { wireReveal, removeCover, loadThumb, getAudioAnalysis, fmtLoudness, getItem, getTags, getModels, mediaUrl, openLocation, releaseVideos, wireMediaFallback, workflowUrl, thumbUrl, canPlay, mediaHtml, kindLabel as mediaKindLabel, fmtDuration, wireUnplayable, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
-import { applyDate, applyModel, applyRating, applyTag, colorDotsHtml, note, tagRemove } from "./curate.js";
+import { applyDate, applyModel, applyRating, applyTag, colorDotsHtml, note, selectionHashes, tagRemove } from "./curate.js";
+import { MUSIC_FIELDS, mountMusicFields } from "./musicfields.js";
 import { mountCommentSection } from "./comments.js";
 import { panelLinesHtml } from "./lyrics.js";
 import { emit, on } from "./main.js";
@@ -87,6 +88,10 @@ const dotsHtml = (rating) =>
     `<span class="rdot${rating && n <= rating ? " on" : ""}" data-n="${n}" title="${n}★"></span>`,
   ).join("");
 
+/** „Erstellt" im Datei-Block: Datum, bei einem Datum von Hand mit Marke. */
+const createdHtml = (d) =>
+  `${esc(d.media_date || STRINGS.fileCreatedUnknown)}${d.manual.media_date ? ` <span class="vdim" title="${esc(STRINGS.fileCreatedManualTitle)}">✎ ${esc(STRINGS.fileCreatedManual)}</span>` : ""}`;
+
 function parseSynced(values) {
   try { return values ? JSON.parse(values[0]) : []; } catch { return []; }
 }
@@ -148,8 +153,11 @@ function generationHtml(d) {
     html += `<div class="kvblock"><div class="klabel">${label("lora")}</div>
       <div class="chiprow">${by.get("lora").map((v) => `<span class="badgechip">${esc(v)}</span>`).join("")}</div></div>`;
   }
+  // Die Musik-Angaben eines Songs stehen bearbeitbar unter KURATIERT
+  // (ADR 0101), nicht noch einmal hier.
+  const edited = d.media_kind === "audio" ? MUSIC_FIELDS : [];
   const misc = [...by.keys()].filter((f) =>
-    !["model", "seed", "lora", "tool", "lyrics_synced", "song_sections", ...CHIP_FIELDS, ...BLOCK_FIELDS].includes(f));
+    !["model", "seed", "lora", "tool", "lyrics_synced", "song_sections", ...CHIP_FIELDS, ...BLOCK_FIELDS, ...edited].includes(f));
   if (misc.length) {
     html += `<div class="kvgrid">${misc.map((f) => `
       <div><div class="klabel">${label(f)}</div>
@@ -392,6 +400,7 @@ export function initDetail() {
         <textarea id="pNotes" rows="2" placeholder="${STRINGS.curateNotesPlaceholder}"></textarea>
         <input id="pDate" autocomplete="off" placeholder="${esc(STRINGS.curateDatePlaceholder)}" title="${esc(STRINGS.curateDateTitle)}">
         <div class="vdim" id="pDateErr" hidden></div>
+        ${d.media_kind === "audio" ? `<div id="pFields"></div>` : ""}
       </div>
       ${generationHtml(d)}
       ${hasWorkflow ? `<div class="section" data-sec="workflow">${sechead(STRINGS.sectionWorkflow, wfEmbedded ? "ComfyUI" : STRINGS.workflowGeneratedBadge)}
@@ -405,7 +414,7 @@ export function initDetail() {
           <div><span>${STRINGS.fileSize}</span><span class="vmono">${fmtBytes(d.file_size)}</span></div>
           ${d.media_kind === "audio" ? `<div><span>${STRINGS.fileLoudness}</span><span class="vmono" id="pLoud">${STRINGS.loudnessPending}</span></div>` : ""}
           ${d.embedded_picture ? `<div class="embrow"><span>${STRINGS.fileEmbeddedPicture}</span><span class="cvemb" title="${esc(STRINGS.coverEmbedded)}"><img alt=""></span></div>` : ""}
-          <div><span>${STRINGS.fileCreated}</span><span class="vmono">${esc(d.media_date || STRINGS.fileCreatedUnknown)}${d.manual.media_date ? ` <span class="vdim" title="${esc(STRINGS.fileCreatedManualTitle)}">✎ ${esc(STRINGS.fileCreatedManual)}</span>` : ""}</span></div>
+          <div><span>${STRINGS.fileCreated}</span><span class="vmono" id="pCreated">${createdHtml(d)}</span></div>
           <div><span>${STRINGS.fileAdded}</span><span class="vmono">${esc((d.first_seen_at || "").slice(0, 19).replace("T", " "))}</span></div>
           <div><span>SHA-256</span><span class="vmono" title="${esc(d.file_hash)}">${esc(d.file_hash.slice(0, 16))}…</span></div>
         </div>
@@ -431,6 +440,8 @@ export function initDetail() {
     if (d.media_kind === "audio") showLoudness(d.file_hash, mySeq);
     if (d.media_kind === "audio") mountCommentSection(panel.querySelector("#pComs"), d, sechead);
     if (d.media_kind === "audio") wireCover(d, name);
+    // Musik-Angaben von Hand (ADR 0101): wirken auf die Auswahl.
+    if (d.media_kind === "audio") mountMusicFields(panel.querySelector("#pFields"), selectionHashes());
 
     // Rating/Tag/Modell wirken auf die AUSWAHL (Einzel oder Multiselect) —
     // curate.js entscheidet zwischen Einzel-Endpunkt und Sammel-Aktion.
@@ -568,6 +579,18 @@ export function initDetail() {
   on("items-reloaded", () => { seq++; curHash = null; showEmpty(); });
   on("annotation-changed", (d) => {
     if (d.hash === curHash) renderManual(d.manual);
+  });
+  // Jahr von Hand geändert (ADR 0101): nur „Erstellt" im Datei-Block
+  // nachziehen. Das Panel wird NICHT neu gebaut: der Fokus stünde sonst
+  // nach Tab im nächsten Feld plötzlich im Leeren, und weiteres Tippen
+  // träfe die Tastenkürzel (Bewerten, Abspielen, Vergleichen).
+  on("fields-changed", async (d) => {
+    const hash = curHash;
+    if (!hash || !d.fields.includes("year") || !d.hashes.includes(hash)) return;
+    let item;
+    try { item = await getItem(hash); } catch (err) { console.warn(err); return; }
+    const el = panel.querySelector("#pCreated");
+    if (el && curHash === hash) el.innerHTML = createdHtml(item);
   });
   // Cover gesetzt/entfernt: Vorschau und Abschnitt hängen am Coverbild — neu laden.
   on("cover-changed", (d) => { if (d.hash === curHash) show(d.hash); });

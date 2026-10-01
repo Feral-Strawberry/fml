@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import socket
 
-from feral.web.__main__ import _open_browser_when_ready
+import pytest
+
+from feral.web.__main__ import _open_browser_when_ready, _run_until_stopped
 
 
 def test_open_browser_waits_for_listening_port(monkeypatch) -> None:
@@ -42,3 +44,20 @@ def test_open_browser_gives_up_without_server(monkeypatch) -> None:
     _open_browser_when_ready(
         f"http://127.0.0.1:{port}", "127.0.0.1", port, attempts=3, delay=0.01)
     assert opened == []
+
+
+def test_ctrl_c_is_a_normal_end() -> None:
+    """Strg+C im Terminal (#254): uvicorn reicht das Signal nach dem sauberen
+    Herunterfahren weiter; das endet still, nicht mit einem Traceback.
+    Jeder andere Fehler bleibt sichtbar."""
+    class Interrupted:
+        def run(self) -> None:
+            raise KeyboardInterrupt
+
+    class Broken:
+        def run(self) -> None:
+            raise OSError("address already in use")
+
+    _run_until_stopped(Interrupted())
+    with pytest.raises(OSError):
+        _run_until_stopped(Broken())

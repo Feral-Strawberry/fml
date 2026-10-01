@@ -17,6 +17,20 @@ server is only reachable at `127.0.0.1`.
 > the six-digit range and is designed for 250,000+ media. It is a hobby
 > project under active development - make backups (see "Good to know").
 
+## New in 2026.10.1
+
+This completes the audio module:
+
+- **Music details by hand:** set title, artist, album, number, year and
+  genre right in the panel, also for several selected songs at once. The
+  files stay unchanged; list, sidebar and search see the value you set.
+- **Exchanging details:** what has been filled in once travels to another
+  fml as a file, together with the time comments. Your own differing
+  details stay there unless you let the file win.
+- **Audio list for managing:** the control **☰ S M L** switches between
+  rows with a waveform and flat rows with title, artist, album, number,
+  year and genre.
+
 ## New in 2026.10
 
 - **Work quietly, pause, carry on:** two buttons in the header switch

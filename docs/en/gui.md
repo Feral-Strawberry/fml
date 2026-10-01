@@ -399,6 +399,9 @@ extracted from the files.
   later are picked up by **Admin → Maintenance → Re-scan all locations**;
   tags removed in the Finder stay in fml (✕ removes them).
 - **Notes:** free text in the panel; saves when leaving the field.
+- **Music details (songs only):** title, artist, album and more fields
+  under CURATED, see
+  [Music details by hand](audio.md#music-details-by-hand).
 - **Date by hand:** field under CURATED, for all media types. Meant for
   files whose own date is wrong (freshly ripped old CDs, scanned photos):
   `1997`, `1997-05` or `1997-05-12`, also `12.05.1997`. The date holds
@@ -430,7 +433,7 @@ For "narrow down this search, then tag/rate ALL hits" there is the
 **⚡ Bulk action** button on the right of the header above the gallery
 (next to "Reset filters"). It opens a dialog that shows what will be hit
 (the chips + hit count) and offers six actions - whether 50 or 20,000
-hits (in the audio view "Time comments → Export" is added, see
+hits (in the audio view "Exchange → Export" is added, see
 [Audio](audio.md#exchanging-comments-with-another-fml)):
 
 - **Base rating** (1-5 ★): fills **only unrated items** - existing

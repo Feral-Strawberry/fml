@@ -53,9 +53,9 @@ The most important safeguards (full write-up in
 - **A parser error stays with its file**: if an interpretation parser
   fails on one file's metadata, it is skipped for that file; the scan or
   re-interpretation of the library carries on.
-- **Comment files from another fml are untrusted input**: at most 20 MB,
-  checked before parsing, a fixed format with length and count limits,
-  accepted as `application/json` only.
+- **Exchange files from another fml (time comments, music details) are
+  untrusted input**: at most 20 MB, checked before parsing, a fixed format
+  with length and count limits, accepted as `application/json` only.
 - **Kodak Photo CD files are decoded by a capped reader** (at most 16 MiB
   read, a bounded number of rows per resolution level, the row-marker
   search runs in C): a crafted file ends quickly instead of tying up the

@@ -28,7 +28,7 @@ import {
   getOrphans, pruneOrphans, clearCache, getThumbCache, getImportRulesPreview, applyImportRules,
   getMoveout, startMoveout, startReparse, startRescan, startRecheckFiltered, startIntegrityCheck,
   startVacuum, startThumbWarm, startAudioWarm, startBackfillDates, startReindex,
-  previewCommentImport, importComments,
+  previewExchangeImport, importExchange,
 } from "../../api.js";
 import { serverMsg } from "../../servermsg.js";
 import { lastKnownStatus } from "../../status.js";
@@ -72,7 +72,7 @@ let info = null;             // /api/admin/info (teuer, zweite Stufe)
 let moveout = null;          // /api/admin/moveout
 let rulesPreview = null;     // /api/admin/import-rules
 let orphanPreview = null;    // /api/admin/orphans (nur auf Knopfdruck)
-let ciData = null;           // geladene Kommentar-Datei (#228), geht zweimal zum Server
+let ciData = null;           // geladene Austauschdatei (#228, ADR 0101), geht zweimal zum Server
 let ciPreview = null;        // letzte Vorschau dazu
 let recheck = null;          // Nachfrage-Timer, solange eine Hintergrund-Zählung läuft (#118)
 const el = (sel) => root.querySelector("#" + sel);
@@ -179,6 +179,7 @@ export function render(target) {
           <div class="mlabel">${STRINGS.ciStepRun}</div>
           <div class="armrow">
             <label id="ciSongLbl" hidden><input type="checkbox" id="ciSong"> ${STRINGS.ciSongId}</label>
+            <label id="ciOverLbl" hidden><input type="checkbox" id="ciOver"> ${STRINGS.ciOverwrite}</label>
             <button type="button" class="accent" id="ciGo" disabled>${STRINGS.ciGo}</button>
           </div>
           <div class="st" id="ciMsg"></div>
@@ -228,6 +229,7 @@ export function render(target) {
   el("ciFile").addEventListener("change", loadCommentFile);
   el("ciSource").addEventListener("input", updateCommentGo);
   el("ciSong").addEventListener("change", updateCommentGo);
+  el("ciOver").addEventListener("change", updateCommentGo);
 }
 
 export async function load() {
@@ -692,7 +694,7 @@ async function runPrune() {
   } catch (err) { msg.className = "st failed"; msg.textContent = err.message; }
 }
 
-// -- Karte: Zeitkommentare importieren (#228, ADR 0098) -----------------------------
+// -- Karte: Austausch importieren (#228, ADR 0098; Musik-Angaben ADR 0101) -----------
 
 const MAX_COMMENT_FILE = 20 * 1024 * 1024;   // = exchange.MAX_BYTES
 
@@ -702,21 +704,33 @@ function nameList(names, total) {
 }
 
 function renderCommentPreview(p) {
-  const n = (b) => ({ items: fmtNum(b.items), new: fmtNum(b.new), known: fmtNum(b.known) });
+  const fieldLabel = (f) => STRINGS.musicFieldLabels?.[f] || f;
+  // Je Fundweg: Songs, dann Kommentare und Musik-Angaben (nur, was die Datei trägt).
+  const bucket = (b, head) => `<div>${tpl(head, { items: fmtNum(b.items) })}</div>
+    ${p.comments ? `<div class="vdim">${tpl(STRINGS.ciComments, { new: fmtNum(b.new), known: fmtNum(b.known) })}</div>` : ""}
+    ${p.fields ? `<div class="vdim">${tpl(STRINGS.ciFields, { new: fmtNum(b.fields_new), same: fmtNum(b.fields_same), differing: fmtNum(b.fields_differing) })}</div>` : ""}`;
+  const differing = p.by_hash.fields_differing + p.by_song_id.fields_differing;
   el("ciPrev").innerHTML = `
-    <div>${tpl(STRINGS.ciInFile, { items: fmtNum(p.items), comments: fmtNum(p.comments) })}</div>
-    <div>${tpl(STRINGS.ciByHash, n(p.by_hash))}</div>
-    ${p.by_song_id.items ? `<div style="margin-top:6px">${tpl(STRINGS.ciBySongId, n(p.by_song_id))}</div>
+    <div>${tpl(STRINGS.ciInFile, { items: fmtNum(p.items), comments: fmtNum(p.comments), fields: fmtNum(p.fields) })}</div>
+    ${bucket(p.by_hash, STRINGS.ciByHash)}
+    ${p.by_song_id.items ? `<div style="margin-top:6px">${bucket(p.by_song_id, STRINGS.ciBySongId)}</div>
       ${nameList(p.song_id_items.map((s) => `${s.name} → ${s.here.join(", ")}`), p.by_song_id.items)}` : ""}
+    ${differing ? `<div style="margin-top:6px">${STRINGS.ciDiffering}</div>
+      ${nameList(p.differing.map((d) => tpl(STRINGS.ciDifferingRow, { name: d.name, field: fieldLabel(d.field), here: d.here, file: d.file })), differing)}` : ""}
     ${p.missing ? `<div style="margin-top:6px">${tpl(STRINGS.ciMissing, { n: fmtNum(p.missing) })}</div>
       ${nameList(p.missing_names, p.missing)}` : ""}`;
   el("ciSongLbl").hidden = !p.by_song_id.items;
+  el("ciOverLbl").hidden = !differing;
 }
 
+/** Gibt es etwas zu übernehmen? Neue Kommentare, neue Angaben, und mit dem
+ *  Häkchen auch abweichende; Suno-ID-Treffer nur mit ihrem Häkchen. */
 function updateCommentGo() {
   const p = ciPreview;
-  const fresh = p ? p.by_hash.new + (el("ciSong").checked ? p.by_song_id.new : 0) : 0;
-  el("ciGo").disabled = !fresh || !el("ciSource").value.trim();
+  const over = el("ciOver").checked;
+  const fresh = (b) => b.new + b.fields_new + (over ? b.fields_differing : 0);
+  const n = p ? fresh(p.by_hash) + (el("ciSong").checked ? fresh(p.by_song_id) : 0) : 0;
+  el("ciGo").disabled = !n || !el("ciSource").value.trim();
 }
 
 async function loadCommentFile() {
@@ -725,6 +739,7 @@ async function loadCommentFile() {
   ciData = null; ciPreview = null;
   msg.className = "st"; msg.textContent = "";
   el("ciSongLbl").hidden = true; el("ciSong").checked = false;
+  el("ciOverLbl").hidden = true; el("ciOver").checked = false;
   updateCommentGo();
   if (!file) { el("ciPrev").innerHTML = `<span class="vdim">${STRINGS.ciNoFile}</span>`; return; }
   const fail = (text) => { el("ciPrev").innerHTML = `<span class="warn">${esc(text)}</span>`; };
@@ -734,7 +749,7 @@ async function loadCommentFile() {
   } catch { return void fail(STRINGS.ciNotJson); }
   el("ciPrev").innerHTML = '<span class="vdim">…</span>';
   try {
-    ciPreview = await previewCommentImport(ciData);
+    ciPreview = await previewExchangeImport(ciData);
     renderCommentPreview(ciPreview);
   } catch (err) { ciData = null; fail(err.message); }
   updateCommentGo();
@@ -746,10 +761,14 @@ async function runCommentImport() {
   if (!source) { msg.className = "st failed"; msg.textContent = STRINGS.ciNeedSource; return; }
   el("ciGo").disabled = true;
   try {
-    const r = await importComments(ciData, source, el("ciSong").checked);
+    const r = await importExchange(ciData, source,
+      { includeSongId: el("ciSong").checked, overwriteFields: el("ciOver").checked });
     msg.className = "st done";
-    msg.textContent = tpl(STRINGS.ciDone, { added: fmtNum(r.added), known: fmtNum(r.known) });
-    ciPreview = await previewCommentImport(ciData);   // zeigt jetzt „schon da"
+    msg.textContent = tpl(STRINGS.ciDone, { added: fmtNum(r.added), known: fmtNum(r.known),
+                                            fields: fmtNum(r.fields_set), same: fmtNum(r.fields_same) })
+      + (r.fields_kept ? tpl(STRINGS.ciKept, { n: fmtNum(r.fields_kept) }) : "");
+    el("ciOver").checked = false;
+    ciPreview = await previewExchangeImport(ciData);   // zeigt jetzt „schon da"
     renderCommentPreview(ciPreview);
   } catch (err) { msg.className = "st failed"; msg.textContent = err.message; }
   updateCommentGo();
