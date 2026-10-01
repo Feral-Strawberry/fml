@@ -594,7 +594,7 @@ export function initSearch() {
   // bleiben clean); alles andere ersetzt den einen sort:-Chip.
   on("sort-changed", async (d) => {
     const preds = clonePreds().filter((p) => p.kind !== "sort");
-    if (d.sort && d.sort !== "added") {
+    if (d.sort && (d.sort !== "added" || d.explicit)) {
       preds.push({ kind: "sort", negated: false, field: "", op: "=",
                    values: [{ value: d.sort, exact: false }] });
     }

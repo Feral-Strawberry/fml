@@ -60,7 +60,7 @@ Strawberry** (zugleich der Name der GitHub-Organisation).
 - [Sicherheit](security.md) — wie fml mit **fremden** Bilddateien umgeht
   (untrusted Metadaten), Betriebsempfehlung, welche Abhängigkeiten installiert
   werden und wie sie geprüft werden (Lock mit Prüfsummen, Advisory-Check). **Vor der Weitergabe an andere lesen.**
-- [Die Testsuite](tests.md) — was die gut 900 automatischen Tests (Python und
+- [Die Testsuite](tests.md) — was die gut 1200 automatischen Tests (Python und
   Node-Tests der Oberfläche) absichern, wie man sie startet (`pytest -q`) und
   woran man das korrekte Ergebnis erkennt.
   **Nützlich als Installations-Check auf einem neuen Rechner.**

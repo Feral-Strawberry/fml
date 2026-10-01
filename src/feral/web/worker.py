@@ -8,6 +8,7 @@ Ereignisse über eine Queue zurück:
     {"ev": "started",  "id", "at"}
     {"ev": "progress", "id", "report", "current"}      (gedrosselt, ≤ 10/s)
     {"ev": "finished", "id", "result", "report", "duration"}
+    {"ev": "paused",   "id", "params", "report"}          (Halt, ADR 0093)
 
 Der Worker besitzt die EINE schreibende Verbindung für Langläufer (ADR
 0007, Nachtrag) und hält prozess-lokal einen Prozess-Pool fürs Parsen
@@ -30,8 +31,11 @@ from typing import Any
 from ..db import connect, optimize
 from ..logsetup import WORKER_LOG, setup_logging
 from ..messages import msg
-from ..processes import exit_when_parent_dies
-from .tasks import TASKS
+from ..processes import (
+    CTRL_HALT, CTRL_LOW, CTRL_QUIET, CTRL_WORKERS, default_workers, effective_workers,
+    exit_when_parent_dies, init_pool_process, set_process_priority,
+)
+from .tasks import TASKS, TaskPaused
 
 log = logging.getLogger("feral.worker")
 
@@ -40,19 +44,45 @@ LOG_INTERVAL = 10.0         # Sekunden zwischen zwei Fortschritts-Logzeilen
 
 
 def default_pool_workers() -> int:
-    return max(2, (os.cpu_count() or 4) - 2)
+    return default_workers()
 
 
 class WorkerContext:
-    """Prozess-lokale Helfer für Aufgaben (``tasks.TaskContext``)."""
+    """Prozess-lokale Helfer für Aufgaben (``tasks.TaskContext``).
+
+    ``control`` (ADR 0093): Steuerblock des Web-Prozesses — Modus Leise und
+    konfigurierte Prozesszahl; ``sync()`` übernimmt Änderungen an jeder
+    Dateigrenze (Pools umbauen, eigene Priorität setzen)."""
 
     def __init__(self, *, pool_workers: int | None, thumb_workers: int | None,
-                 thumb_low_priority: bool) -> None:
-        self.pool_workers = pool_workers or default_pool_workers()
+                 thumb_low_priority: bool, control=None) -> None:
+        self.configured = pool_workers
         self.thumb_workers = thumb_workers
         self.thumb_low_priority = thumb_low_priority
+        self.quiet = False
+        self.control = control
+        self.pool_workers = effective_workers(pool_workers, False)
         self._pool: Executor | None = None
         self._thumbs = None
+        self.sync()
+
+    def sync(self) -> None:
+        """Modus/Prozesszahl aus dem Steuerblock übernehmen (billig, wenn gleich)."""
+        if self.control is None:
+            return
+        quiet = bool(self.control[CTRL_QUIET])
+        configured = int(self.control[CTRL_WORKERS]) or None
+        low = bool(self.control[CTRL_LOW])
+        if (quiet, configured, low) == (self.quiet, self.configured, self.thumb_low_priority):
+            return
+        if quiet != self.quiet:
+            set_process_priority(quiet=quiet, low=False)
+            log.info("Background mode: %s", "quiet" if quiet else "normal")
+        self.quiet, self.configured, self.thumb_low_priority = quiet, configured, low
+        self.thumb_workers = configured
+        self.pool_workers = effective_workers(configured, quiet)
+        if self._thumbs is not None:
+            self._thumbs.reconfigure(self.pool_workers, quiet=quiet, low_priority=low)
 
     def pool(self) -> Executor:
         if self._pool is None:
@@ -60,7 +90,7 @@ class WorkerContext:
             # bleiben sie nach einem harten Worker-Tod als Waisen liegen.
             self._pool = ProcessPoolExecutor(
                 max_workers=self.pool_workers, mp_context=mp.get_context("spawn"),
-                initializer=exit_when_parent_dies,
+                initializer=init_pool_process, initargs=(False, self.quiet),
             )
             log.info("Process pool started: %d processes", self.pool_workers)
         return self._pool
@@ -69,8 +99,8 @@ class WorkerContext:
         if self._thumbs is None:
             from ..thumbs import ThumbPool
 
-            self._thumbs = ThumbPool(workers=self.thumb_workers,
-                                     low_priority=self.thumb_low_priority)
+            self._thumbs = ThumbPool(workers=effective_workers(self.thumb_workers, self.quiet),
+                                     low_priority=self.thumb_low_priority, quiet=self.quiet)
         return self._thumbs
 
     def release(self) -> None:
@@ -101,7 +131,11 @@ def _label_text(label: Any) -> str:
 
 
 def run_task(conn, task: dict[str, Any], ctx, emit) -> None:
-    """Eine Aufgabe ausführen und ihre Ereignisse über ``emit`` melden."""
+    """Eine Aufgabe ausführen und ihre Ereignisse über ``emit`` melden.
+
+    Jede Fortschrittsmeldung ist eine Dateigrenze (ADR 0093): dort übernimmt
+    der Worker Modus/Prozesszahl und hält an, wenn der Web-Prozess es
+    verlangt (``TaskPaused`` → Ereignis ``paused`` mit Fortsetzung)."""
     task_id, name = task["id"], task["name"]
     fn = TASKS.get(name)
     started = time.time()
@@ -112,11 +146,17 @@ def run_task(conn, task: dict[str, Any], ctx, emit) -> None:
     log.info("Start %s [%s] queue=%s", _label_text(task.get("label")), name,
              task.get("queue_pending", 0))
 
+    control = getattr(ctx, "control", None)
+
     def progress(*, report=None, current=None) -> None:
         nonlocal last_sent, last_logged
         if report is not None:
             state["report"] = report
         state["current"] = current
+        if control is not None:
+            ctx.sync()
+            if control[CTRL_HALT]:
+                raise TaskPaused()
         now = time.monotonic()
         if now - last_sent >= PROGRESS_INTERVAL:
             last_sent = now
@@ -135,6 +175,17 @@ def run_task(conn, task: dict[str, Any], ctx, emit) -> None:
             conn.commit()
         outcome = _label_text(result.get("summary")) if isinstance(result, dict) else str(result)
         log.info("Done %s after %.1fs: %s", name, time.time() - started, outcome or "ok")
+    except TaskPaused as paused:
+        # Halt an der Dateigrenze: Bisheriges bleibt (commit), die Engine
+        # stellt die Fortsetzung wieder in die Schlange.
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        log.info("Paused %s after %.1fs", name, time.time() - started)
+        emit({"ev": "paused", "id": task_id, "params": paused.params,
+              "report": state["report"]})
+        return
     except Exception as exc:  # Aufgabe kaputt ≠ Worker kaputt
         try:
             conn.rollback()
@@ -149,7 +200,7 @@ def run_task(conn, task: dict[str, Any], ctx, emit) -> None:
 
 def run_worker(db_path: str, task_queue, status_queue, *, log_dir: str | None = None,
                pool_workers: int | None = None, thumb_workers: int | None = None,
-               thumb_low_priority: bool = True) -> None:
+               thumb_low_priority: bool = True, control=None) -> None:
     """Einstieg des Worker-Prozesses (importierbar — Windows ``spawn``)."""
     # Strg+C in der Konsole trifft die ganze Prozessgruppe: der Web-Prozess
     # fährt herunter und schickt uns „stop" — wir selbst ignorieren SIGINT.
@@ -160,7 +211,7 @@ def run_worker(db_path: str, task_queue, status_queue, *, log_dir: str | None = 
     setup_logging(log_dir, WORKER_LOG)
     log.info("Worker started (pid %d)", os.getpid())
     ctx = WorkerContext(pool_workers=pool_workers, thumb_workers=thumb_workers,
-                        thumb_low_priority=thumb_low_priority)
+                        thumb_low_priority=thumb_low_priority, control=control)
     conn = connect(db_path)
     try:
         while True:
@@ -172,6 +223,7 @@ def run_worker(db_path: str, task_queue, status_queue, *, log_dir: str | None = 
             if not isinstance(message, dict) or message.get("op") == "stop":
                 log.info("Worker stopped (stop).")
                 break
+            ctx.sync()
             run_task(conn, message, ctx, status_queue.put)
             ctx.release()
             optimize(conn)  # Planer-Statistik nach jedem Schreib-Lauf (#85)

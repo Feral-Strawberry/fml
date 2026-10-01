@@ -17,7 +17,7 @@ before(async () => {
   state = await bootAdmin("/admin/maintenance");
   status = await import("../../src/feral/web/static/js/status.js");
   mockApi.post("/api/admin/rescan", () => ({ queued: true }));
-  mockApi.post("/api/admin/thumbcache/clear", () => ({ deleted: 7 }));
+  mockApi.post("/api/admin/cache/clear", ({ params }) => ({ queued: "cache_clear", kind: params.get("kind") }));
   mockApi.post("/api/admin/prune", ({ body }) => ({ pruned: body && body.under ? 1 : 3 }));
   mockApi.get("/api/admin/orphans", ({ params }) => params.get("under")
     ? { total: 1, sample: ["/ext/x.png"], under: params.get("under") }
@@ -34,9 +34,11 @@ before(async () => {
 test("vier Karten in einer Reihe, je Aktion eine Zeile; keine Overlay-Reste", () => {
   const cards = [...document.querySelectorAll(".row.c4 > .card[data-card]")].map((c) => c.dataset.card);
   assert.deepEqual(cards, ["raw", "thumbs", "db", "reeval"]);
-  assert.equal(document.querySelectorAll(".action[data-action]").length, 9, "neun Aktionszeilen in den vier Karten");
+  assert.equal(document.querySelectorAll(".action[data-action]").length, 9, "neun Aktionszeilen in den vier Karten (Cache leeren wohnt in der Cache-Karte, #227)");
+  assert.ok(document.querySelector('[data-action="recheck"]'), "Aussortierte neu prüfen (#230)");
   // „Audio analysieren" (A4 #161) nur mit Audio-Modul — /api/stats ohne audio.
   assert.equal(document.querySelector('[data-action="audiowarm"]').hidden, true);
+  assert.equal(document.getElementById("ciRow").hidden, true, "Kommentar-Import (#228) nur mit Audio-Modul");
   assert.equal(document.querySelector(".maintbtn"), null, "alte Knopfleiste ist weg");
   assert.equal(document.querySelector(".pickoverlay"), null, "kein Overlay offen");
   assert.ok(document.getElementById("moCard"), "Rausverschieben ist eine Karte");
@@ -73,14 +75,52 @@ test("Zustand je Zeile: läuft mit Balken → Warteschlange mit Position → zul
   assert.equal(document.querySelector('[data-st="reindex"]').textContent, "", "ohne Verlaufseintrag leer");
 });
 
-test("Einreihen und synchrone Aktionen melden inline", async () => {
+test("Einreihen meldet inline", async () => {
   click(document.querySelector('[data-run="rescan"]'));
   await flush();
   assert.equal(posts("/api/admin/rescan"), 1);
   assert.ok(document.querySelector('[data-st="rescan"]').classList.contains("queued"));
-  click(document.querySelector('[data-run="thumbs"]'));
+});
+
+test("Angehaltene Warteschlange (#236): Einreihen sagt, dass die Aufgabe beim Fortsetzen startet", async () => {
+  mockApi.post("/api/admin/vacuum", () => ({ queued: true }));
+  state.status = { ...state.status, paused: true, queue_pending: 1 };
+  await status.pollOnce();
+  click(document.querySelector('[data-run="vacuum"]'));
   await flush();
-  assert.ok(document.querySelector('[data-st="thumbs"]').textContent.includes("7"), "Zahl der gelöschten Cache-Dateien");
+  assert.match(document.querySelector('[data-st="vacuum"]').textContent, /angehalten, startet beim Fortsetzen/);
+  state.status = { ...state.status, paused: false, queue_pending: 0 };
+  await status.pollOnce();
+});
+
+test("Karte „Cache“ (#227): Zeile je Art mit Anzahl/Größe/Ort; Löschen nach Rückfrage mit Größe und Folge, als Aufgabe", async () => {
+  const rows = [...document.querySelectorAll("#cacheRows tr[data-cache]")];
+  assert.deepEqual(rows.map((r) => r.dataset.cache), ["thumbs", "audio_analysis", "audio_proxy", "preview"]);
+  const cells = rows[2].querySelectorAll("td").map((td) => td.textContent.trim());
+  assert.ok(cells[0].startsWith("Audio-Wiedergabekopien"));
+  assert.equal(cells[1], "2");
+  assert.equal(cells[2], "80 MB");
+  assert.ok(rows[2].textContent.includes("/x/cache/audio"));
+  assert.equal(rows[3].querySelector("[data-cache-clear]").disabled, true, "leerer Cache: nichts zu löschen");
+  // /api/stats ohne audio → Modul aus: Audio-Zeilen mit Inhalt sagen, dass sie weg können.
+  assert.ok(rows[1].textContent.includes("Audio-Modul aus"), rows[1].textContent);
+  assert.ok(!rows[0].textContent.includes("Audio-Modul aus"));
+  assert.ok(document.getElementById("cacheTotal").textContent.includes("gesamt"));
+
+  click(rows[2].querySelector("[data-cache-clear]"));
+  await flush();
+  const text = document.querySelector(".dlgtext").textContent;
+  assert.match(text, /Audio-Wiedergabekopien löschen \(80(\.0|,0)? MB, 2 Dateien\)\?/);
+  assert.ok(text.includes("beim nächsten Abspielen"), "sagt, was danach passiert");
+  click(document.getElementById("dlgCancel"));
+  await flush();
+  assert.equal(posts("/api/admin/cache/clear"), 0, "Abbrechen löscht nichts");
+  click(document.querySelector('[data-cache-clear="audio_proxy"]'));
+  await flush();
+  click(document.getElementById("dlgOk"));
+  await flush();
+  assert.equal(mockApi.calls.filter((c) => c.method === "POST" && c.path.startsWith("/api/admin/cache/clear")).at(-1).params.get("kind"), "audio_proxy");
+  assert.ok(document.querySelector('tr[data-cache="audio_proxy"] .st.queued'), "Zeile zeigt „eingereiht“");
 });
 
 test("Verwaiste Fundorte: Bereich → Vorschau nur auf Knopfdruck → scharf → aufräumen; Bereichswechsel entwertet die Vorschau", async () => {
@@ -235,4 +275,9 @@ test("Gemerkter Stand (#118): Meter zeigen Stand + Zeit; „Fundorte prüfen“/
   assert.ok(round >= 2, `Nachfrage während der Hintergrund-Zählung (${round})`);
   assert.ok(thumbs().textContent.includes("9") && thumbs().textContent.includes("Stand"), thumbs().textContent);
   assert.equal(document.getElementById("mtCacheCount").disabled, false);
+  // Cache-Karte ohne Aufschlüsselung: „?" und Text getrennt im Kennzahl-Kasten (#227-Befund).
+  const cacheMh = document.querySelector("#cacheRows .meter .mh");
+  assert.ok(cacheMh, "Kennzahl-Kasten wie die anderen Karten");
+  assert.equal(cacheMh.querySelector("b").textContent, "?");
+  assert.equal(cacheMh.querySelector("span").textContent, "noch nicht gezählt");
 });

@@ -29,13 +29,17 @@ Alle Tabellen mit Spalten, Schlüsseln und Indexen samt ER-Diagramm stehen
 in der [Schema-Referenz](schema.md) (aus dem echten Schema erzeugt). Kurz:
 `items` ist der Hub (eine Zeile je Datei-Hash), daran hängen Fundorte,
 Roh-Metadaten (Schicht 1), interpretierte Felder (Schicht 2), die manuelle
-Schicht (Bewertung, Tags, Notizen, gespeicherte Suchen), das Ranking-Modul,
+Schicht (Bewertung, Tags, Notizen, Datum von Hand, Zeitkommentare, Cover,
+gespeicherte Suchen samt eigener Reihenfolge), das Ranking-Modul,
 der Volltextindex und die Betriebstabellen (Sperrliste, Import-Log,
-Watch-Gedächtnis, Probleme, gemerkte Kennzahlen).
+Watch-Gedächtnis, Probleme, gemerkte Kennzahlen, Warteschlange).
 
 Zugriff auf die manuelle Schicht läuft über `feral/db/manual.py`
-(`set_rating`, `set_notes`, `add_tag`, `remove_tag`, `annotations_for`,
-`list_tags`) — idempotent, `set_rating(0)` löscht die Bewertung.
+(`set_rating`, `set_notes`, `set_model`, `add_tag`, `remove_tag`,
+`set_media_date`, `add_comment`, `set_cover`, `annotations_for`,
+`list_tags`) — idempotent, `set_rating(0)` löscht die Bewertung. Tags
+aus dem Finder (macOS) tragen ihre Herkunft; eine Zuordnung von Hand
+wird davon nie überschrieben.
 
 ## Wichtige Eigenschaften
 

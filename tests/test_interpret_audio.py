@@ -435,3 +435,93 @@ def test_suno_model_falls_back_to_system_version():
     items = [item("isobmff:uuid", video_ffprobe.C2PA_UUID.hex(), data=blob),
              item("isobmff:format.tag", "comment", SUNO_COMMENT)]
     assert fields(suno.parse(items))["model"] == ["Suno v5.5"]
+
+
+# -- Musiksammlung: Interpret, Album, Nummern, Jahr, Genre (#224) ---------------
+
+def test_id3v2_music_tags_with_numbers_year_and_genre_ref(tmp_path):
+    tag = ab.id3_tag(
+        ab.id3_frame("TPE1", ab.text_frame("Die Ärzte"))
+        + ab.id3_frame("TPE2", ab.text_frame("Die Ärzte"))
+        + ab.id3_frame("TALB", ab.text_frame("Debil"))
+        + ab.id3_frame("TRCK", ab.text_frame("03/12"))
+        + ab.id3_frame("TPOS", ab.text_frame("1/2"))
+        + ab.id3_frame("TDRC", ab.text_frame("1984-05-12"))
+        + ab.id3_frame("TCON", ab.text_frame("(43)")),
+    )
+    ex = audio_extract.extract(write(tmp_path, "a.mp3", ab.mp3(tag)), container="mp3")
+    f = fields(audio.parse(ex.items))
+    assert f["artist"] == ["Die Ärzte"] and f["album_artist"] == ["Die Ärzte"]
+    assert f["album"] == ["Debil"] and f["track"] == ["3"] and f["disc"] == ["1"]
+    assert f["year"] == ["1984"] and f["genre"] == ["Punk"]
+    assert audio.tag_year(ex.items) == 1984
+    assert audio.VERSION == 4   # v3: Songtext mit Zeiten, v4: Solo-Marken geschätzt (#234)
+
+
+def test_id3v1_only_fills_what_id3v2_lacks(tmp_path):
+    tag = ab.id3_tag(ab.id3_frame("TPE1", ab.text_frame("Long Artist Name Beyond Thirty Chars")))
+    tail = ab.id3v1(title="t", artist="Long Artist Name Beyond Thirty", track=7, genre=17)
+    ex = audio_extract.extract(write(tmp_path, "b.mp3", ab.mp3(tag, tail=tail)), container="mp3")
+    f = fields(audio.parse(ex.items))
+    assert f["artist"] == ["Long Artist Name Beyond Thirty Chars"]
+    assert f["track"] == ["7"] and f["genre"] == ["Rock"]
+
+
+def test_vorbis_riff_and_probe_tag_names():
+    vorbis = [item("flac:comment", "ALBUMARTIST", "Various Artists"),
+              item("flac:comment", "ARTIST", "Nena"),
+              item("flac:comment", "ARTIST", "Kim Wilde"),
+              item("flac:comment", "ALBUM", "Bravo Hits 1"),
+              item("flac:comment", "TRACKNUMBER", "12"),
+              item("flac:comment", "DATE", "1992"),
+              item("flac:comment", "GENRE", "Pop"),
+              item("flac:comment", "GENRE", "Rock")]
+    f = fields(audio.parse(vorbis))
+    assert f["album_artist"] == ["Various Artists"]
+    assert f["artist"] == ["Nena", "Kim Wilde"] and f["genre"] == ["Pop", "Rock"]
+    assert f["track"] == ["12"] and f["year"] == ["1992"]
+    riff = [item("riff:INFO", "IART", "Band"), item("riff:INFO", "IPRD", "Demo"),
+            item("riff:INFO", "ICRD", "1997-03-01"), item("riff:INFO", "IGNR", "Punk")]
+    assert fields(audio.parse(riff)) == {"artist": ["Band"], "album": ["Demo"],
+                                         "year": ["1997"], "genre": ["Punk"]}
+    m4a = [item("isobmff:format.tag", "artist", "A"), item("isobmff:format.tag", "album_artist", "AA"),
+           item("isobmff:format.tag", "album", "Alb"), item("isobmff:format.tag", "track", "2/9"),
+           item("isobmff:format.tag", "disc", "2/2"), item("isobmff:format.tag", "date", "2003-01-01T00:00:00Z"),
+           item("isobmff:format.tag", "genre", "Jazz")]
+    f = fields(audio.parse(m4a))
+    assert (f["artist"], f["album_artist"], f["album"], f["track"], f["disc"], f["year"],
+            f["genre"]) == (["A"], ["AA"], ["Alb"], ["2"], ["2"], ["2003"], ["Jazz"])
+
+
+def test_normalize_edge_cases():
+    assert audio._normalize("track", "0/12") == ""
+    assert audio._normalize("year", "0000") == "" and audio._normalize("year", "?") == ""
+    assert audio._normalize("genre", "(17)Hardrock") == "Hardrock"
+    assert audio._normalize("genre", "(RX)") == "Remix" and audio._normalize("genre", "200") == ""
+    assert audio.tag_year([]) is None
+
+
+def test_odd_number_tags_never_raise():
+    """Fremde Tags: "²" zählt für isdigit(), ist für int() aber keine Zahl, und
+    eine Ziffernfolge über 4300 Stellen sprengt int(). Beides wird übergangen."""
+    assert audio._normalize("genre", "²") == "²"
+    assert audio._normalize("genre", "9" * 5000) == "9" * 5000
+    assert audio._normalize("track", "9" * 5000) == "999999"
+    assert audio._normalize("disc", "①") == ""
+
+
+def test_one_failing_parser_does_not_stop_the_others(monkeypatch):
+    """Ein Parserfehler an einer Datei darf weder Scan noch Neu-Interpretieren
+    abbrechen: der Parser fällt für diese Datei aus, die übrigen laufen."""
+    from feral.interpret import registry
+
+    class Broken:
+        NAME, VERSION = "broken", 1
+
+        @staticmethod
+        def parse(items):
+            raise ValueError("boom")
+
+    monkeypatch.setattr(registry, "PARSERS", [Broken, *registry.PARSERS])
+    items = [item("id3v2:TIT2", "TIT2", "Titel"), item("mp3:stream0", "codec_type", "audio")]
+    assert [i.parser for i in registry.interpret_items(items)] == ["audio"]

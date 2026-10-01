@@ -11,6 +11,7 @@ import { mockApi } from "./apimock.mjs";
 
 let state;
 const resolved = [];
+const rejected = [];
 let blockedTotal = 250;
 const blockedRows = (n, offset) => Array.from({ length: n }, (_, i) => ({
   file_hash: (offset + i).toString(16).padStart(64, "0"), reason: { key: "blockedRejected" },
@@ -32,6 +33,10 @@ before(async () => {
     const total = q ? (q.includes("IMG_12") ? 11 : 0) : blockedTotal;
     const n = Math.max(0, Math.min(limit, total - offset));
     return { blocked: blockedRows(n, offset), total, total_all: blockedTotal, offset, limit };
+  });
+  mockApi.post("/api/admin/issues/reject", ({ params }) => {
+    rejected.push(params.get("kind") || params.get("issue_id"));
+    return params.get("kind") ? { queued: "issues_reject", expected: 2 } : { rejected: 1, resolved: 1, skipped: 0 };
   });
   mockApi.post("/api/admin/issues/resolve", ({ params }) => { resolved.push(params.get("kind") || params.get("issue_id") || "all"); return { resolved: 2 }; });
   mockApi.post("/api/admin/blocked/remove", ({ params }) => {
@@ -56,6 +61,33 @@ test("Karten je Fehlerart mit Zählern, Alle-Knopf mit echter Zahl, Sperrliste g
   assert.equal(document.getElementById("blkPrev").disabled, true);
   assert.equal(document.getElementById("blkNext").disabled, false);
   assert.equal(mockApi.callsTo("/api/admin/blocked")[0].params.get("limit"), "100");
+});
+
+test("„kein Vorschaubild“: ablehnen je Eintrag sofort, alle der Art nach Rückfrage als Aufgabe (#217)", async () => {
+  const thumb = document.querySelector('.issuekind[data-issuekind="thumbnail"]');
+  const failed = document.querySelector('.issuekind[data-issuekind="failed"]');
+  assert.equal(failed.querySelector("[data-reject], [data-reject-kind]"), null, "nur bei »kein Vorschaubild«");
+  const blockedLoads = mockApi.callsTo("/api/admin/blocked").length;
+  click(thumb.querySelector('[data-reject="1"]'));
+  await flush(10);
+  assert.deepEqual(rejected, ["1"]);
+  assert.equal(document.getElementById("issMsg").textContent, "1 abgelehnt.");
+  assert.ok(mockApi.callsTo("/api/admin/blocked").length > blockedLoads, "Sperrliste lädt mit");
+
+  const all = document.querySelector('[data-reject-kind="thumbnail"]');
+  assert.match(all.textContent, /alle 2 dieser Art ablehnen/);
+  click(all);
+  await flush();
+  assert.match(document.querySelector(".dlgtext").textContent, /Alle 2 Medien mit „kein Vorschaubild“ ablehnen/);
+  click(document.getElementById("dlgCancel"));
+  await flush();
+  assert.deepEqual(rejected, ["1"], "Abbrechen lehnt nichts ab");
+  click(document.querySelector('[data-reject-kind="thumbnail"]'));
+  await flush();
+  click(document.getElementById("dlgOk"));
+  await flush(10);
+  assert.deepEqual(rejected, ["1", "thumbnail"]);
+  assert.match(document.getElementById("issMsg").textContent, /eingereiht/);
 });
 
 test("Blättern: Weiter lädt die nächste Seite, Zurück die vorige", async () => {

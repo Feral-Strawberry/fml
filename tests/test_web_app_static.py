@@ -148,6 +148,13 @@ def test_batch_annotate_endpoint(tmp_path) -> None:
         for h in hashes:
             a = manual.annotations_for(conn, h)
             assert a["rating"] == 4 and a["model"] == "Midjourney V5"
+        # Manuelles Datum (ADR 0096): gültig setzt, ungültig ist ein 400.
+        result = endpoint(BatchAnnotateRequest(hashes=hashes[:2], media_date="1997-05"))
+        assert result["manual"]["media_date"] == "1997-05"
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as exc:
+            endpoint(BatchAnnotateRequest(hashes=hashes, media_date="1997-13"))
+        assert exc.value.status_code == 400
         conn.close()
     finally:
         app.state.engine.shutdown()
@@ -448,6 +455,62 @@ def test_instanz_in_stats_and_config_roundtrip(tmp_path) -> None:
         filters.library_root_provider = lambda: None
 
 
+def test_changed_import_rules_recheck_filtered(tmp_path) -> None:
+    """#230: Speichern GEÄNDERTER Import-Regeln reiht „Aussortierte neu
+    prüfen" mit den neuen Regeln ein; Speichern ohne Regeländerung nicht."""
+    from feral.web.app import ConfigUpdate
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text("", encoding="utf-8")
+    app = create_app(tmp_path / "t.sqlite", config_path=cfg)
+    try:
+        ep = {r.path: r.endpoint for r in app.routes if hasattr(r, "endpoint")}
+        queued = []
+        app.state.engine.enqueue_recheck_filtered = queued.append
+
+        ep["/api/admin/config"](ConfigUpdate(thumbnail_size=320, instanz_name="X"))
+        assert queued == []
+        ep["/api/admin/config"](ConfigUpdate(thumbnail_size=320,
+                                             import_min_date="1980-01-02"))
+        assert [r["min_date"] for r in queued] == ["1980-01-02"]
+        ep["/api/admin/recheck-filtered"]()
+        assert len(queued) == 2
+    finally:
+        app.state.engine.shutdown()
+        app.state.thumb_pool.shutdown()
+
+
+def test_rules_changed_outside_the_admin_recheck_on_start(tmp_path) -> None:
+    """#230-Nachtrag: Regeln, die per Hand oder vom Windows-Starter in die
+    config.toml kamen, lösen die Neuprüfung beim nächsten Start aus — einmal,
+    nicht bei jedem Start."""
+    from feral.web import engine as engine_mod
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text("", encoding="utf-8")
+    db = tmp_path / "t.sqlite"
+    queued: list = []
+    orig = engine_mod.ScanEngine.enqueue_recheck_filtered
+    engine_mod.ScanEngine.enqueue_recheck_filtered = lambda self, rules=None: queued.append(rules)
+    try:
+        def start():
+            app = create_app(db, config_path=cfg)
+            app.state.engine.shutdown()
+            app.state.thumb_pool.shutdown()
+
+        start()
+        assert len(queued) == 1                  # erster Start: kein gemerkter Stand
+        start()
+        assert len(queued) == 1                  # gleiche Regeln: nichts
+        cfg.write_text('[import]\nmin_date = "1980-01-02"\n', encoding="utf-8")
+        start()
+        assert [r["min_date"] for r in queued[1:]] == ["1980-01-02"]
+        start()
+        assert len(queued) == 2
+    finally:
+        engine_mod.ScanEngine.enqueue_recheck_filtered = orig
+
+
 def _get_ep(app, path):
     """GET-Endpunkt zu einem Pfad, den auch ein POST teilt (/api/folders)."""
     return next(r.endpoint for r in app.routes
@@ -616,7 +679,7 @@ def test_orphans_endpoint_counts_scope_and_samples(tmp_path) -> None:
 def test_slow_counts_endpoints_remember_stand(tmp_path) -> None:
     """#118 (ADR 0077): /api/admin/info zählt nichts mehr auf der Platte;
     „Fundorte prüfen" (überall) und „Cache zählen" setzen den gemerkten
-    Stand, Cache leeren setzt ihn auf 0, Aufräumen im Teilbereich zählt im
+    Stand (samt Aufschlüsselung, #227), Aufräumen im Teilbereich zählt im
     Hintergrund nach."""
     from feral.db import connect, store_extraction
     from feral.extract.types import ContainerExtraction
@@ -625,7 +688,7 @@ def test_slow_counts_endpoints_remember_stand(tmp_path) -> None:
     db = tmp_path / "t.sqlite"
     cache = tmp_path / "cache"
     (cache / "ab").mkdir(parents=True)
-    (cache / "ab" / "x.jpg").write_bytes(b"jpegdaten")
+    (cache / "ab" / ("ab" * 32 + ".jpg")).write_bytes(b"jpegdaten")
     app = create_app(db, thumb_cache=cache)
     try:
         conn = connect(db)
@@ -645,10 +708,8 @@ def test_slow_counts_endpoints_remember_stand(tmp_path) -> None:
 
         assert _get_ep(app, "/api/admin/thumbcache")()["count"] == 1
         assert info()["cache"]["bytes"] == 9
-        clear = next(r.endpoint for r in app.routes
-                     if getattr(r, "path", None) == "/api/admin/thumbcache/clear")
-        assert clear()["deleted"] == 1
-        assert info()["cache"] == {**info()["cache"], "count": 0, "bytes": 0}
+        assert info()["caches"]["parts"][0] == {**info()["caches"]["parts"][0],
+                                                "kind": "thumbs", "count": 1, "bytes": 9}
 
         prune = next(r.endpoint for r in app.routes if getattr(r, "path", None) == "/api/admin/prune")
         assert prune(PruneRequest(under="/weg"))["pruned"] == 2
@@ -664,8 +725,9 @@ def test_slow_counts_endpoints_remember_stand(tmp_path) -> None:
     app = create_app(db, thumb_cache=cache)
     try:
         info = _get_ep(app, "/api/admin/info")()
-        assert info["orphans"]["count"] == 0 and info["cache"]["count"] == 0
+        assert info["orphans"]["count"] == 0 and info["cache"]["count"] == 1
         assert "stamp" not in info["cache"]
+        assert info["caches"]["parts"][0]["count"] == 1, "Aufschlüsselung überlebt (#227)"
     finally:
         app.state.engine.shutdown()
         app.state.thumb_pool.shutdown()

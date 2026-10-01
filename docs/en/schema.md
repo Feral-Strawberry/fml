@@ -78,16 +78,19 @@ erDiagram
     text created_at
     text updated_at
     text model
+    text media_date
   }
   tags {
     integer id PK
     text name
     text created_at
+    integer color
   }
   item_tags {
     text file_hash PK, FK
     integer tag_id PK, FK
     text created_at
+    text source
   }
   time_comments {
     integer id PK
@@ -96,6 +99,7 @@ erDiagram
     text text
     text created_at
     text updated_at
+    text source
   }
   covers {
     text file_hash PK, FK
@@ -109,6 +113,11 @@ erDiagram
     text expression
     text created_at
     text updated_at
+  }
+  folder_order {
+    integer folder_id PK, FK
+    text file_hash PK, FK
+    real position
   }
   rankings {
     integer id PK
@@ -179,6 +188,15 @@ erDiagram
     text value
     text updated_at
   }
+  task_queue {
+    integer id PK
+    integer ord
+    text name
+    text params
+    text label
+    text key
+    integer priority
+  }
   items ||--o{ file_locations : "file_hash"
   items ||--o{ raw_metadata : "file_hash"
   items ||--o{ interpreted_metadata : "file_hash"
@@ -188,6 +206,8 @@ erDiagram
   items ||--o{ time_comments : "file_hash"
   items ||--o{ covers : "cover_hash"
   items ||--o| covers : "file_hash"
+  items ||--o{ folder_order : "file_hash"
+  smart_folders ||--o{ folder_order : "folder_id"
   rankings ||--o{ ranking_duels : "ranking_id"
   rankings ||--o{ ranking_scores : "ranking_id"
   items |o..o{ ranking_scores : "file_hash"
@@ -281,6 +301,7 @@ Indexes: `idx_interpreted_field_value`, `idx_interpreted_hash`
 | `created_at` | text |  | yes |  |
 | `updated_at` | text |  | yes |  |
 | `model` | text |  |  |  |
+| `media_date` | text |  |  |  |
 
 Indexes: `idx_annotations_rating`
 
@@ -291,6 +312,7 @@ Indexes: `idx_annotations_rating`
 | `id` | integer | PK |  |  |
 | `name` | text |  | yes |  |
 | `created_at` | text |  | yes |  |
+| `color` | integer |  |  |  |
 
 Indexes: none
 
@@ -301,6 +323,7 @@ Indexes: none
 | `file_hash` | text | PK · FK → `items.file_hash` | yes |  |
 | `tag_id` | integer | PK · FK → `tags.id` | yes |  |
 | `created_at` | text |  | yes |  |
+| `source` | text |  |  |  |
 
 Indexes: `idx_item_tags_tag`
 
@@ -314,6 +337,7 @@ Indexes: `idx_item_tags_tag`
 | `text` | text |  | yes |  |
 | `created_at` | text |  | yes |  |
 | `updated_at` | text |  | yes |  |
+| `source` | text |  |  |  |
 
 Indexes: `idx_time_comments_item`
 
@@ -337,6 +361,16 @@ Indexes: `idx_covers_cover`
 | `expression` | text |  | yes |  |
 | `created_at` | text |  | yes |  |
 | `updated_at` | text |  | yes |  |
+
+Indexes: none
+
+#### `folder_order` · PK `folder_id, file_hash`
+
+| Column | Type | Key | Required | Default |
+| --- | --- | --- | --- | --- |
+| `folder_id` | integer | PK · FK → `smart_folders.id` | yes |  |
+| `file_hash` | text | PK · FK → `items.file_hash` | yes |  |
+| `position` | real |  | yes |  |
 
 Indexes: none
 
@@ -457,6 +491,20 @@ Indexes: `idx_scan_issues_open`
 | `key` | text | PK |  |  |
 | `value` | text |  | yes |  |
 | `updated_at` | text |  | yes |  |
+
+Indexes: none
+
+#### `task_queue` · PK `id`
+
+| Column | Type | Key | Required | Default |
+| --- | --- | --- | --- | --- |
+| `id` | integer | PK |  |  |
+| `ord` | integer |  | yes |  |
+| `name` | text |  | yes |  |
+| `params` | text |  | yes |  |
+| `label` | text |  | yes |  |
+| `key` | text |  | yes |  |
+| `priority` | integer |  | yes | `0` |
 
 Indexes: none
 <!-- schema:ende -->

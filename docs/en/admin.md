@@ -23,7 +23,8 @@
      everything cataloged (ADR 0041, I2) —, with metadata, interpreted,
      thumbnails with cache size, DB size with WAL). Next to them three
      panels: **composition by type** (stacked bar with table legend;
-     underneath images and videos, each with their share of the item count
+     underneath images and videos, with the audio module audio as well,
+     each with their share of the item count
      and the storage they occupy across the whole collection — the sum is
      "total cataloged"), **growth of the last 30 days** (columns per day,
      today highlighted) and **years** by creation date. The numbers come
@@ -67,10 +68,11 @@
    thumbnails, database, re-evaluation) with a motivating key figure at
    the top and one row per action: title, explanation, button, **state
    right in the row** (running with bar · queued with position · last ✓
-   result with time). Below them three cards of their own with the same
-   logic in three steps and arming: **Move rejected out**, **Import rules
-   on the collection** and **Clean up orphaned locations** — see
-   "Maintenance actions".
+   result with time). Below them the **Cache** card (what is cached on
+   disk, per kind with Delete) and cards of their own with the same logic
+   in three steps: **Move rejected out**, **Import rules on the
+   collection**, with the audio module **Import time comments**, and
+   **Clean up orphaned locations** — see "Maintenance actions".
 5. **Issues** (`/admin/issues`) — one card per error kind with an honest
    counter, the most recent entries and "dismiss all N of this kind"; the
    all button at the top names the true total. Below it the **block list**
@@ -93,8 +95,9 @@
 > **remembered stand with time** is shown ("as of 18:23"). Counting
 > happens on click — **Check locations** and **Count cache** under
 > Maintenance — and by itself in the background after matching tasks
-> (intake, rescan, move-out, clean-up → locations; create thumbnails,
-> clear cache, import rules → cache); while that runs, "checking …" is
+> (intake, rescan, re-check filtered files, move-out, clean-up →
+> locations; create thumbnails, analyse audio, deleting a cache, import
+> rules, rejecting → cache); while that runs, "checking …" is
 > shown and the page fetches the new stand on its own. The stand
 > **survives restarts** (remembered in the database; older stands carry
 > the date: "as of 09/12 18:23"); it belongs to this computer and cache
@@ -183,8 +186,8 @@ start skips everything unchanged without reading its content — even huge
 watched collections are usable again right after a server restart. Only
 new or changed files run through the pipeline. If you distrust the stat
 comparison in a doubtful case: **"Re-scan all locations"** (Maintenance)
-still checks every file's content by hash. The very first round after the
-update is slow one single time (the memory fills up during the first
+still checks every file's content by hash. The very first round over a
+folder is slow one single time (the memory fills up during the first
 pass).
 
 > There is **ONE** folder concept, the watch folders. Older configs with
@@ -203,8 +206,8 @@ process (section "Activity, queue and server log"). Every action is a
 counter, duration and bar), **queued · position n** or **last ✓ result ·
 time** from the engine history (empty after a restart — the log has
 everything). While an action runs or waits, its button is locked.
-Synchronous actions (clean up, clear cache) write their result into the
-row immediately.
+Synchronous actions (clean up) write their result into the row
+immediately.
 
 The key figure at the top of each card motivates the actions below; cheap
 numbers show immediately. Orphaned locations and cache size are a
@@ -217,6 +220,13 @@ remembered stand; **Check locations** recounts everywhere.
 - **Re-scan all locations** — read all known, still existing locations
   again (idempotent). Useful after installing ffmpeg or when files may have
   changed.
+- **Re-check filtered files** — check files that the import rules skipped
+  while cataloging (too old, too small, excluded format) again with the
+  current rules; whatever fits now is taken in. Runs by itself after
+  changed import rules are saved (watch folders as well as folders
+  cataloged once), and at startup when the rules in `config.toml` differ
+  from the last run (edited by hand or after an update); the button is
+  for doubtful cases.
 - Cleaning up orphaned locations is a card of its own (below).
 
 **Thumbnails** — key figure: cache files versus items (rough; failure
@@ -227,8 +237,6 @@ re-reads the cache folder.
   reason under Issues (kind `thumbnail`). This button is the ONLY path
   with a retry: the automatic runs after import/watch only create missing
   ones and leave dismissed failures alone.
-- **Clear cache** — delete all previews including failure markers; they
-  regenerate when viewed.
 - **Analyse audio** (audio module only) — loudness and waveform for all
   audio items: create missing ones, retry failed ones, recalculate
   outdated measurements after an update. Playable copies (AIFF/ALAC/CAF)
@@ -236,7 +244,8 @@ re-reads the cache folder.
   the next attempt.
   Permanent failures appear under Issues (kind `audio`). After
   import/watch this runs automatically for new items; the audio cache is
-  separate (`cache/audio`) and survives clearing the previews.
+  separate (`cache/audio`), see the Cache card.
+- Deleting caches: a card of its own, "Cache" (below).
 
 **Database** — key figure: file size, WAL, schema version. The button
 **Compute breakdown** shows what the file consists of (raw blobs, items +
@@ -265,6 +274,30 @@ creation date.
   collection", keep them: lower `min_date`.
 - **Rebuild search index** — recreate the FTS5 full-text index from scratch.
 
+### Cache (its own card)
+
+What fml keeps on disk as cache, **broken down by kind**, each row with
+number of files, size and location, the total at the top right:
+
+- **Thumbnails** — the gallery previews (including failure markers).
+- **Audio analyses** — waveform and loudness per song.
+- **Audio playback copies** — FLAC copies for formats the browser cannot
+  play itself (AIFF/ALAC/CAF).
+- **Display images (Photo CD)** — the large display PNGs of Photo CD images.
+
+All of it is derived and is recreated when needed. **Delete** per row
+frees the space: after a confirmation that names the size and what
+happens next (e.g. "Waveforms and loudness are recalculated the next time
+they are shown"), it runs as a task; afterwards the stand is recounted in
+the background. Ratings, tags and comments live in the database and are
+not touched. The numbers are the same remembered stand as the thumbnail
+meter (one counting run for all folders, **Count cache**).
+
+**Decided not to manage music in fml after all?** Switch off the audio
+module; the two audio rows then say "Audio module off: can go." and can
+be deleted. The audio entries in the catalog stay (with ratings,
+comments, tags); they are only hidden while the module is off.
+
 ### Move rejected out (its own card)
 
 The **only** way besides import in which fml moves files (ADR 0041). Three
@@ -282,9 +315,10 @@ steps side by side:
    below the steps, in the widget on the left and in the overview.
 
 The files move into a `YYYY/MM/DD/` date structure under the target
-(collisions get `__2` suffixes, like on import). Before anything is
+(collisions get `__2` suffixes, like on import; without a plausible date
+into `_unbekanntes-datum/`). Before anything is
 touched the **hash is verified** — if the file is missing or was replaced,
-that is only reported. Every file is in the import log; the block list
+that is only reported. Every file is in the DB table `import_log`; the block list
 remembers the new place. External (cataloged in place only) locations are never
 candidates. In read-only mode the card is locked.
 
@@ -327,6 +361,14 @@ The same three steps as the two cards above:
    "Clean up N locations"; the result stays in the card and the key
    figure of the raw-files card is refreshed.
 
+### Import time comments (its own card, only with the audio module)
+
+Takes over the comment file of another fml: choose the file and enter
+the origin → preview (found, new, already there, not found; matches
+only by Suno song ID listed separately) → take over. Changes comments
+only, never files. Details and the file format:
+[Audio module → Exchanging comments](audio.md#exchanging-comments-with-another-fml).
+
 ## Issues and block list
 
 At the top the summary ("N open issues in K kinds") with the all button,
@@ -335,9 +377,20 @@ kind**: counter, the 20 most recent entries ("latest 20 of 2013"),
 "dismiss" per entry, "dismiss all N of this kind" at the bottom.
 Dismissing reports the number of dismissed entries and reloads the cards.
 Kinds: `failed` (not ingested), `warning` (extractor warning), `thumbnail`
-(no preview) and `playback` (video that no or only some browsers play —
+(no preview), `audio` (audio analysis failed) and `playback` (video that no or only some
+browsers play —
 ProRes, 10-bit H.264, HEVC; see
 [interpretation.md](interpretation.md#video-codec-and-playability)).
+
+**Rejecting media without a preview:** files fml has cataloged but cannot
+display (typically bit rot after many backups) can be **rejected** right in
+the "no thumbnail" card - per entry with "reject", or all open ones of this
+kind with "reject all N of this kind" (after a confirmation, runs as a
+task; it covers all of them, not just the 20 shown). Rejecting works as
+everywhere: the medium leaves the catalog and goes onto the block list,
+the file itself stays untouched. The entries count as dismissed afterwards.
+Entries without a catalog entry stay open and are reported as skipped.
+To undo: unblock in the block list below.
 
 The **block list** (rejected media, ADR 0041) is its own card and is loaded
 **separately** from the issues — with drives that are only cataloged it holds thousands
@@ -363,6 +416,44 @@ created only in the gallery (🏆 in the chip bar, the population is built
 from the chips, see [Rankings](rankings.md)). **Edit** per row jumps to the
 gallery into this ranking's edit mode, the same way as ✎ in the ranking.
 
+## Background: power and pause
+
+The gallery header and, in the admin, the **activity widget at the bottom
+left** (on every admin page, top right in the widget) hold the same two
+buttons for all background tasks (cataloging, thumbnails, audio analysis,
+maintenance). Both places show the same state:
+
+- **Power** (click toggles):
+  - **Bolt = Normal:** as many processes as configured (Configuration →
+    Thumbnails & performance → Processes; automatic: one up to 4 cores,
+    otherwise cores − 2).
+  - **Leaf = Quiet:** exactly one process at the lowest priority for
+    processor, disk and memory; ffmpeg then also works with a single
+    thread. On **Windows** background work is then strictly limited to
+    **one processor core**. On **Linux** Quiet is a low processor
+    priority (`nice 19`) without a core limit; after switching back to
+    Normal the worker process keeps running at the low priority there
+    until the next restart of fml. The computer stays usable and the fans stay
+    calm; everything takes longer. Thumbnails of the visible tiles still
+    come first, analyses while scrolling the audio list queue up behind
+    them.
+- **Pause** ("Zz", click on/off): the queue stops at the next file; a
+  running analysis only ends with its file. The button lights up and the
+  activity indicator shows how many tasks are waiting (in the admin
+  widget: "paused · N waiting"). Maintenance tasks started meanwhile
+  queue up and start when resumed. Clicking again resumes, in the power mode that is set. Paused
+  stays paused, even across a restart; with `--exit-when-idle` fml still
+  quits when no page is open.
+
+Both take effect immediately, without a restart. The server remembers
+the state, not the browser: it applies to the computer fml runs on. The
+start value of the power mode is set under **Configuration → Thumbnails
+& performance → Background at start**; saving there also sets the current
+position. Once the button has been used, the remembered position applies:
+changing `[performance] background` by hand in `config.toml` then no
+longer has an effect, the way is the button or the configuration page.
+"Full power" applies only in Normal mode.
+
 ## Activity, queue and server log
 
 Long tasks (import, scan, re-scan, re-interpret, search index, creation
@@ -383,12 +474,20 @@ integrity check) does a write show "busy" — wait a moment and retry.
   waiting is not queued again (hint "already running"). Automatic
   follow-ups (thumbnails after an import) may queue once behind a running
   run.
+- **Watch folders go first:** new files from a watch folder come before
+  all other waiting tasks. If a long run is going on (cataloging,
+  thumbnails, audio analysis), it stops briefly at the next file, the
+  new files are taken in, then it continues.
+- **The queue survives restarts:** when fml is closed (window closed,
+  computer shut down), the running task stops at the next file and all
+  waiting ones are saved. On the next start it continues where it left
+  off, without having to start anything again.
 - **Worker process crashed** (marked red): the running task is reported as
   aborted, waiting tasks are kept, the next task restarts the process. What
   happened is in the server log.
 - **Server log**: folder `logs/` next to the database, two rotating files
-  (`fml-web.log` for the web server, `fml-worker.log` for the tasks; at
-  most 5 × 5 MB each). Every task is recorded with start, progress,
+  (`fml-web.log` for the web server, `fml-worker.log` for the tasks; 5 MB
+  each, plus up to five older files). Every task is recorded with start, progress,
   duration, result and errors (with traceback). The **Logs** page shows
   both files side by side right away (stacked on narrow windows), per file
   with size, line count 100/500/2000, **Refresh** and the switch
@@ -433,8 +532,8 @@ operation, set a media library and sources in the configuration.
 
 Five cards: **Media library** (import target, **library management** as
 the read-only-mode switch, oldest plausible date, import rules),
-**Thumbnails & performance** (size, processes, full power, slow
-threshold), **Interface**, **Instance** and **Modules**
+**Thumbnails & performance** (size, processes, background at start,
+full power, slow threshold), **Interface**, **Instance** and **Modules**
 ([rankings](rankings.md), [audio](audio.md)). Every setting has
 a label, the input, a short explanation underneath and a badge:
 **immediate** takes effect on save, **restart** only after restarting the
@@ -444,7 +543,15 @@ appears while something is unsaved ("N changes · Save · Discard");
 bar. **Language** and **appearance** (dark/light) in the "Interface" card
 belong to the browser (ADR 0054): they apply immediately, without saving,
 only to this browser, not to the instance, and therefore never count as a
-change in the bar.
+change in the bar. The same card has two settings of the instance:
+**Duplicates in the sidebar** (hides the "Duplicates" row; pointless if
+the import filters out duplicates anyway; `[ui] dubletten`) and **Sort
+model list** (recently used first, alphabetically or by count;
+`[ui] modell_sortierung`).
+
+Not everything is in the interface: the path of the database, the cache
+folders (`[cache]`) and `[audio] true_peak` are only set in
+`config.toml`.
 
 **Slow threshold** (card "Thumbnails & performance", `[performance]
 slow_request_ms`, ADR 0076): from this response time on, fml reports a
@@ -471,8 +578,9 @@ used, as soon as the server is reachable.
 - Media library, library management, import rules, slow threshold,
   instance name, accent color and module switches take effect
   **immediately** (badge).
-- Port, thumbnail size, processes and DB path take effect **after
-  restarting** the server.
+- Processes and background at start take effect **immediately**.
+- Port, thumbnail size and DB path take effect **after restarting** the
+  server.
 - **Careful:** comments in a hand-maintained `config.toml` do not survive
   saving from the GUI. A backup `config.toml.bak` is created
   automatically beforehand; the commented reference is

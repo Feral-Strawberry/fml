@@ -29,10 +29,13 @@ const esc = (s) =>
 /** Stelle als „m:ss" (auch 0:00). */
 export const fmtAt = (ms) => fmtDuration(ms / 1000) || "0:00";
 
-const store = new Map();     // Hash → [{id, at_ms, text}]
+const store = new Map();     // Hash → [{id, at_ms, text, source}]
 const loading = new Set();
 
-const slim = (list) => (list || []).map(({ id, at_ms, text }) => ({ id, at_ms, text }));
+const slim = (list) => (list || []).map(({ id, at_ms, text, source }) => ({ id, at_ms, text, source }));
+
+// Herkunft importierter Kommentare (#228, ADR 0098) als kleines Etikett.
+const srcTag = (c) => (c.source ? `<span class="csrc">${esc(c.source)}</span>` : "");
 
 /** Stand vom Server übernehmen (Detail, API-Antwort) — maßgeblich. */
 export function setComments(hash, list) {
@@ -100,7 +103,7 @@ export function paintPins(wv, hash, axis, pos = null) {
     box.className = "pins";
     wv.appendChild(box);
   }
-  const key = `${hash}|${axis}|${list.map((c) => `${c.id}@${c.at_ms}:${c.text}`).join(",")}`;
+  const key = `${hash}|${axis}|${list.map((c) => `${c.id}@${c.at_ms}:${c.source || ""}:${c.text}`).join(",")}`;
   if (box._key !== key) {
     box._key = key;
     box.dataset.hash = hash;
@@ -108,7 +111,7 @@ export function paintPins(wv, hash, axis, pos = null) {
       ? list.map((c) => {
         const x = Math.min(100, (c.at_ms / 1000 / axis) * 100);
         return `<span class="pin" data-cid="${c.id}" data-t="${c.at_ms / 1000}" style="left:${x}%"></span>`
-          + `<span class="plabel${x > 70 ? " r" : ""}" data-cid="${c.id}" style="left:${x}%"><span class="t">${fmtAt(c.at_ms)}</span>${esc(c.text)}</span>`;
+          + `<span class="plabel${x > 70 ? " r" : ""}" data-cid="${c.id}" style="left:${x}%"><span class="t">${fmtAt(c.at_ms)}</span>${srcTag(c)}${esc(c.text)}</span>`;
       }).join("")
       : "";
   }
@@ -232,7 +235,7 @@ function renderSection(el) {
   el.innerHTML = `${el._head(STRINGS.sectionComments, `<span class="vmono vdim">${list.length}</span>`)}
     <div class="coms">${list.map((c) => `
       <div class="com" data-cid="${c.id}" title="${esc(STRINGS.commentJump)}">
-        <span class="t">${fmtAt(c.at_ms)}</span><span class="ctext" title="${esc(STRINGS.commentEditTitle)}">${esc(c.text)}</span>
+        <span class="t">${fmtAt(c.at_ms)}</span>${srcTag(c)}<span class="ctext" title="${esc(STRINGS.commentEditTitle)}">${esc(c.text)}</span>
         <button type="button" class="x" title="${esc(STRINGS.commentDelete)}">✕</button></div>`).join("")
       || `<div class="vdim">${STRINGS.commentsNone}</div>`}</div>
     <button type="button" class="comadd">${STRINGS.commentAddHere}</button>`;
@@ -328,7 +331,7 @@ export function initComments() {
     const tip = tipEl();
     const c = pin ? commentOfPin(pin) : null;
     if (!c) { tip.hidden = true; return; }
-    tip.innerHTML = `<span class="t">${fmtAt(c.at_ms)}</span>${esc(c.text)}`;
+    tip.innerHTML = `<span class="t">${fmtAt(c.at_ms)}</span>${srcTag(c)}${esc(c.text)}`;
     tip.hidden = false;
     const r = pin.getBoundingClientRect();
     tip.style.left = `${Math.max(4, Math.min(window.innerWidth - 270, r.left - 6))}px`;

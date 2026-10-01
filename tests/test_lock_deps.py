@@ -63,6 +63,20 @@ def test_abschluss_mit_markern_und_ohne_unpassende_zweige():
     assert all(e.hashes for e in entries.values())
 
 
+def test_transitive_namen_stehen_normalisiert_im_lock():
+    # Abhängige schreiben denselben Namen verschieden (Odd_Name / odd.name);
+    # der Lock darf nicht davon abhängen, wessen Metadaten zuerst gelesen werden.
+    REQUIRES[("app2", "1.0")] = ["Odd_Name>=1"]
+    REQUIRES[("odd-name", "1.0")] = []
+    INSTALLED["odd-name"] = "1.0"
+    try:
+        entries = _resolve({"app2": ld.Entry("app2", "1.0", "x")})
+        assert entries["odd-name"].name == "odd-name"
+        assert "odd-name==1.0 \\" in ld.render(ld.RUNTIME, entries)
+    finally:
+        del REQUIRES[("app2", "1.0")], REQUIRES[("odd-name", "1.0")], INSTALLED["odd-name"]
+
+
 def test_exclude_laesst_bereits_gelockte_pakete_weg():
     entries = _resolve({"app": ld.Entry("app", "1.0", "x")}, exclude={"shared"})
     assert "shared" not in entries

@@ -11,14 +11,14 @@
 // Dichte-Wechsel), die Spaltenzahl kommt aus dem berechneten Grid-Layout.
 
 import { STRINGS } from "./strings.js";
-import { getItemPosition, getItems, loadThumb, fmtDuration, kindLabel, libraryView } from "./api.js";
+import { getItemPosition, getItems, loadThumb, fmtDuration, kindLabel, libraryView, moveInFolder } from "./api.js";
 import { emit, on } from "./main.js";
 import {
   CMP_MAX, CMP_MIN, listHeadHtml, paintRow, rowHtml, seekAt, seekTo, setTimeAxis, timeAxis, togglePlay,
 } from "./audiolist.js";
 import { pinTime } from "./comments.js";
 import { onRepaint, playingHash } from "./player.js";
-import { rate } from "./curate.js";
+import { colorDotsHtml, rate } from "./curate.js";
 import { viewKinds } from "./libview.js";
 
 const PAGE = 200;              // Items pro API-Seite (wie alte Seite)
@@ -120,6 +120,16 @@ export function initGallery() {
   let selectedSet = new Set();  // Multiselect (Shift/Strg): alle markierten Hashes
   let filter = {};              // aktive Quelle: {model} | {rating_min} | {} (alle)
   let sortKey = storedSort();   // kanonischer Sortierschlüssel (ADR 0039/0057)
+  // Offene gespeicherte Suche (Sortierung „manuell", #218): {id, key} — key =
+  // ihre Chips ohne sort:. Sie gilt nur, solange die Chips genau so stehen;
+  // eine andere Suche (getippt, Seitenleiste) schließt sie.
+  let folder = null;
+  let folderId = null;          // folder.id, solange sie offen ist, sonst null
+  const predsKey = (preds) => JSON.stringify((preds || []).filter((p) => p.kind !== "sort")
+    .map((p) => [p.kind, !!p.negated, p.field || "", p.op || "=", (p.values || []).map((v) => [v.value, !!v.exact])]));
+  // Die offene Suche geht mit jeder Anfrage mit — der Server braucht sie
+  // nur für „manuell" (ohne fällt die Sortierung auf „Hinzugefügt" zurück).
+  const folderParam = () => (folderId !== null ? { folder: folderId } : {});
   let reloadSeq = 0;            // entwertet Antworten überholter Reloads (Sort-Wechsel)
   let firstLoadDone = false;    // Leer-Hinweis erst nach der ersten Antwort zeigen
   // Audioansicht (ADR 0085): dieselbe Virtualisierung als Liste mit einer
@@ -169,7 +179,7 @@ export function initGallery() {
       // Gesamtzähler nur mit Seite 0 anfordern — der Filter-COUNT je
       // Folgeseite war beim Tief-Scrollen ein Prüf-Scan pro Anfrage.
       const d = await getItems({ limit: PAGE, offset: page * PAGE, sort: sortKey,
-                                 total: page === 0 ? 1 : 0, ...filter });
+                                 total: page === 0 ? 1 : 0, ...filter, ...folderParam() });
       if (seq !== reloadSeq) return;   // inzwischen neu geladen (Sort/Quelle)
       if (into !== items) { d.items.forEach((it, k) => into.set(page * PAGE + k, it)); return; }
       if (d.total >= 0) total = d.total;
@@ -213,7 +223,7 @@ export function initGallery() {
     // (dann bleibt es beim Anfang der Galerie).
     if (!keepHash || !total) return;
     try {
-      const pos = await getItemPosition({ hash: keepHash, sort: sortKey, ...filter });
+      const pos = await getItemPosition({ hash: keepHash, sort: sortKey, ...filter, ...folderParam() });
       if (seq !== reloadSeq || selectedHash !== null) return;  // überholt/neu geklickt
       if (pos.index === null || pos.index === undefined) return;
       const it = await galleryItemAt(pos.index);
@@ -249,7 +259,8 @@ export function initGallery() {
     const page = Math.floor(Math.max(0, anchorIndex) / PAGE);
     let d;
     try {
-      d = await getItems({ limit: PAGE, offset: page * PAGE, sort: sortKey, total: 1, ...filter });
+      d = await getItems({ limit: PAGE, offset: page * PAGE, sort: sortKey, total: 1, ...filter,
+                           ...folderParam() });
     } catch (err) {
       console.warn(err);               // alter Stand bleibt stehen, nächster Anlass lädt erneut
       return;
@@ -359,7 +370,7 @@ export function initGallery() {
       if (el.dataset.hash) { delete el.dataset.hash; delete el.dataset.sig; el.innerHTML = ""; }
       return;
     }
-    const sig = `row:${item.file_hash}:${item.rating || 0}:${prev?.file_hash || ""}:${item.cover || ""}:${item.artwork ? 1 : 0}`;
+    const sig = `row:${item.file_hash}:${item.rating || 0}:${prev?.file_hash || ""}:${item.cover || ""}:${item.artwork ? 1 : 0}:${item.colors || ""}`;
     if (el.dataset.sig !== sig) {
       el.dataset.sig = sig;
       el.dataset.hash = item.file_hash;
@@ -370,6 +381,9 @@ export function initGallery() {
       const cov = el.querySelector(".rcov");
       if (cov) loadThumb(cov, item.cover || item.file_hash);
     }
+    // Umsortieren (#218): der Name ist der Griff, nur bei „manuell".
+    const grip = el.querySelector(".rname");
+    if (grip) grip.draggable = manualActive();
     paintRow(el);
   }
 
@@ -384,7 +398,7 @@ export function initGallery() {
     // Signatur statt nur Hash (ADR 0057): nach einem Soft-Refresh wird eine
     // Kachel nur neu gefüllt, wenn sich Item ODER Bewertung geändert hat —
     // unveränderte Kacheln flackern nicht.
-    const sig = `${item.file_hash}:${item.rating || 0}:${item.cover || ""}`;
+    const sig = `${item.file_hash}:${item.rating || 0}:${item.cover || ""}:${item.colors || ""}`;
     if (el.dataset.sig === sig) return;   // schon aktuell gefüllt
     el.dataset.sig = sig;
     el.dataset.hash = item.file_hash;
@@ -405,6 +419,7 @@ export function initGallery() {
         : kindLabel(item) ? `<span class="badge">${kindLabel(item)}</span>` : ""}
       ${cover ? `<button type="button" class="tplay" title="${esc(STRINGS.audioPlay)}">▶</button>` : ""}
       ${chip ? `<span class="tchip">${esc(chip)}</span>` : ""}
+      ${colorDotsHtml(item.colors)}
       ${item.rating ? `<span class="trate">${"●".repeat(item.rating)}</span>` : ""}`;
     // Thumb asynchron mit Nachfassen — 202 heißt: Prozess-Pool generiert
     // gerade (ADR 0020); der Platzhalter oben bleibt solange sichtbar.
@@ -546,11 +561,31 @@ export function initGallery() {
   function renderSortButton() {
     const s = splitSort(sortKey);
     sortSel.innerHTML = `${esc(s.label)} <span class="sortarrow">${s.dir === "auf" ? "↑" : "↓"}</span>`;
+    sortSel.title = manualActive() ? `${STRINGS.sortTitle}\n${STRINGS.manualOrderHint}` : STRINGS.sortTitle;
+    paintManualNote();
+  }
+
+  // Nur-Audio-Sortierungen (Album #224, Manuell #218) bietet das Menü nur in
+  // der Audioansicht an, „Manuell" zusätzlich nur mit offener gespeicherter
+  // Suche (ihr gehört die Reihenfolge).
+  const sortAvailable = (o) => (!o.audio || listMode) && (!o.folder || folderId !== null);
+
+  // Sortierung ohne sort:-Chip (ADR 0057 + #224): ein Album-Chip in der
+  // Audioliste läuft in Album-Reihenfolge (CD → Titelnummer → Dateiname);
+  // sonst die gemerkte Sortierung, sofern es sie in dieser Ansicht gibt
+  // („Album" aus der Audioansicht gilt nicht in der Galerie).
+  function defaultSort() {
+    if (listMode && predicates.some((p) => p.kind === "field" && p.field === "album" && !p.negated)) {
+      return "album";
+    }
+    const stored = storedSort();
+    const opt = STRINGS.sortOptions.find((o) => o.key === stored.split("-")[0]);
+    return opt && sortAvailable(opt) ? stored : "added";
   }
 
   function renderSortMenu() {
     const active = splitSort(sortKey);
-    sortMenu.innerHTML = STRINGS.sortOptions.map((o) => {
+    sortMenu.innerHTML = STRINGS.sortOptions.filter(sortAvailable).map((o) => {
       const isActive = o.key === active.base;
       const dir = isActive ? active.dir : o.dir;
       return `
@@ -566,10 +601,13 @@ export function initGallery() {
     sortKey = key;
     // Explizite Wahl im Menü wird zum neuen Sitzungs-Standard (ADR 0057) —
     // Chips aus Grammatik/gespeicherten Suchen schreiben ihn NICHT um.
-    localStorage.setItem(SORT_KEY, key);
+    // „Manuell" gehört einer Suche (#218) — kein Sitzungs-Standard.
+    if (!key.startsWith("manual")) localStorage.setItem(SORT_KEY, key);
     renderSortButton();
     if (filter.dupes) reloadGrid();
-    else emit("sort-changed", { sort: key });
+    // „Hinzugefügt" ist sonst chip-los; weicht der Standard ab (Album-Chip),
+    // braucht die ausdrückliche Wahl einen Chip, sonst gewönne der Standard.
+    else emit("sort-changed", { sort: key, explicit: key === "added" && defaultSort() !== "added" });
   }
 
   sortSel.addEventListener("click", () => {
@@ -606,6 +644,106 @@ export function initGallery() {
     if (e.key === "Escape" && !sortMenu.hidden) sortMenu.hidden = true;
   });
 
+  // -- Eigene Reihenfolge einer gespeicherten Suche (#218, ADR 0095) ----------------
+  //
+  // Nur in der Audioansicht, mit offener gespeicherter Suche und Sortierung
+  // „manuell". Der Server ordnet in AUFSTEIGENDER Reihenfolge; bei
+  // absteigender Anzeige tauschen „davor" und „dahinter" die Rollen.
+  function manualActive() {
+    return listMode && folderId !== null && splitSort(sortKey).base === "manual";
+  }
+  on("state-load", (d) => { folder = d.folder ? { id: d.folder.id, key: null } : null; });
+  on("folder-origin", (d) => {   // gerade mit ☆ gespeichert: die aktuellen Chips SIND sie
+    folder = { id: d.id, key: predsKey(predicates) };
+    const changed = folderId !== d.id;
+    folderId = d.id;
+    renderSortButton();
+    // Als NEUE Suche gespeichert, während „Manuell" lief: die neue Suche hat
+    // ihre eigene (noch leere) Reihenfolge — neu laden statt die alte zeigen.
+    if (changed && manualActive()) reloadGrid();
+    else renderGrid();
+  });
+  on("state-clear", () => { folder = null; folderId = null; });
+
+  // Sichtbarer Hinweis im Listenkopf, solange umsortiert werden kann (sonst
+  // stünde die Bedienung nur im Tooltip); Fehler beim Verschieben ebenda.
+  function paintManualNote(error = "") {
+    const note = listHead.querySelector(".manualnote");
+    if (!note) return;
+    note.hidden = !manualActive();
+    note.classList.toggle("err", !!error);
+    note.textContent = error || STRINGS.manualOrderHint;
+  }
+
+  async function moveRow(hash, where, neighbor) {
+    if (!neighbor || neighbor === hash) return;
+    const flip = splitSort(sortKey).dir === "ab";
+    const side = (where === "before") !== flip ? "before" : "after";
+    try {
+      await moveInFolder(folderId, { hash, [side]: neighbor });
+    } catch (err) {
+      console.warn(err);
+      paintManualNote(err.message);
+      return;
+    }
+    paintManualNote();
+    await refreshGrid();
+    // Die Auswahl wandert mit dem Song (Position aus der neuen Reihenfolge).
+    try {
+      const pos = await getItemPosition({ hash, sort: sortKey, ...filter, ...folderParam() });
+      if (pos.index !== null && pos.index !== undefined) {
+        emit("selection-changed", { hash, index: pos.index });
+      }
+    } catch (err) { console.warn(err); }
+  }
+
+  // Alt+↑/↓: die ausgewählte Zeile eine Position hoch/runter.
+  document.addEventListener("keydown", async (e) => {
+    if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+    if (!manualActive() || selectedIndex === null || selectedSet.size > 1) return;
+    if (e.target instanceof Element && e.target.matches("input, textarea, select")) return;
+    e.preventDefault();
+    const up = e.key === "ArrowUp";
+    const other = await galleryItemAt(selectedIndex + (up ? -1 : 1));
+    if (other) moveRow(selectedHash, up ? "before" : "after", other.file_hash);
+  }, true);
+
+  // Ziehen am Namen: über der oberen Hälfte einer Zeile = davor, sonst dahinter.
+  let dragHash = null;
+  const dropSide = (row, e) => {
+    const r = row.getBoundingClientRect();
+    return e.clientY < r.top + r.height / 2 ? "before" : "after";
+  };
+  const clearDrop = () => grid.querySelectorAll(".dropbefore, .dropafter")
+    .forEach((el) => el.classList.remove("dropbefore", "dropafter"));
+  grid.addEventListener("dragstart", (e) => {
+    const row = e.target.closest?.(".arow");
+    if (!manualActive() || !row?.dataset.hash) return;
+    dragHash = row.dataset.hash;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", dragHash);
+  });
+  grid.addEventListener("dragover", (e) => {
+    const row = e.target.closest?.(".arow");
+    if (!dragHash || !row?.dataset.hash) return;
+    e.preventDefault();
+    clearDrop();
+    if (row.dataset.hash !== dragHash) row.classList.add(`drop${dropSide(row, e)}`);
+  });
+  grid.addEventListener("dragleave", (e) => {
+    if (!e.relatedTarget || !grid.contains(e.relatedTarget)) clearDrop();
+  });
+  grid.addEventListener("drop", (e) => {
+    const row = e.target.closest?.(".arow");
+    const hash = dragHash;
+    dragHash = null;
+    clearDrop();
+    if (!hash || !row?.dataset.hash) return;
+    e.preventDefault();
+    moveRow(hash, dropSide(row, e), row.dataset.hash);
+  });
+  grid.addEventListener("dragend", () => { dragHash = null; clearDrop(); });
+
   // Dichte S/M/L: rein clientseitig (CSS-Klasse), Wahl überlebt in localStorage.
   function applyDensity(d) {
     const density = DENSITIES.includes(d) ? d : "m";
@@ -628,10 +766,20 @@ export function initGallery() {
   // Eine sort:-Direktive im Ausdruck gewinnt serverseitig über ?sort=.
   on("search-state-changed", (d) => {
     predicates = d.predicates || [];
+    // Gespeicherte Suche (#218): der erste Zustand nach dem Laden legt ihre
+    // Chips fest, jeder spätere muss dazu passen — sonst ist sie zu.
+    if (folder && folder.key === null) folder.key = predsKey(predicates);
+    folderId = folder && folder.key === predsKey(predicates) ? folder.id : null;
+    if (folderId === null && (d.sort || "").startsWith("manual")) {
+      // „Manuell" ohne offene Suche hat keine Reihenfolge: Chip räumen,
+      // der Sitzungs-Standard greift wieder (search.js verkündet neu).
+      emit("sort-changed", { sort: "added" });
+      return;
+    }
     filter = d.expression ? { filter: d.expression } : {};
     // Knopf spiegelt den Zustand (S6): ohne sort:-Chip gilt der
     // Sitzungs-Standard (gemerkte Sortierung, ADR 0057).
-    sortKey = d.sort || storedSort();
+    sortKey = d.sort || defaultSort();
     renderSortButton();
     reloadGrid({ keepSelection: !d.reset });
   });
@@ -643,6 +791,7 @@ export function initGallery() {
     listHead.hidden = !listMode;
     if (listMode) {
       listHead.innerHTML = listHeadHtml();
+      paintManualNote();
     }
   }
   on("library-view-changed", (d) => {
@@ -816,6 +965,7 @@ export function initGallery() {
     if (!document.getElementById("rankings").hidden) return;  // ←/→ werten dort Duelle
     const delta = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -cols, ArrowDown: cols }[e.key];
     if (delta === undefined) return;
+    if (e.altKey && manualActive()) return;   // Alt+↑/↓ ordnet um (#218)
     // Liste: nur ↑/↓ wechseln die Zeile; ←/→ gehören dem Sprung im Song (A5).
     if (listMode && (e.key === "ArrowLeft" || e.key === "ArrowRight")) return;
     e.preventDefault();   // Grid scrollt selbst (ensureVisible), nicht der Browser

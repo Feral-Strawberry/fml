@@ -605,3 +605,29 @@ def test_import_records_playback_issue_at_destination(env, monkeypatch):
     row = conn.execute("SELECT path, kind, message FROM scan_issues").fetchone()
     assert row["kind"] == "playback" and '"key": "issueUnplayable"' in row["message"]
     assert row["path"].startswith(str(target)), "Problem am Ziel-Fundort, nicht an der Quelle"
+
+
+def test_halt_mitten_im_schub_schliesst_den_schub_ab(env):
+    """Anhalten oder Beenden mitten in einem Ordner-Import (ADR 0093): die
+    schon importierten Dateien des angefangenen Schubs sind danach fertig
+    (Quelle weg), und der nächste Lauf hält sie nicht für Dubletten."""
+    conn, source, target = env
+    for n in range(5):
+        _png(source / f"bild{n}.png", f"prompt {n}")
+
+    class Halt(Exception):
+        pass
+
+    def progress(_path, index, _total, _report):
+        if index == 4:
+            raise Halt
+
+    with pytest.raises(Halt):
+        importer.import_folder(conn, source, target_root=target, source_mode="loeschen",
+                               progress=progress)
+    assert len(list(target.rglob("*.png"))) == 3
+    assert sorted(p.name for p in source.glob("*.png")) == ["bild3.png", "bild4.png"]
+
+    report = importer.import_folder(conn, source, target_root=target, source_mode="loeschen")
+    assert (report.importiert, report.dublette) == (2, 0)
+    assert not (source / "_dubletten").exists() and not list(source.glob("*.png"))

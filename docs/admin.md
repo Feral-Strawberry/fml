@@ -24,7 +24,7 @@
      Katalogisierte (ADR 0041, I2) —, mit Metadaten, interpretiert, Thumbnails
      mit Cache-Größe, DB-Größe mit WAL). Daneben drei Felder:
      **Zusammensetzung nach Typ** (Stapelbalken mit Tabellen-Legende;
-     darunter Bilder und Videos je mit Anteil an der Stückzahl und
+     darunter Bilder und Videos, mit Audio-Modul auch Audio, je mit Anteil an der Stückzahl und
      belegtem Speicher über den ganzen Bestand — die Summe ist „katalogisiert
      gesamt"), **Zuwachs der letzten 30 Tage** (Säulen je Tag,
      heute hervorgehoben) und **Jahrgänge** nach Erstelldatum. Die Zahlen
@@ -71,10 +71,12 @@
    Thumbnails, Datenbank, Neubewertung) mit begründender Kennzahl oben und
    je Aktion einer Zeile: Titel, Erklärung, Knopf, **Zustand direkt in der
    Zeile** (läuft mit Balken · in der Warteschlange mit Position · zuletzt
-   ✓ Ergebnis mit Uhrzeit). Darunter drei eigene Karten mit derselben
-   Logik in drei Schritten und Scharfschalten: **Abgelehnte
-   rausverschieben**, **Import-Regeln auf den Bestand** und **Verwaiste
-   Fundorte aufräumen** — siehe „Wartungsaktionen".
+   ✓ Ergebnis mit Uhrzeit). Darunter die Karte **Cache** (was auf der
+   Platte zwischengespeichert ist, je Art mit Löschen) und eigene Karten
+   mit derselben Logik in drei Schritten: **Abgelehnte rausverschieben**,
+   **Import-Regeln auf den Bestand**, mit Audio-Modul **Zeitkommentare
+   importieren**, und **Verwaiste Fundorte aufräumen** — siehe
+   „Wartungsaktionen".
 5. **Probleme** (`/admin/issues`) — je Fehlerart eine Karte mit ehrlichem
    Zähler, den jüngsten Einträgen und „alle N dieser Art quittieren"; der
    Alle-Knopf oben nennt die echte Gesamtzahl. Darunter die **Sperrliste**
@@ -97,8 +99,9 @@
 > als **gemerkter Stand mit Uhrzeit** gezeigt („Stand 18:23"). Gezählt
 > wird auf Klick — **Fundorte prüfen** und **Cache zählen** in der
 > Wartung — und nach passenden Aufgaben von selbst im Hintergrund
-> (Aufnahme, Re-Scan, Rausverschieben, Aufräumen → Fundorte; Thumbnails
-> erstellen, Cache leeren, Import-Regeln → Cache); solange das läuft,
+> (Aufnahme, Re-Scan, Aussortierte neu prüfen, Rausverschieben, Aufräumen
+> → Fundorte; Thumbnails erstellen, Audio analysieren, einen Cache
+> löschen, Import-Regeln, Ablehnen → Cache); solange das läuft,
 > steht „wird geprüft …", und die Seite holt den neuen Stand von allein.
 > Der Stand **überlebt Neustarts** (in der Datenbank gemerkt, ältere
 > Stände mit Datum: „Stand 12.09. 18:23"); er gehört zu diesem Rechner und
@@ -190,7 +193,7 @@ riesige Watch-Bestände sind nach einem Serverneustart sofort wieder
 bedienbar. Nur neue oder geänderte Dateien laufen durch die Pipeline. Wer
 dem Stat-Vergleich in einem Zweifelsfall nicht traut: **„Re-Scan aller
 Fundorte"** (Wartung) prüft weiterhin jeden Dateiinhalt per Hash. Die
-allererste Runde nach dem Update ist einmalig noch langsam (das Gedächtnis
+allererste Runde über einen Ordner ist einmalig langsam (das Gedächtnis
 füllt sich beim ersten Durchlauf).
 
 > Es gibt **EIN** Ordner-Konzept, die Watchordner. Frühere Configs mit
@@ -209,8 +212,8 @@ Aktion ist eine **Zeile** mit Titel, Erklärung, Knopf und ihrem Zustand:
 **läuft** (mit Zähler, Dauer und Balken), **in der Warteschlange ·
 Position n** oder **zuletzt ✓ Ergebnis · Uhrzeit** aus dem Verlauf der
 Engine (nach einem Neustart leer — das Log hat alles). Während eine Aktion
-läuft oder wartet, ist ihr Knopf gesperrt. Synchrone Aktionen (Aufräumen,
-Cache leeren) schreiben ihr Ergebnis sofort in die Zeile.
+läuft oder wartet, ist ihr Knopf gesperrt. Synchrone Aktionen (Aufräumen)
+schreiben ihr Ergebnis sofort in die Zeile.
 
 Die Kennzahl oben in jeder Karte begründet die Aktionen darunter; die
 billigen Zahlen stehen sofort. Verwaiste Fundorte und Cache-Größe sind
@@ -223,6 +226,14 @@ gemerkter Stand; **Fundorte prüfen** zählt überall neu.
 - **Re-Scan aller Fundorte** — alle bekannten, noch existierenden Fundorte
   erneut einlesen (idempotent). Sinnvoll nach ffmpeg-Installation oder wenn
   Dateien sich geändert haben könnten.
+- **Aussortierte neu prüfen** — Dateien, die die Import-Regeln beim
+  Katalogisieren aussortiert haben (zu alt, zu klein, ausgeschlossenes
+  Format), mit den aktuellen Regeln erneut prüfen; was jetzt passt, wird
+  aufgenommen. Läuft nach dem Speichern geänderter Import-Regeln von
+  selbst (Watchordner wie einmal katalogisierte Ordner), ebenso beim Start,
+  wenn die Regeln in der `config.toml` anders sind als beim letzten Lauf
+  (von Hand geändert oder nach einem Update); der Knopf ist für den
+  Zweifelsfall.
 - Aufräumen verwaister Fundorte ist eine eigene Karte (unten).
 
 **Thumbnails** — Kennzahl: Cache-Dateien gegen Items (grob; Fehler-Marker
@@ -234,16 +245,14 @@ Cache-Ordner neu.
   der EINZIGE Weg mit erneutem Versuch: die automatischen Läufe nach
   Import/Watch erzeugen nur Fehlende und lassen quittierte Fehlschläge in
   Ruhe.
-- **Cache leeren** — alle Vorschaubilder inkl. Fehler-Marker löschen; sie
-  regenerieren sich beim Ansehen.
 - **Audio analysieren** (nur mit Audio-Modul) — Lautheit und Wellenform
   für alle Audio-Items: Fehlende erzeugen, Fehlgeschlagene erneut
   versuchen, nach einem Update veraltete Messungen neu rechnen.
   Abspielbare Kopien (AIFF/ALAC/CAF) entstehen erst beim ersten Abspielen;
   gescheiterte gibt der Knopf für den nächsten Versuch frei. Dauerhafte Fehler erscheinen unter Probleme (Art
   `audio`). Nach Import/Watch läuft das automatisch für Neues; der
-  Audio-Cache liegt getrennt (`cache/audio`) und bleibt beim Leeren der
-  Vorschaubilder erhalten.
+  Audio-Cache liegt getrennt (`cache/audio`), siehe Karte Cache.
+- Caches löschen: eigene Karte „Cache" (unten).
 
 **Datenbank** — Kennzahl: Dateigröße, WAL, Schema-Version. Der Knopf
 **Aufteilung berechnen** zeigt, woraus die Datei besteht (Roh-Blobs,
@@ -272,6 +281,30 @@ Erstelldatum.
   Bestand", behalten: `min_date` senken.
 - **Suchindex neu aufbauen** — den FTS5-Volltextindex komplett neu erzeugen.
 
+### Cache (eigene Karte)
+
+Was fml auf der Platte zwischenspeichert, **aufgeschlüsselt nach Art**, je
+Zeile Anzahl Dateien, Größe und Ort, oben rechts die Summe:
+
+- **Thumbnails** — Vorschaubilder der Galerie (inkl. Fehler-Marker).
+- **Audio-Analysen** — Wellenform und Lautheit je Song.
+- **Audio-Wiedergabekopien** — FLAC-Kopien für Formate, die der Browser
+  nicht selbst abspielt (AIFF/ALAC/CAF).
+- **Anzeigebilder (Photo CD)** — die großen Anzeige-PNGs der Photo-CD-Bilder.
+
+Alles davon ist abgeleitet und entsteht bei Bedarf neu. **Löschen** je
+Zeile gibt den Platz frei: nach einer Rückfrage, die Größe und die Folge
+nennt (z. B. „Wellenformen und Lautheit werden beim nächsten Anzeigen neu
+berechnet"), läuft es als Aufgabe; danach wird der Stand im Hintergrund
+neu gezählt. Bewertungen, Tags und Kommentare stehen in der Datenbank und
+bleiben unberührt. Die Zahlen sind derselbe gemerkte Stand wie beim
+Thumbnail-Meter (ein Zähllauf für alle Ordner, **Cache zählen**).
+
+**Musik doch nicht in fml verwalten?** Audio-Modul ausschalten, dann
+zeigen die beiden Audio-Zeilen „Audio-Modul aus: kann weg." und lassen
+sich löschen. Die Audio-Einträge im Katalog bleiben (mit Bewertungen,
+Kommentaren, Tags), sie sind nur ausgeblendet, solange das Modul aus ist.
+
 ### Abgelehnte rausverschieben (eigene Karte)
 
 Der **einzige** Weg neben dem Import, auf dem fml Dateien bewegt (ADR
@@ -290,9 +323,10 @@ Der **einzige** Weg neben dem Import, auf dem fml Dateien bewegt (ADR
    Übersicht.
 
 Die Dateien wandern in eine Datumsstruktur `JJJJ/MM/TT/` unter dem Ziel
-(Kollisionen bekommen `__2`-Suffixe, wie beim Import). Vor jedem Anfassen
+(Kollisionen bekommen `__2`-Suffixe, wie beim Import; ohne plausibles
+Datum nach `_unbekanntes-datum/`). Vor jedem Anfassen
 wird der **Hash verifiziert** — fehlt die Datei oder wurde sie ersetzt,
-wird das nur gemeldet. Jede Datei steht im Import-Log; die Sperrliste
+wird das nur gemeldet. Jede Datei steht in der DB-Tabelle `import_log`; die Sperrliste
 merkt sich den neuen Ort. Externe (nur am Ort katalogisierte) Fundorte sind nie
 Kandidaten. Im Übersichtsmodus ist die Karte gesperrt.
 
@@ -339,6 +373,14 @@ darüber:
    „N Fundorte aufräumen"; das Ergebnis steht in der Karte, die Kennzahl
    der Rohdateien-Karte wird nachgezogen.
 
+### Zeitkommentare importieren (eigene Karte, nur mit Audio-Modul)
+
+Übernimmt die Kommentar-Datei eines anderen fml: Datei wählen und
+Herkunft eintragen → Vorschau (gefunden, neu, schon da, nicht gefunden;
+Treffer nur über die Suno-Song-ID eigens) → Übernehmen. Ändert nur
+Kommentare, keine Dateien. Einzelheiten und das Dateiformat:
+[Audio-Modul → Kommentare austauschen](audio.md#kommentare-mit-einem-anderen-fml-austauschen).
+
 ## Probleme und Sperrliste
 
 Oben die Zusammenfassung („N offene Probleme in K Arten") mit dem
@@ -347,9 +389,21 @@ Fehlerart eine Karte**: Zähler, die jüngsten 20 Einträge („jüngste 20 von
 2013"), je Eintrag „quittieren", unten „alle N dieser Art quittieren".
 Quittieren meldet die Zahl der quittierten Einträge und lädt die Karten
 neu. Arten: `failed` (nicht aufgenommen), `warning` (Extraktor-Warnung),
-`thumbnail` (kein Vorschaubild) und `playback` (Video, das kein bzw. nur
+`thumbnail` (kein Vorschaubild), `audio` (Audio-Analyse fehlgeschlagen) und
+`playback` (Abspielbarkeit: Video, das kein bzw. nur
 mancher Browser abspielt — ProRes, 10-bit-H.264, HEVC; siehe
 [interpretation.md](interpretation.md#video-codec-und-abspielbarkeit)).
+
+**Kein Vorschaubild ablehnen:** Dateien, die fml katalogisiert, aber nicht
+anzeigen kann (typisch: Bitrot nach vielen Backups), lassen sich in der
+Karte „kein Vorschaubild" direkt **ablehnen** - je Eintrag mit „ablehnen"
+oder alle offenen dieser Art mit „alle N dieser Art ablehnen" (nach einer
+Rückfrage, läuft als Aufgabe; trifft alle, nicht nur die angezeigten 20).
+Ablehnen wirkt wie überall: das Medium verschwindet aus dem Katalog und
+kommt auf die Sperrliste, die Datei selbst bleibt unangetastet. Die
+Einträge gelten danach als quittiert. Einträge, zu denen es keinen
+Katalogeintrag gibt, bleiben offen und werden als übersprungen gemeldet.
+Rückgängig: Entsperren in der Sperrliste unten.
 
 Die **Sperrliste** (abgelehnte Medien, ADR 0041) ist eine eigene Karte und
 wird **getrennt** von den Problemen geladen — bei nur katalogisierten
@@ -376,6 +430,47 @@ Chip-Leiste, die Population entsteht aus den Chips, siehe
 [Rankings](rankings.md)). **Bearbeiten** je Zeile springt in die Galerie
 in den Bearbeiten-Modus dieses Rankings, derselbe Weg wie ✎ im Ranking.
 
+## Hintergrund: Leistung und Anhalten
+
+In der Kopfzeile der Galerie und im Admin im **Aktivitäts-Widget unten
+links** (auf jeder Admin-Seite, oben rechts im Widget) sitzen dieselben
+zwei Knöpfe für alle Hintergrundaufgaben (Einlesen, Thumbnails,
+Audio-Analyse, Wartung). Beide Stellen zeigen denselben Zustand:
+
+- **Leistung** (Klick schaltet um):
+  - **Blitz = Normal:** so viele Prozesse wie eingestellt (Konfiguration
+    → Thumbnails & Leistung → Prozesse; Automatik: bis 4 Kerne einer,
+    sonst Kerne − 2).
+  - **Blatt = Leise:** genau ein Prozess mit niedrigster Priorität für
+    Prozessor, Platte und Speicher; auch ffmpeg rechnet dann nur mit
+    einem Thread. Unter **Windows** ist die Hintergrundarbeit dann hart
+    auf **einen Prozessorkern** begrenzt. Unter **Linux** ist Leise eine
+    niedrige Prozessor-Priorität (`nice 19`) ohne Kern-Begrenzung; nach
+    dem Zurückschalten auf Normal läuft der Arbeitsprozess dort bis zum
+    nächsten Neustart von fml mit der niedrigen Priorität weiter. Der
+    Rechner bleibt bedienbar,
+    die Lüfter bleiben ruhig; alles dauert länger. Vorschaubilder der
+    sichtbaren Kacheln kommen trotzdem zuerst, Analysen beim Blättern
+    durch die Audioliste reihen sich dahinter ein.
+- **Anhalten** („Zz“, Klick an/aus): Die Warteschlange hält an der
+  nächsten Datei an; eine laufende Analyse endet erst mit ihrer Datei.
+  Der Knopf leuchtet, die Aktivitäts-Anzeige nennt, wie viele Aufgaben
+  warten (im Admin-Widget: „angehalten · N wartend“). Wartungsaufgaben,
+  die man währenddessen startet, reihen sich wartend ein und starten
+  beim Fortsetzen. Nochmal klicken setzt fort, im eingestellten
+  Leistungsmodus. Angehalten bleibt angehalten, auch über einen Neustart;
+  fml beendet sich mit `--exit-when-idle` trotzdem, wenn keine Seite mehr
+  offen ist.
+
+Beides wirkt sofort, ohne Neustart. Den Zustand merkt sich der Server,
+nicht der Browser: Er gilt für den Rechner, auf dem fml läuft. Den
+Startwert der Leistung legt **Konfiguration → Thumbnails & Leistung →
+Hintergrund beim Start** fest; Speichern setzt dort auch die aktuelle
+Stellung. Wurde der Knopf einmal benutzt, gilt die gemerkte Stellung: Eine
+Änderung von `[performance] background` von Hand in der `config.toml`
+wirkt dann nicht mehr, der Weg führt über den Knopf oder die
+Konfigurationsseite. „Volle Leistung“ gilt nur im Modus Normal.
+
 ## Aktivität, Warteschlange und Serverlog
 
 Lange Aufgaben (Import, Scan, Re-Scan, Neu interpretieren, Suchindex,
@@ -398,12 +493,22 @@ Meldung „gerade beschäftigt" — kurz warten, erneut versuchen.
   wartet, wird nicht erneut eingereiht (Hinweis „läuft bereits").
   Automatische Nachläufer (Thumbnails nach einem Import) dürfen einmal
   hinter einen laufenden Lauf.
+- **Watch-Ordner haben Vorrang:** Neue Dateien aus einem Watch-Ordner
+  kommen vor alle anderen wartenden Aufgaben. Läuft gerade ein langer
+  Lauf (Einlesen, Thumbnails, Audio-Analyse), hält er an der nächsten
+  Datei kurz an, die neuen Dateien werden aufgenommen, dann läuft er
+  weiter.
+- **Die Warteschlange überlebt Neustarts:** Wird fml beendet (Fenster
+  zu, Rechner herunterfahren), hält die laufende Aufgabe an der nächsten
+  Datei an, und alle wartenden werden gesichert. Beim nächsten Start
+  geht es dort weiter, wo es aufgehört hat, ohne dass man etwas neu
+  anstoßen muss.
 - **Arbeitsprozess abgestürzt** (rot markiert): die laufende Aufgabe wird als
   abgebrochen gemeldet, wartende bleiben erhalten, der nächste Auftrag
   startet den Prozess neu. Was passiert ist, steht im Serverlog.
 - **Serverlog**: Ordner `logs/` neben der Datenbank, zwei rotierende
   Dateien (`fml-web.log` für den Webserver, `fml-worker.log` für die
-  Aufgaben; je höchstens 5 × 5 MB). Jede Aufgabe steht mit Start,
+  Aufgaben; je 5 MB, dazu bis zu fünf ältere Dateien). Jede Aufgabe steht mit Start,
   Fortschritt, Dauer, Ergebnis und Fehlern (mit Traceback) darin. Die
   Seite **Logs** zeigt beide Dateien sofort nebeneinander (auf schmalen
   Fenstern untereinander), je Datei mit Größe, Zeilenzahl 100/500/2000,
@@ -448,8 +553,8 @@ der Konfiguration eine Media Library und Quellen setzen.
 
 Fünf Karten: **Media Library** (Import-Ziel, **Library-Verwaltung** als
 Übersichtsmodus-Schalter, ältestes plausibles Datum, Import-Regeln),
-**Thumbnails & Leistung** (Größe, Prozesse, volle Leistung,
-Langsam-Schwelle), **Oberfläche**, **Instanz** und **Module**
+**Thumbnails & Leistung** (Größe, Prozesse, Hintergrund beim Start,
+volle Leistung, Langsam-Schwelle), **Oberfläche**, **Instanz** und **Module**
 ([Rankings](rankings.md), [Audio](audio.md)). Jede
 Einstellung hat ein Label, die Eingabe, eine kurze Erklärung darunter und
 ein Badge: **sofort** wirkt beim Speichern, **Neustart** erst nach einem
@@ -460,7 +565,15 @@ gespeicherten Stand wieder her, Fehler vom Server stehen direkt in der
 Leiste. **Sprache** und **Darstellung** (Dunkel/Hell) in der Karte
 „Oberfläche" sind Sache des Browsers (ADR 0054): sie wirken sofort, ohne
 Speichern, gelten nur für diesen Browser, nicht für die Instanz, und
-zählen deshalb nie als Änderung in der Leiste.
+zählen deshalb nie als Änderung in der Leiste. Dieselbe Karte hat zwei
+Einstellungen der Instanz: **Dubletten in der Sidebar** (blendet die Zeile
+„Dubletten" aus; überflüssig, wenn der Import Dubletten ohnehin
+aussortiert; `[ui] dubletten`) und **Modell-Liste sortieren** (zuletzt
+genutzt zuerst, alphabetisch oder nach Anzahl; `[ui] modell_sortierung`).
+
+Nicht alles steht in der Oberfläche: Der Pfad der Datenbank, die
+Cache-Ordner (`[cache]`) und `[audio] true_peak` werden nur in der
+`config.toml` gesetzt.
 
 **Langsam-Schwelle** (Karte „Thumbnails & Leistung", `[performance]
 slow_request_ms`, ADR 0076): Ab dieser Antwortzeit meldet fml eine
@@ -486,8 +599,8 @@ Port, sobald der Server erreichbar ist.
 
 - Media Library, Library-Verwaltung, Import-Regeln, Langsam-Schwelle,
   Instanzname, Akzentfarbe und Modul-Schalter wirken **sofort** (Badge).
-- Port, Thumbnail-Größe, Prozesse und DB-Pfad wirken **nach Neustart**
-  des Servers.
+- Prozesse und Hintergrund beim Start wirken **sofort**.
+- Port, Thumbnail-Größe und DB-Pfad wirken **nach Neustart** des Servers.
 - **Achtung:** Kommentare in einer von Hand gepflegten `config.toml` überleben
   das Speichern aus der GUI nicht. Vorher wird automatisch ein Backup
   `config.toml.bak` angelegt; die kommentierte Referenz ist

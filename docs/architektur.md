@@ -29,6 +29,15 @@ Thread-Pool, damit große Videos keine Galerie-Anfrage blockieren. Der
 Watcher prüft jeden Watchordner und reiht eine Datei erst ein, wenn sie
 eine Ruhezeit lang unverändert war.
 
+Die Warteschlange steht zusätzlich in der Datenbank und übersteht einen
+Neustart: Beim Beenden hält die laufende Aufgabe an der nächsten Datei
+an, beim Start geht es dort weiter. Zwei Knöpfe in der Galerie wirken
+sofort auf den Worker: **Leistung** (Normal oder Leise: ein Prozess,
+niedrigste Priorität) und **Anhalten**. Neue Dateien aus einem
+Watchordner reihen sich vor wartende Langläufer ein; eine laufende
+Aufgabe mit Dateiliste gibt dafür an der nächsten Datei ab und läuft
+danach weiter.
+
 ## Wie eine Datei in den Katalog kommt
 
 ![Aufnahme-Kette: Quelle, Erkennen, Import-Regeln, SHA-256, optional Kopie und Prüfung, Katalog, optional Quelle leeren. Katalogisieren schreibt Schicht 1 byte-treu in raw_metadata, Schicht 2 interpretiert daraus Felder, beides landet im Volltextindex. Neu interpretieren läuft ohne Dateizugriff über raw_metadata.](img/architektur-aufnahme.de.svg)

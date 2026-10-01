@@ -7,6 +7,165 @@ What changed between snapshot releases, from the user's point of view.
 Versions are date versions (`YYYY.MM` or `YYYY.MM.N`); a running
 instance shows its version under Admin → Overview.
 
+## 2026.10 (2026-10-01)
+
+fml now works **quietly in the background** and can be **paused**;
+whatever is waiting survives a restart. The audio module understands the
+ordinary **music collection** (artist, album, genre), shows the **lyrics
+with timings** during playback and exchanges **time comments** between
+two fml. Plus a right panel that folds away, a date set by hand and
+Finder tags on macOS.
+
+### After updating
+
+1. **Start with `start.sh` or `start.bat` as usual.** The dependencies
+   are unchanged.
+2. **Database:** migrated automatically to schema 33 on the first start
+   (five new migrations). Make a backup of `feral.sqlite` first, as with
+   every update.
+3. **On the first start two tasks run once by themselves:** "Re-check
+   filtered files" (done immediately if nothing was filtered) and, with
+   the audio module, "Fetch timed lyrics" (only songs with a subtitle
+   track).
+4. **Music in the collection:** run **Admin → Maintenance →
+   "Re-interpret"** once for artist, album, genre, the year from the tags
+   and lyrics with timings from ID3 `SYLT` or LRC. If you have old music,
+   set "Oldest plausible date" back first (Admin → Configuration → Media
+   library, 2015 out of the box), otherwise a tag year like 1987 counts
+   as implausible.
+5. **macOS, Finder tags in the collection:** run **Admin → Maintenance →
+   "Re-scan all locations"** once.
+6. **"Clear cache" has moved:** Admin → Maintenance now has a **Cache**
+   card of its own with one row per kind.
+
+### New: work quietly, pause, carry on
+
+- **Two buttons in the gallery header** (and in the admin's activity
+  widget) for all background tasks. **Power:** bolt = Normal, leaf =
+  **Quiet** (one process at the lowest priority for processor, disk and
+  memory, ffmpeg works with one thread too; strictly limited to one core
+  on Windows). **Pause** ("Zz"): the queue stops at the next file and
+  resumes there on the second click. Both take effect immediately,
+  without a restart; the start value is set by `[performance]
+  background`.
+- **The queue survives restarts:** when fml is closed, the running task
+  stops at the next file and everything waiting is saved. At the next
+  start it continues there.
+- **Watch folders go first:** new files from a watch folder come before
+  waiting long-running tasks; a running intake hands over at the next
+  file for that and continues afterwards.
+- **Thumbnails before analyses:** visible tiles and display images come
+  first, audio analyses while scrolling queue up behind them.
+- **Number of processes:** the automatic setting takes one process up to
+  4 cores, otherwise cores − 2. A changed number of processes takes
+  effect without a restart.
+
+### New in the audio module
+
+- **Music collection:** artist, album artist, album, track and disc
+  number, year and genre from ID3, Vorbis, WAV and M4A. In the audio view
+  three new groups in the sidebar (Artist, Album, Genre), the search
+  knows `albumartist:` (German `interpret:`), `artist:`, `album:` and
+  `genre:`, and the sort order **"Album"** plays an album in its
+  sequence. Clicking an album sorts by it automatically. The list row
+  shows "artist · album".
+- **Lyrics with timings:** songs from Suno V6 carry their text line by
+  line with timings in a subtitle track; fml reads it, plus ID3 `SYLT`
+  and LRC in the lyrics tag. Below the waveform of the playback bar sits
+  the line that is currently playing, preceded by the section ("Chorus ·
+  …"). On the waveform of every list row labels mark the sections, and in
+  the detail panel the lyrics follow along; clicking a line jumps there.
+- **Exchanging time comments:** Bulk action → Time comments → **Export**
+  writes a file that another fml takes over under Admin → Maintenance →
+  **Import time comments**, with a preview and an origin label on every
+  comment. fml finds songs by the file itself, for Suno songs optionally
+  by the song ID as well. The same import twice changes nothing.
+- **Your own order per saved search:** sort order **"Manual"** in the
+  audio view; drag rows by the file name or move them with Alt+↑ / Alt+↓.
+  "Play all" follows this order.
+- **Year from the tags as the date:** without an embedded date, the year
+  from the tags counts before the file stamp. A ripped CD from 1987 then
+  sits under 1987, not under the day it was ripped.
+- **True peak or sample peak:** `[audio] true_peak = false` measures the
+  sample peak and roughly halves the analysis time; loudness matching
+  then keeps 1 dB more headroom. The default stays true peak.
+
+### New for everyone
+
+- **Right panel:** a click on a heading collapses the section (CURATED,
+  GENERATION, WORKFLOW, Time comments, FILE). The narrow strip at the
+  right edge of the window or the **P** key folds the whole panel away,
+  and the gallery gets more columns at once. Both are remembered. Raw
+  metadata and locations now sit at the very bottom.
+- **Date set by hand:** a field under CURATED and the row **"Date"** of the
+  bulk action, for all media: `1997`, `1997-05`, `1997-05-12` or
+  `12.05.1997`, as precise as entered. It wins against metadata and file
+  stamp and survives every re-scan; clearing it brings back the derived
+  date. The file stays unchanged.
+- **Finder tags (macOS):** the colored labels from the Finder become
+  normal tags on import and on scan, with a color dot on the tile, the
+  list row and in the panel. The import also copies the extended file
+  attributes, so the copy in the library keeps its Finder tags. fml only
+  reads and never writes back to the Finder.
+- **Re-check filtered files:** changed import rules also reach back to
+  what was filtered while cataloging: after saving in the admin, at
+  start after a change in `config.toml`, or via the button under Admin →
+  Maintenance. A new scan is not needed.
+- **Admin → Issues:** files without a thumbnail (typically damaged after
+  many backups) can be **rejected** right there, one by one or all of
+  this kind. The file stays where it is.
+- **Admin → Maintenance, Cache card:** thumbnails, audio analyses, audio
+  playback copies and display images, each with count, size, location
+  and **Delete**. All of it is recreated when needed.
+
+### Fixes
+
+- **Activity:** re-scan, folder scan and watch folders report their own
+  result ("Cataloged: n new · m known"). Before, a task could show the
+  summary of the previous one.
+- **Import rules:** the hint text for the oldest plausible date now
+  describes what the rule really does.
+- **Loupe:** the hint at the bottom promised "Enter = single view"; in
+  the loupe Enter does nothing. The hint is corrected.
+- **Docs:** after switching on the audio module, "Re-scan all locations"
+  does not take in any music, unlike described so far. Add folders that
+  were cataloged once one more time (Admin → Sources & import); watch
+  folders catch up on the music by themselves.
+
+### Security and robustness
+
+Before this release, everything added since 2026.09.3 was checked once
+more against crafted files and unlucky sequences of events:
+
+- **A broken tag no longer aborts a run.** A song with a nonsensical
+  genre or track number could abort intake and "Re-interpret" at that
+  file. Now only the interpretation of that one file drops out.
+- **Lyrics with timings and Finder tags are capped** (text length, number
+  of lines, line length, number of subtitle tracks). Crafted tags finish
+  in fractions of a second instead of blocking the background.
+- **Imports survive a restart properly.** An import with copy or move
+  that was running or waiting on shutdown reported every file as an
+  error afterwards; in move mode the remaining source files ended up in
+  the source's `_fehler` folder. Nothing was lost. Catalog only was never
+  affected.
+- **Pausing in the middle of a folder import** completes the files
+  already imported. Before, they showed up as duplicates on resuming.
+- **Read-only mode across the restart:** a saved import does not come
+  back if read-only mode applies in the meantime.
+- **Deleting the cache** now only removes files that fml created itself,
+  never a whole folder. A wrongly entered cache path in `config.toml`
+  can no longer cost you files of your own.
+- **Rejecting issues** only applies to "no thumbnail" on the server side.
+- **Foreign websites can no longer trigger anything.** Some admin actions
+  (deleting a cache, dismissing issues) could be set off blindly by a
+  foreign page in the same browser while fml was running. Now every
+  changing request must come from fml's own interface. Behind a reverse
+  proxy, pass the `Host` header through unchanged.
+- **Comment import:** at most 2,000 comments per song.
+- **Thumbnails before analyses** now really takes effect: the analysis
+  while scrolling used to run on an equal footing with the tiles.
+- Dependencies: unchanged, all 22 packages without an open advisory.
+
 ## 2026.09.3 (2026-09-25)
 
 fml now reads **Kodak Photo CD**: the pictures from the photo CDs of the

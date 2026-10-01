@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from .messages import dump as msg_dump
+from .processes import ffmpeg_quiet_args
 from .tools import NO_WINDOW, find_binary, media_input
 
 # Format-Version der Analyse-Datei. Anheben, wenn sich Inhalt oder Form
@@ -128,6 +129,9 @@ _NUM = r"(-?\d+(?:\.\d+)?|-?inf)"
 _RE_I = re.compile(r"^\s*I:\s+" + _NUM + r"\s+LUFS", re.M)
 _RE_LRA = re.compile(r"^\s*LRA:\s+" + _NUM + r"\s+LU\b", re.M)
 _RE_PEAK = re.compile(r"^\s*Peak:\s+" + _NUM + r"\s+dBFS", re.M)
+# Überschrift des Peak-Abschnitts: „True peak:" (peak=true) oder „Sample
+# peak:" (peak=sample, #225) — daraus der Schlüssel in der Analyse.
+_RE_PEAK_KIND = re.compile(r"^\s*(True|Sample) peak:", re.M)
 
 
 def _num(match: re.Match | None) -> float | None:
@@ -140,15 +144,18 @@ def parse_ebur128(stderr: str) -> dict[str, float | None] | None:
     """Den ``Summary:``-Block von ``ebur128`` lesen (letzter Block zählt).
 
     ``-inf`` (Stille) wird ``None``. ``None`` insgesamt, wenn kein Block da
-    ist (ffmpeg brach vorher ab)."""
+    ist (ffmpeg brach vorher ab). Der Peak heißt je nach Messung
+    ``true_peak`` (dBTP) oder ``sample_peak`` (dBFS, #225)."""
     at = stderr.rfind("Summary:")
     if at < 0:
         return None
     block = stderr[at:]
+    kind = _RE_PEAK_KIND.search(block)
+    key = "sample_peak" if kind and kind.group(1) == "Sample" else "true_peak"
     return {
         "integrated": _num(_RE_I.search(block)),
         "lra": _num(_RE_LRA.search(block)),
-        "true_peak": _num(_RE_PEAK.search(block)),
+        key: _num(_RE_PEAK.search(block)),
     }
 
 
@@ -210,14 +217,16 @@ def reduce_buckets(mins: array, maxs: array, buckets: int = BUCKETS) -> tuple[li
     return out_min, out_max
 
 
-def _filter_graph() -> str:
+def _filter_graph(true_peak: bool = True) -> str:
     names = [name for name, _ in BANDS]
     split = "".join(f"[{n}]" for n in names)
     bands = ";".join(f"[{n}]{flt}[{n}o]" for n, flt in BANDS)
     merged = "".join(f"[{n}o]" for n in names)
     return (
         "[0:a:0]asplit=2[meter][wave];"
-        "[meter]ebur128=peak=true:framelog=quiet,anullsink;"
+        # True Peak (4× Überabtastung) ist knapp die Hälfte der ganzen
+        # Analyse; Sample Peak kostet fast nichts (#225, Messung im Issue).
+        f"[meter]ebur128=peak={'true' if true_peak else 'sample'}:framelog=quiet,anullsink;"
         f"[wave]aformat=channel_layouts=mono,aresample={_RATE},asplit={len(BANDS)}{split};"
         f"{bands};"
         # join statt amerge: drei Mono-Eingänge hätten gleiche Layouts, die
@@ -227,15 +236,16 @@ def _filter_graph() -> str:
     )
 
 
-def analyze(source: str | Path) -> tuple[dict[str, Any] | None, str]:
+def analyze(source: str | Path, true_peak: bool = True) -> tuple[dict[str, Any] | None, str]:
     """Lautheit + dreibandige Wellenform einer Audiodatei in einem ffmpeg-Lauf.
+    ``true_peak=False``: Sample Peak statt True Peak (``[audio] true_peak``).
 
     ``(daten, "")`` bei Erfolg, ``(None, grund)`` bei Fehlschlag — wirft nicht.
     """
     cmd = [
         find_binary("ffmpeg") or "ffmpeg", "-nostdin", "-hide_banner", "-nostats",
-        "-v", "info", *media_input(source),
-        "-filter_complex", _filter_graph(),
+        "-v", "info", *ffmpeg_quiet_args(), *media_input(source),
+        "-filter_complex", _filter_graph(true_peak),
         "-map", "[out]", "-f", "s16le", "-c:a", "pcm_s16le", "pipe:1",
     ]
     try:
@@ -317,10 +327,10 @@ def _write_atomic(dest: Path, produce) -> bool:
         tmp.unlink(missing_ok=True)
 
 
-def generate_analysis(source: str | Path, dest: Path) -> bool:
+def generate_analysis(source: str | Path, dest: Path, true_peak: bool = True) -> bool:
     """Analyse nach ``dest`` (JSON). Pool-tauglich (Modulfunktion, picklebar)."""
     def produce(tmp: Path) -> tuple[bool, str]:
-        data, reason = analyze(source)
+        data, reason = analyze(source, true_peak)
         if data is None:
             return False, reason
         tmp.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
@@ -334,7 +344,7 @@ def generate_proxy(source: str | Path, dest: Path) -> bool:
         try:
             proc = subprocess.run(
                 [find_binary("ffmpeg") or "ffmpeg", "-nostdin", "-v", "error", "-y",
-                 *media_input(source), "-map", "0:a:0", "-map_metadata", "-1",
+                 *ffmpeg_quiet_args(), *media_input(source), "-map", "0:a:0", "-map_metadata", "-1",
                  "-c:a", "flac", "-f", "flac", str(tmp)],
                 capture_output=True, timeout=_TIMEOUT, **NO_WINDOW,
             )
@@ -373,7 +383,7 @@ def audio_items(conn) -> dict[str, tuple[str, str | None, list[str]]]:
 
 
 def warm_audio(conn, cache_dir: str | Path, *, progress=None, pool=None,
-               retry_failed: bool = False) -> dict[str, int]:
+               retry_failed: bool = False, true_peak: bool = True) -> dict[str, int]:
     """Fehlende Analysen erzeugen (Muster ``warm_thumbnails``).
 
     Proxies entstehen hier NICHT: nur beim ersten Abspielen in einem
@@ -386,6 +396,8 @@ def warm_audio(conn, cache_dir: str | Path, *, progress=None, pool=None,
     erzeugt neu; dauerhafte Analyse-Fehlschläge werden Scan-Probleme der Art
     ``audio``, Erfolge quittieren sie. Veraltete Analyse-Versionen gelten
     immer als fehlend. Mit ``pool`` parallel in kleinen Schüben.
+    ``true_peak`` gilt nur für neue Analysen; vorhandene behalten ihren
+    Peak-Wert (#225).
     """
     from concurrent.futures import wait
 
@@ -416,7 +428,9 @@ def warm_audio(conn, cache_dir: str | Path, *, progress=None, pool=None,
     index = skipped
 
     def report() -> None:
-        if progress is not None and (index % 10 == 0 or index == total):
+        # Jede Datei meldet: die Meldung ist zugleich die Dateigrenze, an der
+        # Pause/Vorrang greifen (ADR 0093) — Analysen dauern Sekunden je Song.
+        if progress is not None:
             progress(index, total, created, skipped, failed)
 
     def finish(issue_path: str, ok: bool, reason: str | None = None) -> None:
@@ -433,7 +447,6 @@ def warm_audio(conn, cache_dir: str | Path, *, progress=None, pool=None,
         report()
 
     batch: list[tuple[Any, str, Path]] = []
-    batch_size = (pool.workers * 2) if pool is not None else 1
 
     def drain() -> None:
         wait([f for f, _p, _d in batch])
@@ -449,13 +462,13 @@ def warm_audio(conn, cache_dir: str | Path, *, progress=None, pool=None,
             finish(issue_path, False)   # kein Fundort: kein Versuch, kein Marker
             continue
         if pool is None:
-            ok = fn(source, dest)
+            ok = fn(source, dest, true_peak)
             finish(issue_path, ok, None if ok else fail_reason(dest))
             conn.commit()
         else:
             key = f"{dest.suffix}:{file_hash}"
-            batch.append((pool.submit_call(key, fn, source, dest), issue_path, dest))
-            if len(batch) >= batch_size:
+            batch.append((pool.submit_call(key, fn, source, dest, true_peak), issue_path, dest))
+            if len(batch) >= pool.workers * 2:   # je Runde neu (ADR 0093)
                 drain()
     if batch:
         drain()

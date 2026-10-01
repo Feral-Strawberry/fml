@@ -24,6 +24,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from ..db.manual import parse_manual_date
 from ..db.store import drop_search_index_row, now_iso, update_search_index
 from ..messages import UserError, dump
 from . import filters
@@ -40,6 +41,7 @@ def apply_bulk(
     add_tag: str | None = None,
     model: str | None = None,
     note: str | None = None,
+    media_date: str | None = None,
     reject: bool = False,
     thumb_cache: str | Path | None = None,
     now: str | None = None,
@@ -57,11 +59,15 @@ def apply_bulk(
     add_tag = (add_tag or "").strip() or None
     model = (model or "").strip() or None
     note = (note or "").strip() or None
-    if reject and (rating is not None or add_tag or model or note):
+    # Manuelles Datum (ADR 0096): setzt für alle Treffer, geleert wird je
+    # Song im Detailpanel.
+    media_date = parse_manual_date(media_date) if (media_date or "").strip() else None
+    if reject and (rating is not None or add_tag or model or note or media_date):
         # Kuratieren auf Items, die im selben Durchlauf verschwinden, wäre
         # nie das Gewollte — ehrlich ablehnen statt still halb ausführen.
         raise UserError("errRejectExclusive")
-    if not reject and rating is None and add_tag is None and model is None and note is None:
+    if (not reject and rating is None and add_tag is None and model is None
+            and note is None and media_date is None):
         raise UserError("errNoAction")
     if rating is not None and rating not in (1, 2, 3, 4, 5):
         # 0 („löschen") gibt es hier bewusst nicht — die Basisbewertung füllt nur.
@@ -86,6 +92,8 @@ def apply_bulk(
                 changed = _apply_model(conn, model, ts)
                 summary["model_set"] = len(changed)
                 fts_dirty.update(changed)
+            if media_date is not None:
+                summary["date_set"] = _apply_date(conn, media_date, ts)
             if note is not None:
                 summary["noted"] = _apply_note(conn, note, ts)
                 fts_dirty.update(
@@ -190,6 +198,28 @@ def _apply_model(conn: sqlite3.Connection, model: str, ts: str) -> list[str]:
         (model, ts, ts),
     )
     return changed
+
+
+def _apply_date(conn: sqlite3.Connection, value: str, ts: str) -> int:
+    """Manuelles Datum setzen (ADR 0096) und nach ``items.media_date``
+    durchschreiben; liefert die Zahl der Items mit geändertem Datum."""
+    n = conn.execute(
+        f"""SELECT COUNT(*) FROM {_HITS} h
+             LEFT JOIN annotations a ON a.file_hash = h.file_hash
+            WHERE a.media_date IS NOT ?""", (value,),
+    ).fetchone()[0]
+    conn.execute(
+        f"""INSERT INTO annotations (file_hash, media_date, created_at, updated_at)
+            SELECT file_hash, ?, ?, ? FROM {_HITS} WHERE true
+            ON CONFLICT(file_hash) DO UPDATE SET
+                media_date = excluded.media_date, updated_at = excluded.updated_at""",
+        (value, ts, ts),
+    )
+    conn.execute(
+        f"UPDATE items SET media_date = ? WHERE file_hash IN (SELECT file_hash FROM {_HITS})",
+        (value,),
+    )
+    return int(n)
 
 
 def _apply_reject(

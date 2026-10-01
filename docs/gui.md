@@ -40,6 +40,9 @@ Port, Start per `start.bat --config name.toml`): [instanzen.md](instanzen.md).
 Suchfeld (Mitte), direkt daneben der **Sortier-Knopf** und die
 **Dichte S/M/L** (die Leiste unter der Suche gehört den Chips), Aktivitäts-Anzeige
 (pulsiert, wenn Scan/Wartung läuft - ein Link auf die Admin-Seite),
+die Knöpfe **Leistung** (Blitz = Normal, Blatt = Leise) und **Anhalten**
+(„Zz“) für Hintergrundaufgaben (siehe
+[Admin](admin.md#hintergrund-leistung-und-anhalten)),
 **Dark/Light-Umschalter** (Mond/Sonne; dieselbe Wahl gilt im Admin),
 Admin-Knopf (ein echter Link nach `/admin`: Klick öffnet den Admin,
 Mittelklick den Admin in einem zweiten Tab). Ist in der
@@ -62,8 +65,10 @@ können dieselbe Instanz in verschiedenen Sprachen ansehen (ADR 0054).
 Die Such-Grammatik versteht zusätzlich **englische
 Aliasse** für ihre deutschen Reste: `file:` = `datei:`, `location:` =
 `fundort:`, `portrait`/`square`/`landscape` = `hochformat`/`quadratisch`/
-`querformat`, `-asc`/`-desc` = `-auf`/`-ab`, `external` = `extern` und
-`unknown` = `unbekannt`. Beide Schreibweisen werden
+`querformat`, `-asc`/`-desc` = `-auf`/`-ab`, `external` = `extern`,
+`unknown` = `unbekannt`, `type:` = `typ:` (mit `image` = `bild`),
+`duration:` = `dauer:`, `generator:` = `tool:`, `codec:` = `video_codec:`
+und `albumartist:` = `interpret:`. Beide Schreibweisen werden
 immer verstanden, egal welche Sprache eingestellt ist; **kanonisch** (in
 Chips, gespeicherten Suchen und serialisierten Ausdrücken) bleibt die
 bisherige Schreibweise — gespeicherte Smart Folders bleiben unangetastet
@@ -90,13 +95,13 @@ die Modell-Liste darunter im Kontext zählen), **Nach Modell** - inklusive **„
 für Medien ohne interpretiertes Modellfeld (Midjourney, Gemini, ChatGPT, …);
 WAN-2.2-Zweistufen-Checkpoints (High-/Low-Noise) erscheinen als EIN Eintrag,
 der Tooltip nennt beide Rohnamen und der Klick filtert auf beide -,
-**Nach Jahr** (Erstelldatum; das Caret vor der Jahreszahl klappt die Monate
-auf - Alt-Bestände bekommen ihr Datum per „Re-Scan: alle Fundorte"),
 **Nach LoRA** (die beim Generieren benutzten LoRAs, meistgenutzte zuerst;
 in den langen Listen Generator, Modell und LoRA stehen bei aktiven Chips die
 Zeilen mit Treffern oben, die im Kontext leeren gedimmt unter einer
 Trennzeile „keine Treffer mit diesem Filter · 106 Modelle" - ohne aktiven Chip gibt es
-diese Zeile nicht).
+diese Zeile nicht),
+**Nach Jahr** (Erstelldatum; das Caret vor der Jahreszahl klappt die Monate
+auf - Alt-Bestände bekommen ihr Datum per „Re-Scan aller Fundorte").
 Darunter liegt der Sammelblock **„Weitere Kriterien"** (ab Werk
 zugeklappt, ein Klick auf die Überschrift klappt ihn auf; fml merkt sich
 den Zustand je Browser) mit
@@ -130,8 +135,9 @@ openai`). Das „+ Kriterium"-Popover und die Tipphilfe fügen weiterhin
 hinzu. Der Hinweis steht als Tooltip an jeder Gruppenüberschrift und an
 jeder Zeile - mit der Taste deines Systems (⌘ auf dem Mac, Strg sonst).
 Und beim ersten Mal, wenn ein Klick eine bestehende Auswahl ersetzt,
-erscheint kurz unter der Gruppe „Auswahl ersetzt · ⌘-Klick fügt hinzu
-(ODER)" - höchstens dreimal, dann ist die Regel gelernt.
+erscheint für einige Sekunden direkt unter der angeklickten Zeile
+„Auswahl ersetzt · ⌘-Klick fügt hinzu (ODER)" - höchstens dreimal, dann
+ist die Regel gelernt.
 
 Die Zähler **filtern mit**: Sobald Chips aktiv sind, zeigt jede Gruppe, wie
 viele Treffer ein Klick **im aktuellen Kontext** brächte - gerechnet gegen
@@ -157,8 +163,8 @@ führt so direkt zum zuletzt angeklickten Bild. Einzige Ausnahme ist der
 Klick auf **„Alle Medien"** in der Sidebar: das ist die Reset-Taste, die
 Galerie steht danach oben, ohne Auswahl.
 Der **Sortier-Knopf** (Hinzugefügt / Erstellt /
-Dateiname / Dateigröße / Container / Bewertung - Unbewertete und Undatierte
-zuletzt) und die **Dichte S/M/L** sitzen oben in der Topbar neben dem
+Dateiname / Dateigröße / Container / Bewertung / Dauer - Unbewertete und
+Undatierte zuletzt; in der Audioansicht zusätzlich Album und Manuell) und die **Dichte S/M/L** sitzen oben in der Topbar neben dem
 Suchfeld. Der Sortier-Knopf öffnet ein kleines Menü;
 ein **zweiter Klick auf den aktiven Eintrag dreht die Richtung** (Pfeil
 ↑/↓ am Knopf und am Chip). Die Sortierung ist Teil des Suchzustands: eine
@@ -174,7 +180,7 @@ Coverbild mit ♪, Dauer und ▶ (Leertaste spielt, siehe
 [Cover](audio.md#cover-fertige-songs-in-der-galerie)). **Klick** wählt ein Medium aus (Panel rechts),
 **Space** öffnet die Lupe (schnelles Durchblättern), **Doppelklick oder Enter** die Einzelbildansicht (Zoom + Metadaten); **Pfeiltasten** bewegen die Auswahl auch in der Übersicht (←/→ ein Medium, ↑/↓ eine Zeile).
 
-**Rechts - Detail-Panel:** Immer sichtbar. Von oben nach unten: Vorschau
+**Rechts - Detail-Panel:** Von oben nach unten: Vorschau
 (Klick → Lupe) · Dateiname, Typ, Format, Größe, **Rating-Punkte** ·
 **KURATIERT** (deine Tags und Notizen) · **GENERATION** (die
 interpretierten Felder: Modell, Sampler/Steps/CFG, Seed mit Klick-Kopieren,
@@ -192,12 +198,13 @@ von Seed-Serien; zu streng? Einzelne Chips entfernen lockert die Suche) ·
 A1111-Bildern mit Badge „ComfyUI · erzeugt" - siehe Workflow-Ansicht - plus
 **„A1111-Infotext kopieren"**: der unveränderte Infotext für PNG Info /
 txt2img in A1111 und Forge) ·
-aufklappbar **Roh-Metadaten** (Schicht 1, byte-treu mit Quell-Label) und
-**Fundorte** · **DATEI** (Format, Größe, **Erstellt** - das Erstelldatum
+**DATEI** (Format, Größe, **Erstellt** - das Erstelldatum
 mit Uhrzeit (UTC), nach dem „Nach Jahr" gruppiert und die Sortierung
 „Erstellt" sekundengenau ordnet; „ohne Datum" heißt: kein plausibles Datum
 gefunden, nur Datum ohne Uhrzeit: die Uhrzeit ließ sich für den
-Alt-Bestand nicht mehr sicher ermitteln -, Hinzugefügt, Hash). Medien ohne
+Alt-Bestand nicht mehr sicher ermitteln -, Hinzugefügt, Hash) · ganz
+unten aufklappbar **Roh-Metadaten** (Schicht 1, byte-treu mit Quell-Label)
+und **Fundorte**. Medien ohne
 erkannte Generierungs-Daten zeigen einen Hinweis - die Roh-Schicht bleibt
 immer einsehbar.
 
@@ -206,13 +213,31 @@ immer einsehbar.
 für Querformat-Bilder); Doppelklick auf die Trennlinie stellt den Standard
 wieder her. Die Wahl bleibt gespeichert.
 
+**Abschnitte einklappen:** Ein Klick auf die Überschrift eines Abschnitts
+(KURATIERT, GENERATION, WORKFLOW, Zeitkommentare, DATEI) klappt ihn ein
+oder aus (▾/▸). Eingeklappt bleibt nur die Überschrift stehen, bei
+GENERATION mit dem Modell als Kurzinfo. Die Wahl gilt für alle Medien und
+bleibt über Neustarts erhalten, wie links in der Seitenleiste.
+
+**Panel wegklappen:** Ganz rechts am Fensterrand liegt ein schmaler
+Streifen mit einem Pfeil auf halber Höhe - ein reiner Umschalter, der
+immer an derselben Stelle bleibt. Ein Klick darauf (oder die Taste
+**`P`**) klappt das ganze Panel weg (Pfeil **›**) bzw. holt es zurück
+(Pfeil **‹**). Die Galerie nutzt die frei gewordene
+Breite sofort für mehr Spalten, die Auswahl bleibt erhalten - praktisch auf
+kleinen Monitoren, etwa beim Markieren zum Ablehnen oder für
+Sammel-Aktionen. Auch dieser Zustand bleibt gespeichert. Lupe und
+Einzelbildansicht zeigen ihre Metadaten wie immer.
+
 ## Einzelbildansicht (Zoom + Metadaten)
 
 **Doppelklick oder Enter** öffnet das ausgewählte Medium in der
 Einzelbildansicht - der Arbeitsansicht mit echtem Zoom: Stufen
 **Anpassen / max. 100 % / 50 / 100 / 200 %**, **Mausrad** zoomt stufenlos,
 **Doppelklick im Bild** springt zwischen Anpassen und 100 %, gezogen wird
-mit der Maus. Die Prozente meinen **echte Pixel**: Bei 100 % entspricht
+mit der Maus. Ein kleiner **Navigator** zeigt das ganze Bild mit dem
+sichtbaren Ausschnitt als Rahmen; Klicken oder Ziehen darin verschiebt den
+Ausschnitt. Die Prozente meinen **echte Pixel**: Bei 100 % entspricht
 ein Bildpixel einem Bildschirmpixel - unabhängig von OS-Skalierung
 (Windows 150 %, Retina-Macs) und Browser-Zoom. So ist 100 % überall
 pixelscharf und die verlässliche Stufe, um Details und Artefakte zu
@@ -281,7 +306,9 @@ ComfyUI-Edit-Workflows.
 **Öffnen:** genau zwei Medien markieren (Strg/Cmd-Klick oder
 Shift-Klick), dann **Taste `C`** oder der Knopf **⇆ Vergleichen** in der
 Kopfzeile der Galerie (erscheint nur bei genau zwei markierten Medien).
-Das zuerst markierte Bild ist **A** (links), das zweite **B** (rechts).
+Mit Strg/Cmd-Klick ist das zuerst markierte Bild **A** (links), das
+zweite **B** (rechts); nach einem Shift-Klick ist es umgekehrt. **Tab**
+tauscht die Seiten.
 
 - **Wischkante:** mit der Maus oder dem Finger irgendwo im Bild ziehen;
   **`←`/`→`** verschieben sie in kleinen Schritten (mit Shift grob),
@@ -300,7 +327,8 @@ Das zuerst markierte Bild ist **A** (links), das zweite **B** (rechts).
   auf **A** - mit Tab holt man das andere Bild nach A. Nach dem Ablehnen
   schließt sich der Vergleich.
 - **Ungleiche Maße:** Beide Bilder werden auf die Breite von A gebracht,
-  oben rechts erscheint der Hinweis „Maße unterschiedlich".
+  oben neben dem Titel erscheint der Hinweis „Maße unterschiedlich · an
+  Breite angepasst".
 - **Esc, Enter oder ✕** führen zur Galerie zurück; die Zweier-Auswahl
   bleibt bestehen.
 
@@ -379,7 +407,24 @@ Dateien extrahiert wurde.
 - **Tags:** Im Panel unter KURATIERT eintippen und Enter - bereits vergebene
   Tags werden beim Tippen vorgeschlagen (dein Vokabular). ✕ am Tag löst ihn
   vom Medium; im Vokabular bleibt er erhalten.
+- **Finder-Tags (macOS):** Die farbigen Markierungen aus dem Finder werden
+  beim Import und beim Scan zu normalen Tags, reine Farben wie „Rot"
+  ebenso. Ein Tag mit Farbe zeigt seinen Farbpunkt auf der Kachel, in der
+  Listenzeile und im Panel; die Marke „Finder" am Tag zeigt die Herkunft.
+  fml liest nur und schreibt nie in den Finder zurück. Später im Finder
+  vergebene Tags holt **Admin → Wartung → Re-Scan aller Fundorte** nach;
+  im Finder entfernte Tags bleiben in fml stehen (✕ entfernt sie).
 - **Notizen:** Freitext im Panel; speichert beim Verlassen des Feldes.
+- **Datum von Hand:** Feld unter KURATIERT, für alle Medienarten. Gedacht
+  für Dateien, deren eigenes Datum falsch ist (frisch gerippte alte CDs,
+  eingescannte Fotos): `1997`, `1997-05` oder `1997-05-12`, auch
+  `12.05.1997`. Das Datum gilt **so genau, wie es eingegeben wurde** — `1997`
+  erscheint als „1997", zählt in der Seitenleiste zum Jahr 1997 und passt
+  auf `year: 1997`. Es **gewinnt immer** gegen Metadaten und Dateistempel und
+  überlebt jeden Re-Scan. Im Datei-Block steht dann „✎ von Hand" neben
+  „Erstellt". Leeren des Feldes holt das abgeleitete Datum zurück. Wirkt
+  auf die ganze Auswahl; die Datei selbst bleibt unverändert, auch ihr
+  Platz in der Library.
 - **Ablehnen (ersetzt Löschen):** Taste **Entf** auf die Auswahl (auch
   Multiselect). Ein Dialog nennt die Anzahl und erklärt die Folgen; nach
   Bestätigung verschwindet das Medium aus der Bibliothek
@@ -400,8 +445,10 @@ Dateien extrahiert wurde.
 Für „diese Suche eingrenzen, dann ALLE Treffer taggen/bewerten" gibt es den
 Knopf **⚡ Sammel-Aktion** rechts in der Kopfzeile über der Galerie (neben
 „Filter zurücksetzen"). Er öffnet einen Dialog, der
-zeigt, was getroffen wird (die Chips + Trefferzahl), und fünf Aktionen
-anbietet - egal ob 50 oder 20.000 Treffer:
+zeigt, was getroffen wird (die Chips + Trefferzahl), und sechs Aktionen
+anbietet - egal ob 50 oder 20.000 Treffer (in der Audioansicht kommt
+„Zeitkommentare → Exportieren" dazu, siehe
+[Audio](audio.md#kommentare-mit-einem-anderen-fml-austauschen)):
 
 - **Basisbewertung** (1-5 ★): füllt **nur Unbewertete** - bereits vergebene
   Bewertungen bleiben unangetastet. Nichts wird zerstört.
@@ -409,15 +456,20 @@ anbietet - egal ob 50 oder 20.000 Treffer:
   übersprungen - die Zusammenfassung sagt ehrlich, wie viele).
 - **Modell setzen:** wie die Modell-Zuweisung im Panel, nur für alle Treffer
   (überschreibt ein vorhandenes manuelles Modell).
+- **Datum:** wie das Datum von Hand im Panel, für alle Treffer —
+  eine ganze CD auf einmal (überschreibt ein vorhandenes manuelles Datum;
+  zurücksetzen geht je Medium im Panel).
 - **Notiz anhängen:** der Text wird an vorhandene Notizen **angehängt**
   (neue Zeile), nie überschrieben.
 - **Ablehnen:** alle Treffer aus dem Katalog nehmen + Hashes sperren (wie
   Entf, s. o. - die Dateien bleiben unangetastet). Wirkt bewusst auch auf
   Bewertete und läuft **allein**, nicht kombiniert mit anderen Aktionen.
 
-Gibt es gerade eine Multiselect-Auswahl, fragt der Dialog, ob die Aktion auf
-die **Auswahl (N)** oder auf **alle Treffer (M)** wirken soll. Ohne Chips
-wirkt sie ehrlich auf die ganze Bibliothek - die Zahl steht groß im Dialog.
+**Achtung, Auswahl:** Ist beim Öffnen etwas ausgewählt, auch nur eine
+einzelne angeklickte Kachel, bietet der Dialog oben **Auswahl (N)** und
+**alle Treffer (M)** an, und **Auswahl ist vorgewählt**. Wer das ganze
+Suchergebnis meint, stellt dort um. Ohne Chips heißt die zweite Möglichkeit
+„die ganze Bibliothek" - die Zahl steht groß im Dialog.
 Der Anwenden-Knopf fragt beim ersten Klick noch einmal nach
 („Wirklich anwenden auf …?"), der zweite Klick führt aus. Danach zeigt der
 Dialog eine Zusammenfassung, und Grid + Seitenleiste frischen sich auf.
@@ -564,7 +616,9 @@ year: 2022 | unbekannt sort: created
 Direktive **`sort: <schlüssel>`** (einmal pro Ausdruck) legt die Sortierung
 fest und wird mit der Suche gespeichert: `added` (hinzugefügt), `created`
 (Erstelldatum), `size`, `name`, `container`, `rating`, `duration` (Dauer,
-Audio und Video). Die Richtung dreht
+Audio und Video), nur in der Audioansicht `album` und `manual` (eigene
+Reihenfolge einer gespeicherten Suche, siehe
+[Audio](audio.md#eigene-reihenfolge-einer-gespeicherten-suche)). Die Richtung dreht
 ein Suffix: `sort: created-auf` (älteste zuerst), `sort: name-ab` (Z–A) -
 englisch als `-asc`/`-desc` (`sort: created-asc`).
 Ohne Suffix gilt die sinnvolle Standardrichtung (Neuestes/Größtes/Bestes
@@ -646,7 +700,7 @@ Bearbeiten-Modus, „Ranking speichern" führt zurück. Alles Weitere
 Der Knopf oben rechts führt direkt in den **Admin** (ein echter Link nach
 `/admin`: Lesezeichen, Mittelklick und Rechtsklick → neuer Tab). Das
 frühere Schnellmenü mit Wartungsaktionen gibt es nicht mehr; Re-Scan, Neu
-interpretieren und Thumbnail-Cache leeren stehen unter Admin → Wartung,
+interpretieren und das Löschen der Caches (Karte „Cache") stehen unter Admin → Wartung,
 Dark/Light sitzt als Mond/Sonne-Knopf neben dem Sprachumschalter.
 
 Der **Admin** ist seit ADR 0074 eine **eigene Seite** unter `/admin` mit
@@ -673,18 +727,23 @@ Kacheln, deren Inhalt sich geändert hat, werden neu gefüllt.
 | `Space` | Lupe öffnen/schließen |
 | `Enter` / Doppelklick | Einzelbildansicht öffnen/schließen |
 | `C` | A/B-Vergleich zweier markierter Bilder öffnen |
+| `P` | Rechtes Panel wegklappen/zurückholen |
 | `+` / `-` | Zoomen (Einzelbildansicht, Vergleich) |
 | `1`–`5` / `0` | Bewerten / Bewertung löschen (Toggle) |
-| `←` / `→` | Blättern - in Übersicht und Lupe; Wischkante im Vergleich |
+| `←` / `→` | Blättern - in Übersicht, Lupe und Einzelbildansicht; Wischkante im Vergleich (mit Shift grob) |
 | `↑` / `↓` | Eine Zeile hoch/runter (Übersicht) |
-| `Entf` | Auswahl ablehnen (Item raus + Sperre, Datei bleibt) |
-| `Pos1` / `Ende` | Erstes/letztes Medium (Lupe); Wischkante ganz links/rechts (Vergleich) |
+| `Entf` | Auswahl ablehnen (Item raus + Sperre, Datei bleibt); im Vergleich: Seite A ablehnen. Auf Mac-Tastaturen ohne Entf-Taste: fn+⌫ |
+| `Pos1` / `Ende` | Erstes/letztes Medium (Lupe, Einzelbildansicht); Wischkante ganz links/rechts (Vergleich) |
 | `Tab` / `Space` | Vergleich: A und B tauschen / Wisch → nur A → nur B |
-| `Esc` | Obersten Dialog schließen, sonst offenes Overlay (Lupe, Einzelbild) - sonst: **Filter zurücksetzen** |
+| `Esc` | Obersten Dialog schließen, sonst offenes Overlay (Lupe, Einzelbild, Vergleich) oder Menü - sonst: **Filter zurücksetzen**. Im Suchfeld: leert zuerst die Eingabe |
+
+Die Tasten der Audioansicht (Leertaste spielt, `K`, `C`, `Alt+↑/↓`) stehen
+unter [Audio](audio.md#audioansicht), die der Rankings unter
+[Rankings](rankings.md).
 
 ### Dialoge und hängende Anfragen
 
-Dialoge (Neues Ranking, Speichern, Sammel-Aktion, Ablehnen - im Admin nur noch
+Dialoge (Neues Ranking, Speichern, Sammel-Aktion, Ablehnen, Cover wählen, Hilfe - im Admin nur noch
 Ordner-Auswahl und Bestätigung) dürfen übereinander liegen: die
 Ordner-Auswahl öffnet sich über der Seite bzw. einer Bestätigung, ein
 Abbruch lässt die bisherige Eingabe stehen. `Esc` schließt immer nur den obersten
@@ -737,7 +796,7 @@ Einzelbild; `codec: prores` im Suchfeld findet alle Betroffenen
   anzeigen) oder ein H.264-Export. Welche Codecs im eigenen Bestand
   stecken, zeigt `codec: prores` im Suchfeld bzw. das
   [Diagnose-Kommando](scanning.md#diagnose-video-codecs-im-bestand); beim
-  Aufnehmen erscheint das Problem unter Admin → Probleme (Art `playback`).
+  Aufnehmen erscheint das Problem unter Admin → Probleme (Karte „Abspielbarkeit").
 - **TIFF, PSD und Kodak Photo CD** zeigt kein Browser nativ — Galerie, Lupe und
   Einzelbildansicht rendern dafür serverseitig ein JPEG (das Original bleibt
   unangetastet). Photo CD in der größten Stufe (3072×2048). PSD nutzt das eingebettete Composite. PSDs, die **ohne

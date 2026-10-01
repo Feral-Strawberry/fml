@@ -12,8 +12,10 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from ..db import folders as folders_db
 from ..db import manual
 from ..hashing import hash_file
+from ..messages import UserError
 from . import filters
 from .cache import EpochCache
 from typing import Any, Callable
@@ -317,7 +319,10 @@ def year_counts(conn: sqlite3.Connection) -> dict[str, Any]:
         year = r["month"][:4]
         bucket = years.setdefault(year, {"year": year, "count": 0, "months": []})
         bucket["count"] += r["count"]
-        bucket["months"].append({"month": r["month"], "count": r["count"]})
+        # Nur-Jahr-Daten (Tag-Jahr eines Songs, manuell „1997", ADR 0096)
+        # zählen zum Jahr, haben aber keinen Monat.
+        if len(r["month"]) == 7:
+            bucket["months"].append({"month": r["month"], "count": r["count"]})
     return {"years": list(years.values()), "undated": undated}
 
 
@@ -677,6 +682,42 @@ def tool_counts(
     ]
 
 
+# Musiksammlung (#224, ADR 0094): effektiver Album-Interpret je Song — das
+# album_artist-Tag, sonst der Interpret; dieselbe Regel wie ``interpret:``.
+_INTERPRET_ROWS = """
+    SELECT file_hash, value_text AS name FROM interpreted_metadata
+     WHERE field = 'album_artist' AND value_text != ''
+    UNION
+    SELECT file_hash, value_text FROM interpreted_metadata
+     WHERE field = 'artist' AND value_text != ''
+       AND file_hash NOT IN (SELECT file_hash FROM interpreted_metadata
+                              WHERE field = 'album_artist' AND value_text != '')"""
+
+
+def music_counts(
+    conn: sqlite3.Connection, field: str, *, hits: str | None = None
+) -> list[dict[str, Any]]:
+    """Seitenleisten-Gruppen der Audioansicht (#224): ``interpret``
+    (effektiver Album-Interpret), ``album`` oder ``genre`` mit Song-Zählern,
+    alphabetisch wie in jeder Musiksammlung; optional innerhalb einer
+    Treffermenge. Ohne Obergrenze — eine Sammlung mit tausend Alben zeigt
+    tausend Zeilen (gedimmte leere stehen gesammelt darunter)."""
+    rows = (_INTERPRET_ROWS if field == filters.INTERPRET else
+            f"SELECT file_hash, value_text AS name FROM interpreted_metadata"
+            f" WHERE field = '{field}' AND value_text != ''")
+    join = f"JOIN {hits} ht ON ht.file_hash = r.file_hash" if hits else ""
+    return [
+        {"name": r["name"], "count": r["count"]}
+        for r in conn.execute(
+            f"""SELECT r.name, COUNT(DISTINCT r.file_hash) AS count
+                  FROM ({rows}) r {join}
+                 GROUP BY r.name ORDER BY r.name COLLATE NOCASE""")
+    ]
+
+
+_MUSIC_FACETS = {"interprets": filters.INTERPRET, "albums": "album", "genres": "genre"}
+
+
 def tag_counts(
     conn: sqlite3.Connection, *, limit: int = 500, hits: str | None = None
 ) -> list[dict[str, Any]]:
@@ -781,6 +822,7 @@ def _facets_base(conn: sqlite3.Connection) -> dict[str, Any]:
         "lyrics": has_field_counts(conn, "lyrics"),
         "fundort": fundort_counts(conn),
         "tags": tag_counts(conn),
+        **{key: music_counts(conn, field) for key, field in _MUSIC_FACETS.items()},
     }
 
 
@@ -827,7 +869,8 @@ def _facets_context(
             months = [{"month": m["month"], "count": by_month.get(m["month"], 0)}
                       for m in y["months"]]
             years["years"].append({"year": y["year"],
-                                   "count": sum(m["count"] for m in months),
+                                   "count": sum(m["count"] for m in months)
+                                   + by_month.get(y["year"], 0),   # Nur-Jahr (ADR 0096)
                                    "months": months})
         years["undated"] = by_month.get(None, 0) if base["undated_total"] else 0
 
@@ -865,6 +908,17 @@ def _facets_context(
         tags = [{"tag": t["tag"], "count": counts.get(t["tag"], 0)}
                 for t in base["tags"]]
 
+    # Interpret/Album/Genre (#224): globale Zeilen, Zähler im Kontext der
+    # anderen Chips — wie der Generator.
+    music: dict[str, list[dict[str, Any]]] = {}
+    for key, field in _MUSIC_FACETS.items():
+        hits = hits_mgr.table(_group_predicates(predicates, field=field))
+        music[key] = base.get(key, [])
+        if hits is not None:
+            counts = {r["name"]: r["count"] for r in music_counts(conn, field, hits=hits)}
+            music[key] = [{"name": x["name"], "count": counts.get(x["name"], 0)}
+                          for x in base.get(key, [])]
+
     return {
         "media_kinds": media_kinds,
         "containers": containers,
@@ -877,6 +931,7 @@ def _facets_context(
         "lyrics": lyrics,
         "fundort": fundort,
         "tags": tags,
+        **music,
     }
 
 
@@ -976,7 +1031,7 @@ def view_base(
                            base_ratings=base_ratings, view_preds=view_preds)
     live = lambda rows: [r for r in rows if r["count"]]   # noqa: E731
     facets = dict(full["facets"])
-    for key in ("media_kinds", "containers", "loras", "tools", "tags"):
+    for key in ("media_kinds", "containers", "loras", "tools", "tags", *_MUSIC_FACETS):
         facets[key] = live(facets[key])
     years = []
     for y in facets["years"]:
@@ -1146,8 +1201,75 @@ _PAGED_SORTS = {
     ),
 }
 
+# Album-Sortierung (#224, ADR 0094): effektiver Album-Interpret → Album →
+# CD → Titelnummer → Dateiname als EIN Vergleichstext (Nummern vierstellig,
+# damit 10 hinter 9 steht; der Dateiname ordnet Alben ohne Titelnummern —
+# Rips heißen „01 Titel.mp3"); Songs ganz ohne Album-Tags ans Ende. Die Tags kommen aus
+# EINER Pivot-Abfrage über interpreted_metadata (ein Index-Lauf) — fünf
+# korrelierte Unterabfragen je Song kosteten bei 30k Songs 420 ms je Seite,
+# die Pivot-Form 115 ms; weitergeblättert wird aus dem Trefferlisten-Cache.
+_ALBUM_JOIN = """ LEFT JOIN (
+    SELECT file_hash AS mh,
+           MIN(CASE WHEN field = 'album_artist' THEN value_text END) AS aa,
+           MIN(CASE WHEN field = 'artist' THEN value_text END) AS ar,
+           MIN(CASE WHEN field = 'album' THEN value_text END) AS al,
+           MIN(CASE WHEN field = 'disc' THEN CAST(value_text AS INTEGER) END) AS di,
+           MIN(CASE WHEN field = 'track' THEN CAST(value_text AS INTEGER) END) AS tr
+      FROM interpreted_metadata
+     WHERE field IN ('album_artist', 'artist', 'album', 'disc', 'track') AND value_text != ''
+     GROUP BY file_hash) mk ON mk.mh = i.file_hash"""
+_ALBUM_KEY = (
+    "(CASE WHEN mk.mh IS NULL THEN NULL ELSE"
+    " lower(COALESCE(mk.aa, mk.ar, '')) || char(31) || lower(COALESCE(mk.al, ''))"
+    " || char(31) || printf('%04d', COALESCE(mk.di, 0))"
+    " || char(31) || printf('%04d', COALESCE(mk.tr, 0))"
+    f" || char(31) || lower({_BASENAME_FL}) END)"
+)
+_PAGED_SORTS["album"] = (
+    _ALBUM_JOIN + _FIRST_LOCATION_JOIN,
+    f"{_ALBUM_KEY} IS NULL, {_ALBUM_KEY} ASC, i.file_hash",
+    "page.sortval IS NULL, page.sortval ASC, i.file_hash",
+    f"{_ALBUM_KEY} AS sortval",
+)
+_PAGED_SORTS["album-ab"] = (
+    _ALBUM_JOIN + _FIRST_LOCATION_JOIN,
+    f"{_ALBUM_KEY} IS NULL, {_ALBUM_KEY} DESC, i.file_hash DESC",
+    "page.sortval IS NULL, page.sortval DESC, i.file_hash DESC",
+    f"{_ALBUM_KEY} AS sortval",
+)
+# Manuelle Reihenfolge einer gespeicherten Suche (#218, ADR 0095): Treffer
+# mit Position zuerst, der Rest in Hinzufüge-Reihenfolge dahinter (neu
+# Getaggtes hängt sich hinten an). ``{folder}`` setzt _paged_sort als
+# Ganzzahl ein — der Schlüssel heißt dann ``manual@<id>``.
+_PAGED_SORTS["manual"] = (
+    " LEFT JOIN folder_order fo ON fo.file_hash = i.file_hash AND fo.folder_id = {folder}",
+    "fo.position IS NULL, fo.position ASC, i.first_seen_at ASC, i.file_hash",
+    "page.sortval IS NULL, page.sortval ASC, i.first_seen_at ASC, i.file_hash",
+    "fo.position AS sortval",
+)
+_PAGED_SORTS["manual-ab"] = (
+    _PAGED_SORTS["manual"][0],
+    "fo.position IS NULL, fo.position DESC, i.first_seen_at DESC, i.file_hash DESC",
+    "page.sortval IS NULL, page.sortval DESC, i.first_seen_at DESC, i.file_hash DESC",
+    "fo.position AS sortval",
+)
+
 # Für den Whitelist-Abgleich (?sort=-Parameter und Kopplungs-Test).
 _SORTS = _PLAIN_SORTS | _PAGED_SORTS
+
+
+def _list_cached(sort_key: str, filtered: bool) -> bool:
+    """Trefferlisten-Cache (ADR 0048) auch ungefiltert für die teuren
+    Sortierungen der Audioansicht (Album, manuell): einmal je Epoche sortieren,
+    dann blättert die Liste aus dem Slice."""
+    return filtered or sort_key.startswith(("album", "manual"))
+
+
+def _paged_sort(sort_key: str) -> tuple[str, str, str, str]:
+    """Bauform einer Sorter-Sortierung; ``manual@<id>`` mit Ordner-Id."""
+    base, _, folder = sort_key.partition("@")
+    join, inner, outer, carry = _PAGED_SORTS[base]
+    return join.format(folder=int(folder or 0)), inner, outer, carry
 
 
 def rating_counts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -1169,6 +1291,7 @@ def _grid_query_parts(
     filter_expr: str | None,
     dupes: bool,
     view_preds: tuple[filters.Predicate, ...] = (),
+    folder: int | None = None,
 ) -> tuple[str, list[Any], str, bool]:
     """Gemeinsamer WHERE-/Sortier-Bau der Galerie-Queries.
 
@@ -1223,6 +1346,10 @@ def _grid_query_parts(
             "(SELECT COUNT(*) FROM file_locations l2 WHERE l2.file_hash = i.file_hash) > 1"
         )
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+    # Manuell (#218) gibt es nur mit gespeicherter Suche: die Reihenfolge
+    # gehört ihr. Ohne Ordner fällt die Sortierung auf „Hinzugefügt" zurück.
+    if sort_key.split("-")[0] == "manual":
+        sort_key = f"{sort_key}@{int(folder)}" if folder else "added"
     return where_sql, params, sort_key, len(where) > n_base
 
 
@@ -1230,7 +1357,7 @@ def _sort_join_order(sort_key: str) -> tuple[str, str]:
     """(Zusatz-JOIN, ORDER BY) der Hash-Reihenfolge für einen Sortierschlüssel."""
     if sort_key in _PLAIN_SORTS:
         return "", _PLAIN_SORTS[sort_key]
-    join, order_by, _, _ = _PAGED_SORTS[sort_key]
+    join, order_by, _, _ = _paged_sort(sort_key)
     return join, order_by
 
 
@@ -1292,6 +1419,7 @@ def list_items(
     scope: dict | None = None,
     view_preds: tuple[filters.Predicate, ...] = (),
     with_max_duration: bool = False,
+    folder: int | None = None,
 ) -> dict[str, Any]:
     """Eine Seite des Bestands fürs Grid, Sortierung per Whitelist (``_SORTS``).
 
@@ -1315,10 +1443,12 @@ def list_items(
     Ansicht (ADR 0085) — gefiltert zählt er nicht als Filter.
     ``with_max_duration`` legt ``max_duration`` bei: die längste Dauer der
     Treffermenge, die gemeinsame Zeitachse der Audioliste (ADR 0087).
+    ``folder`` = offene gespeicherte Suche, Grundlage der Sortierung
+    „manuell" (#218); ohne sie fällt ``manual`` auf ``added`` zurück.
     """
     where_sql, params, sort_key, filtered = _grid_query_parts(
         sort=sort, model=model, rating=rating, filter_expr=filter_expr, dupes=dupes,
-        view_preds=view_preds,
+        view_preds=view_preds, folder=folder,
     )
     display = _GRID_DISPLAY_SQL
     extra: dict[str, Any] = {}
@@ -1328,7 +1458,7 @@ def list_items(
         extra["max_duration"] = (
             cache.get(("maxdur", where_sql, tuple(params)), compute, scope=scope)
             if cache is not None and filtered else compute())
-    if cache is not None and filtered:
+    if cache is not None and _list_cached(sort_key, filtered):
         # Trefferlisten-Cache (ADR 0048), NUR für gefilterte Zustände: die
         # fertig sortierte Hash-Liste einmal materialisieren, an die
         # Schreib-Epoche binden — jedes Häppchen ist dann Slice + EINE
@@ -1370,7 +1500,7 @@ def list_items(
     else:
         # "paged" (ADR 0039): erst die schlanke Hash-Seite in Ordnung
         # bringen, die Anzeige-Subqueries laufen dann nur für diese Seite.
-        join, inner_order, outer_order, carry = _PAGED_SORTS[sort_key]
+        join, inner_order, outer_order, carry = _paged_sort(sort_key)
         inner = (
             f"SELECT i.file_hash AS h{', ' + carry if carry else ''}"
             f" FROM items i{join}{where_sql}"
@@ -1396,6 +1526,7 @@ def item_position(
     dupes: bool = False,
     cache: EpochCache | None = None,
     view_preds: tuple[filters.Predicate, ...] = (),
+    folder: int | None = None,
 ) -> int | None:
     """Grid-Position (0-basiert) eines Items in der Treffermenge — oder ``None``.
 
@@ -1409,9 +1540,9 @@ def item_position(
     """
     where_sql, params, sort_key, filtered = _grid_query_parts(
         sort=sort, model=model, rating=rating, filter_expr=filter_expr, dupes=dupes,
-        view_preds=view_preds,
+        view_preds=view_preds, folder=folder,
     )
-    if cache is not None and filtered:
+    if cache is not None and _list_cached(sort_key, filtered):
         key = ("items", sort_key, where_sql, tuple(params))
         hashes = cache.get(
             key, lambda: _materialize_hits(conn, sort_key, where_sql, params)
@@ -1429,6 +1560,38 @@ def item_position(
         (*params, file_hash),
     ).fetchone()
     return row[0] - 1 if row else None
+
+
+def move_in_folder(
+    conn: sqlite3.Connection, folder_id: int, file_hash: str, *,
+    before: str | None = None, after: str | None = None,
+    view_preds: tuple[filters.Predicate, ...] = (),
+) -> int:
+    """Einen Treffer der gespeicherten Suche vor bzw. hinter einen anderen
+    setzen (#218, ADR 0095) — in der aufsteigenden manuellen Reihenfolge.
+
+    Grundlage ist der GESPEICHERTE Ausdruck (plus Grundbereich der Ansicht),
+    nicht die Chips des Moments: zusätzliche Chips engen die Liste nur ein,
+    die relative Reihenfolge bleibt dieselbe. Danach wird die ganze
+    Trefferliste 1..n durchnummeriert (Playlists sind klein; auch 10k Songs
+    sind ein Schreibgriff). Liefert die neue Position (0-basiert).
+    Wirft ``UserError``, wenn Suche, Song oder Nachbar nicht passen."""
+    folder = folders_db.get(conn, folder_id)
+    target = before or after
+    if folder is None or not target or (before and after):
+        raise UserError("folderOrderInvalid")
+    where_sql, params, _sort, _filtered = _grid_query_parts(
+        sort="manual", model=None, rating=None, filter_expr=folder["expression"],
+        dupes=False, view_preds=view_preds, folder=folder_id,
+    )
+    hashes = _materialize_hits(conn, f"manual@{folder_id}", where_sql, params)
+    if file_hash not in hashes or target not in hashes or target == file_hash:
+        raise UserError("folderOrderInvalid")
+    hashes.remove(file_hash)
+    index = hashes.index(target) + (1 if after else 0)
+    hashes.insert(index, file_hash)
+    folders_db.write_order(conn, folder_id, hashes)
+    return index
 
 
 # Anzeige-Spalten einer Galerie-Seite (Issue #85): das unäre Plus vor
@@ -1453,10 +1616,16 @@ _GRID_DISPLAY_SQL = """
                     (SELECT value_text FROM interpreted_metadata m
                       WHERE m.file_hash = i.file_hash AND +m.field = 'model'
                         AND m.value_text != '' LIMIT 1)) AS model,
-           (SELECT json_group_array(json_array(c.id, c.at_ms, c.text))
-              FROM (SELECT id, at_ms, text FROM time_comments
+           (SELECT json_group_array(json_array(c.id, c.at_ms, c.text, c.source))
+              FROM (SELECT id, at_ms, text, source FROM time_comments
                      WHERE file_hash = i.file_hash ORDER BY at_ms, id) c) AS comments,
            (SELECT cover_hash FROM covers v WHERE v.file_hash = i.file_hash) AS cover,
+           -- Farben der Tags (Finder-Tags, ADR 0097) für die Punkte auf
+           -- Kachel und Listenzeile: je Farbe einmal, feste Reihenfolge.
+           (SELECT group_concat(color) FROM (
+               SELECT DISTINCT t.color FROM item_tags it JOIN tags t ON t.id = it.tag_id
+                WHERE it.file_hash = i.file_hash AND t.color IS NOT NULL
+                ORDER BY t.color)) AS colors,
            -- Eingebettetes Bild eines Songs (#198): nur für Audio-Zeilen
            -- gerechnet (CASE), dieselbe Bedingung wie manual.has_embedded_picture.
            CASE WHEN i.media_kind = 'audio' THEN EXISTS (
@@ -1464,7 +1633,26 @@ _GRID_DISPLAY_SQL = """
                 WHERE r.file_hash = i.file_hash
                   AND (r.value_text LIKE '{"mime": %'
                        OR (r.keyword = 'codec_type' AND r.value_text = 'video')))
-           END AS embedded
+           END AS embedded,
+           -- Interpret und Album eines Songs (#224) für die Listenzeile.
+           CASE WHEN i.media_kind = 'audio' THEN COALESCE(
+               (SELECT value_text FROM interpreted_metadata m
+                 WHERE m.file_hash = i.file_hash AND +m.field = 'artist'
+                   AND m.value_text != '' ORDER BY m.ordinal LIMIT 1),
+               (SELECT value_text FROM interpreted_metadata m
+                 WHERE m.file_hash = i.file_hash AND +m.field = 'album_artist'
+                   AND m.value_text != '' LIMIT 1))
+           END AS artist,
+           CASE WHEN i.media_kind = 'audio' THEN
+               (SELECT value_text FROM interpreted_metadata m
+                 WHERE m.file_hash = i.file_hash AND +m.field = 'album'
+                   AND m.value_text != '' LIMIT 1)
+           END AS album,
+           -- Abschnitte des getimten Songtexts (#234) für die Welle der Zeile.
+           CASE WHEN i.media_kind = 'audio' THEN
+               (SELECT value_text FROM interpreted_metadata m
+                 WHERE m.file_hash = i.file_hash AND +m.field = 'song_sections' LIMIT 1)
+           END AS sections
       FROM items i
     """
 
@@ -1494,16 +1682,23 @@ def _item_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
             "duration": r["duration"],
             # Zeitkommentare (#163): Pins und Zähler der Listenzeile ohne
             # eigene Anfrage je Zeile; nur, wo es welche gibt.
-            **({"comments": [{"id": c[0], "at_ms": c[1], "text": c[2]}
+            **({"comments": [{"id": c[0], "at_ms": c[1], "text": c[2], "source": c[3]}
                              for c in json.loads(r["comments"])]}
                if r["comments"] and r["comments"] != "[]" else {}),
             # Cover eines Songs (#165): Kachel und Listenzeile zeigen sein
             # Vorschaubild, ohne eigenen Thumbnail-Auftrag.
             **({"cover": r["cover"]} if r["cover"] else {}),
+            # Songabschnitte (#234): [[start_ms, "Chorus"], …], nur wo es welche gibt.
+            **({"sections": json.loads(r["sections"])} if r["sections"] else {}),
+            # Tag-Farben (ADR 0097): Finder-Punkte, nur wo es welche gibt.
+            **({"colors": [int(c) for c in r["colors"].split(",")]}
+               if r["colors"] else {}),
             # Anzeigebild (#198): das eingebettete Bild normaler Musik, nur
             # ohne Cover und ohne erkannten KI-Erzeuger (Sunos Standardbilder
             # bleiben draußen). Nie Cover: keine Galerie, nicht finalisiert.
             **({"artwork": True} if _shows_artwork(r) else {}),
+            **({"artist": r["artist"]} if r["artist"] else {}),
+            **({"album": r["album"]} if r["album"] else {}),
         }
         for r in rows
     ]
@@ -1713,6 +1908,22 @@ def match_location(
         if what == "folder" and have.startswith(want + "/"):
             return loc
     return None
+
+
+def synced_lyrics(conn: sqlite3.Connection, file_hash: str) -> dict[str, list[list[Any]]]:
+    """Songtext mit Zeiten (#234): ``lines`` = ``[[start_ms, end_ms|null,
+    "Zeile"], …]``, ``sections`` = ``[[start_ms, "Chorus"], …]`` (Solo-Marken
+    schon an ihrer geschätzten Stelle) aus Schicht 2; leer ohne getimten Text."""
+    out: dict[str, list[list[Any]]] = {"lines": [], "sections": []}
+    for field, key in (("lyrics_synced", "lines"), ("song_sections", "sections")):
+        row = conn.execute(
+            "SELECT value_text FROM interpreted_metadata WHERE file_hash = ? AND field = ? LIMIT 1",
+            (file_hash, field)).fetchone()
+        try:
+            out[key] = json.loads(row[0]) if row and row[0] else []
+        except ValueError:
+            pass
+    return out
 
 
 def audio_facts(conn: sqlite3.Connection, file_hash: str) -> tuple[str, str | None] | None:

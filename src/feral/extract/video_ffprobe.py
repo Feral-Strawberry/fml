@@ -12,6 +12,12 @@ Fehlt ffprobe auf dem System, ist das **kein Fehler**: die Datei wird trotzdem
 katalogisiert (Hash + Fundort), die Extraktion liefert nur eine Warnung. Sobald
 ffprobe installiert ist, holt ein erneuter Scan die Metadaten nach.
 
+Songtext mit Zeiten (#234): Hat eine AUDIO-Datei (M4A, Matroska nur mit Ton)
+eine Text-Untertitel-Spur (Suno V6 schreibt den Songtext als ``mov_text``),
+holt ein zusätzlicher ffmpeg-Lauf sie als SRT (``isobmff:stream2.subtitle``,
+Keyword ``srt``). Nur bei Audio: ffmpeg liest dafür die ganze Datei, bei
+einem Film wären das Gigabytes.
+
 Einzige Ausnahme vom „nur ffprobe": ffprobe sieht keine ``uuid``-Boxen. Das
 C2PA-Manifest von MP4/M4A steckt in einer Top-Level-``uuid``-Box (C2PA 2.2
 §A.5, Recherche Audio §7) — die liest ``c2pa_uuid_items`` byte-treu
@@ -53,6 +59,12 @@ STREAM_FACTS = (
 
 # Format-Eckwerte (ADR 0083) unter ``<container>:format``.
 FORMAT_FACTS = ("format_name", "duration", "bit_rate")
+
+# Text-Untertitel, die ffmpeg verlustfrei als SRT ausgibt (#234); Bild-
+# Untertitel (PGS, DVB) tragen keinen Text.
+TEXT_SUBTITLES = frozenset({"mov_text", "subrip", "srt", "ass", "ssa", "webvtt", "text"})
+_MAX_SUBTITLE = 1024 * 1024   # ein Songtext ist wenige KB
+_MAX_SUBTITLE_STREAMS = 4     # je Spur ein ffmpeg-Lauf; mehr hat kein Song
 
 
 def _ffprobe() -> str | None:
@@ -128,7 +140,48 @@ def extract(source: str | Path | BinaryIO, *, container: str) -> ContainerExtrac
     result.width, result.height, result.fps = dimensions_from_ffprobe(data)
     result.duration = duration_from_ffprobe(data)
     result.media_kind = media_kind_from_ffprobe(data)
+    if result.media_kind == "audio":
+        result.items.extend(subtitle_items(path, data, container=container,
+                                           warnings=result.warnings))
     return result
+
+
+def subtitle_streams(data: dict[str, Any]) -> list[int]:
+    """Indizes der Text-Untertitel-Spuren einer ffprobe-Ausgabe (#234)."""
+    return [i for i, s in enumerate(data.get("streams") or [])
+            if s.get("codec_type") == "subtitle"
+            and (s.get("codec_name") or "").lower() in TEXT_SUBTITLES]
+
+
+def subtitle_items(path: str | Path, data: dict[str, Any], *, container: str,
+                   warnings: list[str]) -> list[RawMetadataItem]:
+    """Jede Text-Untertitel-Spur als SRT-Roh-Eintrag (#234). Wirft nicht:
+    fehlendes ffmpeg, Timeouts und kaputte Spuren werden Warnungen."""
+    items: list[RawMetadataItem] = []
+    for index in subtitle_streams(data)[:_MAX_SUBTITLE_STREAMS]:
+        try:
+            proc = subprocess.run(
+                [find_binary("ffmpeg") or "ffmpeg", "-v", "error", "-nostdin",
+                 *media_input(path), "-map", f"0:{index}", "-c:s", "srt", "-f", "srt", "-"],
+                capture_output=True, timeout=_TIMEOUT_SECONDS, **NO_WINDOW,
+            )
+        except FileNotFoundError:
+            warnings.append("ffmpeg nicht gefunden: Untertitel-Spur nicht gelesen.")
+            return items
+        except subprocess.TimeoutExpired:
+            warnings.append(f"ffmpeg: Untertitel-Spur {index} nach {_TIMEOUT_SECONDS} s abgebrochen.")
+            continue
+        except OSError as exc:   # Extraktoren werfen nicht, sie sammeln Warnungen
+            warnings.append(f"ffmpeg: Untertitel-Spur {index} nicht lesbar ({exc}).")
+            continue
+        out = proc.stdout[:_MAX_SUBTITLE]
+        if proc.returncode != 0 or not out.strip():
+            warnings.append(f"ffmpeg: Untertitel-Spur {index} nicht lesbar.")
+            continue
+        items.append(RawMetadataItem(source=f"{container}:stream{index}.subtitle", keyword="srt",
+                                     text=out.decode("utf-8", errors="replace"),
+                                     data=None, encoding="utf-8"))
+    return items
 
 
 def c2pa_uuid_items(path: str | Path, warnings: list[str]) -> list[RawMetadataItem]:

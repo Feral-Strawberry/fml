@@ -60,7 +60,7 @@ GitHub organization).
 - [Security](security.md) — how fml handles **untrusted** image files
   (untrusted metadata), operating recommendations, which dependencies get
   installed and how they are checked (lock with checksums, advisory check). **Read before passing the tool on to others.**
-- [The test suite](tests.md) — what the 900-odd automated tests (Python
+- [The test suite](tests.md) — what the 1200-odd automated tests (Python
   and Node tests of the interface) guarantee, how to run them (`pytest -q`)
   and how to recognize a correct result.
   **Useful as an installation check on a new machine.**

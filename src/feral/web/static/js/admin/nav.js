@@ -17,7 +17,7 @@ export function initNav(pages) {
   document.getElementById("navlist").innerHTML = pages.map((p) => `
     <a href="/admin/${p.id}" data-page="${p.id}">${p.icon}<span>${esc(p.title())}</span>
       <span class="cnt mute" id="navCnt-${p.id}" hidden></span></a>`).join("");
-  document.getElementById("actw").title = STRINGS.widgetTitle;
+  document.getElementById("actlink").title = STRINGS.widgetTitle;
 }
 
 export function markActive(pageId) {
@@ -74,7 +74,15 @@ export function renderWidget(s) {
   const cf = s.current_file && s.current_file.params;
   const total = (s.report || {}).scanned_files || 0;
   const queued = s.queue_pending ? tpl(STRINGS.widgetQueued, { n: s.queue_pending }) : "";
-  if (s.running) {
+  if (s.paused && !dead) {
+    // Angehalten (ADR 0093, #236): das Widget sagt, WARUM nichts läuft. Eine
+    // laufende Aufgabe endet noch mit ihrer Datei — dann steht sie darunter.
+    dot.className = "dot warn";
+    task.textContent = tpl(STRINGS.widgetPaused, { n: fmtNum(s.queue_pending || 0) });
+    count.textContent = s.running ? tpl(STRINGS.widgetPausing, { task: serverMsg(s.label) || STRINGS.activityRunning }) : "";
+    right.textContent = "";
+    bar.style.width = s.running ? `${progressPercent(s)}%` : "0%";
+  } else if (s.running) {
     dot.className = "dot";
     task.textContent = serverMsg(s.label) || STRINGS.activityRunning;
     count.textContent = cf && cf.total ? `${fmtNum(cf.index)} / ${fmtNum(cf.total)}`

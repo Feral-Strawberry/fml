@@ -46,4 +46,12 @@
   --ok: #4bbf82;
   --bad: #e05252;
   --warnc: #e0a832;
+  /* Finder-Tag-Farben (ADR 0097), Index 1–7 wie im Finder */
+  --finder-1: #8e8e93;
+  --finder-2: #34c759;
+  --finder-3: #af52de;
+  --finder-4: #0a84ff;
+  --finder-5: #ffcc00;
+  --finder-6: #ff3b30;
+  --finder-7: #ff9500;
 }

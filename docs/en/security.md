@@ -40,6 +40,22 @@ internet: never trust it blindly.
   truncated blocks are detected, compressed ID3 frames are decompressed with
   a cap, embedded pictures are only described, never stored. Tested
   with tens of thousands of mangled files: no crash, no hang.
+- **Lyrics with timings** (subtitle track, ID3 `SYLT`, LRC in the lyrics
+  tag) are capped: at most 512 KiB of text per source, 2,000 lines, 500
+  characters per line; from one file fml reads at most four subtitle
+  tracks of 1 MiB each. Crafted lines (tens of thousands of timestamps,
+  endless bracket sequences) finish in fractions of a second.
+- **Finder tags (macOS)** come with the file and count as untrusted
+  input: the attribute is only read up to 1 MiB, at most 64 tags of 200
+  characters each, without entity resolution.
+- **A parser error stays with its file.** If an interpretation parser
+  fails on the metadata of a file, it drops out for that file; scan and
+  "Re-interpret" keep running, the raw metadata stays stored.
+- **Comment files from another fml** (Import time comments) are untrusted
+  input: at most 20 MB, checked before reading, a fixed format with
+  length and quantity limits (2,000 comments per song), only as
+  `application/json`. Only comment text, position and origin are taken
+  over; the import does not touch files.
 - **ffmpeg/ffprobe** (videos, audio) receive every file as a local file:
   `-protocol_whitelist file` and an absolute `file:` path. A crafted file
   (such as a hidden playlist) cannot make ffmpeg access the network, and a
@@ -51,11 +67,16 @@ internet: never trust it blindly.
 - All database queries are **parameterized** — no metadata or search text
   is ever concatenated into SQL. The full-text search (FTS5) quotes the
   search terms; field and sort names come from fixed whitelists.
+- **The queue** is kept in the database so that it survives a restart:
+  per task a name from a fixed list and parameters as JSON, never
+  executable code. In read-only mode, no job that copies, moves or
+  deletes files comes back from this backup.
 
 **Display (in the browser interface):**
 
 - Every text originating from a file (prompt, raw metadata, song title and
-  lyrics, filename, tags, time comments, search hits) is **HTML-escaped** when inserted into the page —
+  lyrics including section names, filename, tags, time comments and their
+  origin, search hits) is **HTML-escaped** when inserted into the page —
   embedded malicious code is displayed as text, not executed.
 - The workflow graph preview forces all coordinates from the untrusted
   JSON to **numbers**, so no value can break out of the SVG; colour values
@@ -85,6 +106,14 @@ internet: never trust it blindly.
   built only from the validated hash; fml never writes into the originals.
   A **cover** is a reference between two cataloged items, no upload and no
   path.
+- **Deleting the cache** (Admin → Maintenance) removes only files that fml
+  itself put there (pattern `<2 hex characters>/<hash>.<extension>`),
+  never a folder as a whole. If a cache path in `config.toml` accidentally
+  points at a folder with files of your own, those stay where they are.
+- **Finder attributes on import (macOS):** the copy in the library gets
+  the extended attributes of the source after its content has been
+  verified by hash; access control lists (ACL) are deliberately not
+  carried over.
 
 ## Residual risks & operating recommendation
 
@@ -99,6 +128,18 @@ internet: never trust it blindly.
   over a private VPN like Tailscale), that list opens automatically —
   which makes the recommendation above matter all the more. All
   responses additionally carry `X-Content-Type-Options: nosniff`.
+- **Foreign websites cannot change anything.** A page in another tab can
+  send requests to `127.0.0.1` while fml is running. Every changing
+  request (anything but GET) must therefore come from fml's own interface:
+  the browser names where a request comes from in the `Origin` header, and
+  if that does not match the server, the request is refused (403) and
+  noted in the server log. Scripts without a browser (curl) are not
+  affected. If you put fml behind a reverse proxy, pass the `Host` header
+  through unchanged, otherwise the check hits fml's own interface too.
+- **Do not open a `feral.sqlite` from someone else.** Besides the catalog,
+  the database also contains the waiting tasks with their paths. fml only
+  runs known tasks from it, and none that write files in read-only mode;
+  still: only start your own databases and your own backups.
 - **The folder browser is powerful.** The admin interface can list
   directories across the whole machine (for choosing source/target
   folders). That is intended, but one more reason not to expose the

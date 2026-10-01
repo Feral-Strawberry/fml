@@ -6,6 +6,169 @@ Was sich zwischen den Snapshot-Releases geändert hat, aus Sicht der
 Nutzer. Versionen sind Datums-Versionen (`JJJJ.MM` oder `JJJJ.MM.N`);
 die laufende Instanz zeigt ihre Version in Admin → Übersicht.
 
+## 2026.10 (2026-10-01)
+
+fml arbeitet jetzt **leise im Hintergrund** und lässt sich **anhalten**;
+was wartet, übersteht einen Neustart. Das Audio-Modul versteht die
+gewöhnliche **Musiksammlung** (Interpret, Album, Genre), zeigt den
+**Songtext mit Zeiten** beim Abspielen und tauscht **Zeitkommentare**
+zwischen zwei fml aus. Dazu ein rechtes Panel, das sich wegklappen lässt,
+ein Datum von Hand und Finder-Tags unter macOS.
+
+### Nach dem Update
+
+1. **Wie gewohnt mit `start.sh` bzw. `start.bat` starten.** Die
+   Abhängigkeiten sind unverändert.
+2. **Datenbank:** wird beim ersten Start automatisch auf Schema 33
+   migriert (fünf neue Migrationen). Vorher ein Backup der
+   `feral.sqlite` anlegen, wie bei jedem Update.
+3. **Beim ersten Start laufen zwei Aufgaben einmal von selbst:**
+   „Aussortierte neu prüfen" (ohne Aussortiertes sofort fertig) und, mit
+   Audio-Modul, „Songtexte mit Zeiten nachholen" (nur Songs mit
+   Untertitel-Spur).
+4. **Musik im Bestand:** einmal **Admin → Wartung → „Neu interpretieren"**
+   für Interpret, Album, Genre, das Jahr aus den Tags und Songtexte mit
+   Zeiten aus ID3 `SYLT` oder LRC. Wer alte Musik hat, stellt vorher
+   „Ältestes plausibles Datum" zurück (Admin → Konfiguration → Media
+   Library, ab Werk 2015), sonst gilt ein Tag-Jahr wie 1987 als
+   unplausibel.
+5. **macOS, Finder-Tags im Bestand:** einmal **Admin → Wartung →
+   „Re-Scan aller Fundorte"**.
+6. **„Cache leeren" ist umgezogen:** Admin → Wartung hat jetzt eine eigene
+   Karte **Cache** mit einer Zeile je Art.
+
+### Neu: leise arbeiten, anhalten, weitermachen
+
+- **Zwei Knöpfe in der Kopfzeile der Galerie** (und im Aktivitäts-Widget
+  des Admins) für alle Hintergrundaufgaben. **Leistung:** Blitz = Normal,
+  Blatt = **Leise** (ein Prozess mit niedrigster Priorität für Prozessor,
+  Platte und Speicher, auch ffmpeg rechnet mit einem Thread; unter Windows
+  hart auf einen Kern begrenzt). **Anhalten** („Zz"): Die Warteschlange
+  hält an der nächsten Datei an und setzt beim zweiten Klick dort fort.
+  Beides wirkt sofort, ohne Neustart; den Startwert legt `[performance]
+  background` fest.
+- **Die Warteschlange übersteht Neustarts:** Wird fml beendet, hält die
+  laufende Aufgabe an der nächsten Datei an, alles Wartende wird
+  gesichert. Beim nächsten Start geht es dort weiter.
+- **Watchordner haben Vorrang:** Neue Dateien aus einem Watchordner kommen
+  vor wartende Langläufer; ein laufendes Einlesen gibt dafür an der
+  nächsten Datei ab und läuft danach weiter.
+- **Vorschaubilder vor Analysen:** Sichtbare Kacheln und Anzeigebilder
+  kommen zuerst, Audio-Analysen beim Blättern reihen sich dahinter ein.
+- **Prozesszahl:** Die Automatik nimmt bis 4 Kerne einen Prozess, sonst
+  Kerne − 2. Eine geänderte Prozesszahl wirkt ohne Neustart.
+
+### Neu im Audio-Modul
+
+- **Musiksammlung:** Interpret, Album-Interpret, Album, Titel- und
+  CD-Nummer, Jahr und Genre aus ID3, Vorbis, WAV und M4A. In der
+  Audioansicht drei neue Gruppen in der Seitenleiste (Interpret, Album,
+  Genre), die Suche kennt `interpret:`, `artist:`, `album:` und `genre:`,
+  und die Sortierung **„Album"** spielt ein Album in seiner Reihenfolge.
+  Ein Klick auf ein Album sortiert von selbst danach. Die Listenzeile
+  zeigt „Interpret · Album".
+- **Songtext mit Zeiten:** Songs aus Suno V6 tragen ihren Text Zeile für
+  Zeile mit Zeiten in einer Untertitel-Spur; fml liest sie, dazu ID3
+  `SYLT` und LRC im Songtext-Tag. Unter der Welle der Abspielleiste steht
+  die Zeile, die gerade läuft, davor der Abschnitt („Chorus · …"). Auf
+  der Welle jeder Listenzeile markieren Beschriftungen die Abschnitte, und
+  im Detailpanel läuft der Songtext mit; ein Klick auf eine Zeile springt
+  dorthin.
+- **Zeitkommentare austauschen:** Sammel-Aktion → Zeitkommentare →
+  **Exportieren** schreibt eine Datei, die ein anderes fml unter Admin →
+  Wartung → **Zeitkommentare importieren** übernimmt, mit Vorschau und
+  einem Herkunfts-Etikett an jedem Kommentar. Songs findet fml über die
+  Datei selbst, bei Suno-Songs auf Wunsch auch über die Song-ID. Derselbe
+  Import zweimal ändert nichts.
+- **Eigene Reihenfolge je gespeicherter Suche:** Sortierung **„Manuell"**
+  in der Audioansicht; Zeilen am Dateinamen ziehen oder mit Alt+↑ / Alt+↓
+  verschieben. „Alle abspielen" folgt dieser Reihenfolge.
+- **Jahr aus den Tags als Datum:** Ohne eingebettetes Datum zählt das Jahr
+  aus den Tags vor dem Dateistempel. Eine gerippte CD von 1987 steht dann
+  unter 1987, nicht unter dem Tag des Rippens.
+- **True Peak oder Sample Peak:** `[audio] true_peak = false` misst den
+  Sample Peak und halbiert etwa die Analysezeit; der Lautheitsangleich
+  hält dann 1 dB mehr Abstand. Standard bleibt True Peak.
+
+### Neu für alle
+
+- **Rechtes Panel:** Ein Klick auf eine Überschrift klappt den Abschnitt
+  ein (KURATIERT, GENERATION, WORKFLOW, Zeitkommentare, DATEI). Der
+  schmale Streifen am rechten Fensterrand oder die Taste **P** klappt das
+  ganze Panel weg, die Galerie bekommt sofort mehr Spalten. Beides wird
+  gemerkt. Roh-Metadaten und Fundorte stehen jetzt ganz unten.
+- **Datum von Hand:** Feld unter KURATIERT und Zeile **„Datum"** der
+  Sammel-Aktion, für alle Medien: `1997`, `1997-05`, `1997-05-12` oder
+  `12.05.1997`, so genau wie eingegeben. Es gewinnt gegen Metadaten und
+  Dateistempel und übersteht jeden Re-Scan; Leeren holt das abgeleitete
+  Datum zurück. Die Datei bleibt unverändert.
+- **Finder-Tags (macOS):** Die farbigen Markierungen aus dem Finder werden
+  beim Import und beim Scan zu normalen Tags, mit Farbpunkt auf Kachel,
+  Listenzeile und im Panel. Der Import kopiert außerdem die erweiterten
+  Dateiattribute mit, sodass die Kopie in der Library ihre Finder-Tags
+  behält. fml liest nur und schreibt nie in den Finder zurück.
+- **Aussortierte neu prüfen:** Geänderte Import-Regeln wirken auch
+  rückwärts auf das, was beim Katalogisieren aussortiert wurde: nach dem
+  Speichern im Admin, beim Start nach einer Änderung in der `config.toml`
+  oder per Knopf unter Admin → Wartung. Ein Neu-Scan ist nicht nötig.
+- **Admin → Probleme:** Dateien ohne Vorschaubild (typisch: beschädigt
+  nach vielen Backups) lassen sich direkt **ablehnen**, einzeln oder alle
+  dieser Art. Die Datei bleibt liegen.
+- **Admin → Wartung, Karte Cache:** Thumbnails, Audio-Analysen,
+  Audio-Wiedergabekopien und Anzeigebilder je mit Anzahl, Größe, Ort und
+  **Löschen**. Alles davon entsteht bei Bedarf neu.
+
+### Fehlerbehebungen
+
+- **Aktivität:** Re-Scan, Ordner-Scan und Watchordner melden ihr eigenes
+  Ergebnis („Katalogisiert: n neu · m bekannt"). Vorher konnte eine
+  Aufgabe die Zusammenfassung der vorigen zeigen.
+- **Import-Regeln:** Der Hinweistext zum ältesten plausiblen Datum
+  beschreibt jetzt, was die Regel wirklich tut.
+- **Lupe:** Der Hinweis am unteren Rand versprach „Enter =
+  Einzelbildansicht"; in der Lupe hat Enter keine Funktion. Der Hinweis
+  ist korrigiert.
+- **Doku:** Nach dem Einschalten des Audio-Moduls nimmt „Re-Scan aller
+  Fundorte" keine Musik auf, anders als bisher beschrieben. Einmal
+  katalogisierte Ordner noch einmal aufnehmen (Admin → Quellen & Import);
+  Watchordner holen die Musik von selbst nach.
+
+### Sicherheit und Robustheit
+
+Vor diesem Release wurde alles, was seit 2026.09.3 dazukam, noch einmal
+gegen präparierte Dateien und unglückliche Abläufe geprüft:
+
+- **Ein kaputter Tag bricht keinen Lauf mehr ab.** Ein Song mit einer
+  unsinnigen Genre- oder Titelnummer konnte Einlesen und „Neu
+  interpretieren" an dieser Datei abbrechen. Jetzt fällt nur die Deutung
+  dieser einen Datei aus.
+- **Songtext mit Zeiten und Finder-Tags sind gedeckelt** (Textlänge,
+  Zeilenzahl, Zeilenlänge, Zahl der Untertitel-Spuren). Präparierte Tags
+  enden in Sekundenbruchteilen, statt den Hintergrund zu blockieren.
+- **Importe überstehen einen Neustart richtig.** Ein Import mit kopieren
+  oder verschieben, der beim Beenden lief oder wartete, meldete danach
+  jede Datei als Fehler; im Modus verschieben landeten die restlichen
+  Quelldateien dabei im Ordner `_fehler` der Quelle. Verloren ging nichts.
+  Nur Katalogisieren war nie betroffen.
+- **Anhalten mitten in einem Ordner-Import** schließt die schon
+  importierten Dateien ab. Vorher erschienen sie beim Fortsetzen als
+  Dubletten.
+- **Übersichtsmodus über den Neustart:** Ein gesicherter Import kommt
+  nicht zurück, wenn inzwischen der Übersichtsmodus gilt.
+- **Cache löschen** entfernt nur noch Dateien, die fml selbst angelegt
+  hat, nie einen ganzen Ordner. Ein falsch eingetragener Cache-Pfad in der
+  `config.toml` kann so keine eigenen Dateien mehr kosten.
+- **Probleme ablehnen** gilt serverseitig nur für „kein Vorschaubild".
+- **Fremde Webseiten können nichts mehr auslösen.** Einige
+  Admin-Aktionen (Cache löschen, Probleme quittieren) konnte eine fremde
+  Seite im selben Browser blind anstoßen, solange fml lief. Jetzt muss
+  jede ändernde Anfrage von fmls eigener Oberfläche stammen. Hinter einem
+  Reverse-Proxy den `Host`-Kopf unverändert durchreichen.
+- **Kommentar-Import:** höchstens 2.000 Kommentare je Song.
+- **Vorschaubilder vor Analysen** greift jetzt wirklich: Die Analyse beim
+  Blättern lief bisher gleichrangig mit den Kacheln.
+- Abhängigkeiten: unverändert, alle 22 Pakete ohne offene Meldung.
+
 ## 2026.09.3 (2026-09-25)
 
 fml liest jetzt **Kodak Photo CD**: die Bilder von den Foto-CDs der

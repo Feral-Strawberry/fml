@@ -81,6 +81,11 @@ test("?native= nur, wenn der Browser AIFF/ALAC selbst spielt (Safari) — dann k
   }
 });
 
+test("fmtLoudness: Sample Peak nennt sich so und hat dBFS (#225)", () => {
+  const s = api.fmtLoudness({ integrated: -14, lra: 5, sample_peak: -0.3 });
+  assert.ok(s.includes("Sample Peak") && s.includes("dBFS") && !s.includes("dBTP"), s);
+});
+
 test("fmtLoudness: Dezimalzeichen der Sprache, Stille als –", () => {
   assert.equal(api.fmtLoudness({ integrated: -14.23, lra: 5.3, true_peak: null }),
     "-14,2 LUFS · LRA 5,3 LU · True Peak – dBTP");

@@ -333,6 +333,14 @@ def audio_enabled(config: dict[str, Any]) -> bool:
     return bool(config.get("audio", {}).get("enabled", False))
 
 
+def audio_true_peak(config: dict[str, Any]) -> bool:
+    """Peak der Audio-Analyse als True Peak messen? (``[audio] true_peak``,
+    Standard True.) Aus = Sample Peak: halbiert etwa die Analysezeit, der
+    Lautheitsangleich hält dafür mehr Abstand (#225). Wirkt nur auf neue
+    Analysen."""
+    return bool(config.get("audio", {}).get("true_peak", True))
+
+
 # -- Schreiben (Admin-Bereich) --------------------------------------------------
 
 def ui_show_dupes(config: dict[str, Any]) -> bool:
@@ -357,6 +365,18 @@ def slow_request_ms(config: dict[str, Any]) -> float:
     except (TypeError, ValueError):
         return SLOW_REQUEST_MS_DEFAULT
     return ms if ms >= 0 else SLOW_REQUEST_MS_DEFAULT
+
+
+BACKGROUND_MODES = ("normal", "quiet")
+
+
+def background_default(config: dict[str, Any]) -> str:
+    """Startwert des Hintergrund-Modus (``[performance] background``,
+    ADR 0093): ``normal`` (Standard) oder ``quiet`` (Leise: ein Prozess,
+    Hintergrund-Priorität). Gilt, bis in der Galerie umgeschaltet wird;
+    Unbekanntes → ``normal``."""
+    value = str(config.get("performance", {}).get("background", "normal"))
+    return value if value in BACKGROUND_MODES else "normal"
 
 
 def model_sort(config):
@@ -388,6 +408,7 @@ def update_config_file(
     rankings_enabled: bool | None = None,
     audio_enabled: bool | None = None,
     slow_request_ms: float | None = None,
+    background: str | None = None,
 ) -> dict[str, Any]:
     """Aktualisiere verwaltete Felder der Config-Datei und schreibe sie zurück.
 
@@ -511,6 +532,10 @@ def update_config_file(
         config.setdefault("performance", {})["slow_request_ms"] = (
             ms if ms >= 0 else int(SLOW_REQUEST_MS_DEFAULT)
         )
+    if background is not None:
+        # Startwert des Hintergrund-Modus (ADR 0093): immer explizit.
+        config.setdefault("performance", {})["background"] = (
+            background if background in BACKGROUND_MODES else "normal")
     save_config(path, config)
     return config
 

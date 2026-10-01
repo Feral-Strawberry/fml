@@ -23,12 +23,17 @@
   <a class="back" id="adBack" href="/"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg><span id="adBackLabel"></span></a>
   <div class="navlist" id="navlist"></div>
   <div class="navfoot">
-    <!-- Aktivität auf jeder Seite sichtbar; Klick führt zur Übersicht. -->
-    <a class="actw" id="actw" href="/admin/overview">
-      <div class="row"><span class="dot idle" id="wDot"></span><span class="task" id="wTask"></span></div>
-      <div class="meta"><span id="wCount"></span><span id="wRight"></span></div>
-      <div class="bar"><i id="wBar" style="width:0%"></i></div>
-    </a>
+    <!-- Aktivität auf jeder Seite sichtbar; Klick führt zur Übersicht. Die
+         Hintergrund-Knöpfe (ADR 0093, #236) stehen NEBEN dem Link, nicht
+         darin (Knöpfe in einem <a> wären ungültiges HTML). -->
+    <div class="actw" id="actw">
+      <div class="actbtns"><button type="button" id="wPower"></button><button type="button" id="wPause"></button></div>
+      <a class="actlink" id="actlink" href="/admin/overview">
+        <div class="row"><span class="dot idle" id="wDot"></span><span class="task" id="wTask"></span></div>
+        <div class="meta"><span id="wCount"></span><span id="wRight"></span></div>
+        <div class="bar"><i id="wBar" style="width:0%"></i></div>
+      </a>
+    </div>
     <div class="navmeta"><span class="pill" id="navInstance" hidden></span><span class="mono" id="navMeta"></span></div>
   </div>
 </nav>

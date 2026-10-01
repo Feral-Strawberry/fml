@@ -87,7 +87,7 @@ def test_admin_info_reports_counts_and_tools(db, db_path, tmp_path):
     _store(db, "h1", "/a.png")
     cache = tmp_path / "cache"
     (cache / "ab").mkdir(parents=True)
-    (cache / "ab" / "x.jpg").write_bytes(b"jpegdaten")
+    (cache / "ab" / ("ab" * 32 + ".jpg")).write_bytes(b"jpegdaten")
 
     info = admin.admin_info(db, db_path=db_path, thumb_cache=cache)
 
@@ -117,7 +117,7 @@ def test_slow_counts_remember_set_and_background_refresh(db, db_path, tmp_path):
     db.commit()
     cache = tmp_path / "cache"
     (cache / "ab").mkdir(parents=True)
-    (cache / "ab" / "x.jpg").write_bytes(b"12345")
+    (cache / "ab" / ("ab" * 32 + ".jpg")).write_bytes(b"12345")
     slow = admin.SlowCounts(db_path, cache)
     assert slow.snapshot() == admin.SlowCounts.EMPTY
 
@@ -261,17 +261,76 @@ def test_orphan_locations_and_prune(db, tmp_path):
     assert admin.orphan_locations(db) == []
 
 
-# --- Thumbnail-Cache ---------------------------------------------------------------
+# --- Caches aufgeschlüsselt (#227) --------------------------------------------------
 
-def test_clear_thumb_cache(tmp_path):
-    cache = tmp_path / "cache"
-    (cache / "ab").mkdir(parents=True)
-    (cache / "ab" / "x.jpg").write_bytes(b"x")
-    (cache / "ab" / "y.fail").write_text("kaputt")
+_X, _Y, _H, _G = "a" * 64, "b" * 64, "c" * 64, "d" * 64
 
-    assert admin.clear_thumb_cache(cache) == 2
-    assert not cache.exists()
-    assert admin.clear_thumb_cache(cache) == 0  # idempotent
+
+def _caches(tmp_path):
+    """Cache-Ordner so, wie fml sie füllt (<2 hex>/<hash>.<endung>), dazu in
+    jedem Ordner fremde Dateien, die nie mitgezählt oder gelöscht werden."""
+    dirs = {k: tmp_path / "cache" / k for k in ("thumbs", "audio", "preview")}
+    files = {
+        "thumbs": {f"ab/{_X}.jpg": b"x" * 3, f"ab/{_Y}.fail": b"k",
+                   "urlaub.jpg": b"fremd", "ab/notiz.txt": b"fremd"},
+        "audio": {f"cd/{_H}.json": b"j" * 10, f"cd/{_H}.json.fail": b"",
+                  f"cd/{_H}.flac": b"f" * 100, f"cd/{_G}.flac.fail": b"!",
+                  "Album/01 Lied.mp3": b"musik", "cd/lied.flac": b"musik"},
+        "preview": {},
+    }
+    for key, content in files.items():
+        for rel, data in content.items():
+            p = dirs[key] / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(data)
+    return dirs
+
+
+def test_cache_breakdown_splits_audio_by_suffix(tmp_path):
+    """Analysen (JSON) und Wiedergabekopien (FLAC) teilen sich den Audio-
+    Ordner; .fail-Marker zählen zu ihrem Produkt. Fehlender Ordner = 0.
+    Fremde Dateien im Ordner zählen nicht mit."""
+    dirs = _caches(tmp_path)
+    parts = {p["kind"]: (p["count"], p["bytes"]) for p in admin.cache_breakdown(dirs)}
+    assert parts == {"thumbs": (2, 4), "audio_analysis": (2, 10),
+                     "audio_proxy": (2, 101), "preview": (0, 0)}
+    assert [p["kind"] for p in admin.cache_breakdown(dirs)] == list(admin.CACHE_KINDS)
+
+
+def test_clear_cache_per_kind(tmp_path):
+    dirs = _caches(tmp_path)
+    assert admin.clear_cache(dirs, "audio_proxy") == 2
+    left = {p.name for p in dirs["audio"].rglob("*") if p.is_file()}
+    assert left == {f"{_H}.json", f"{_H}.json.fail", "01 Lied.mp3", "lied.flac"}, "Analysen bleiben"
+    assert admin.clear_cache(dirs, "thumbs") == 2
+    assert admin.clear_cache(dirs, "thumbs") == 0          # idempotent
+    assert admin.clear_cache(dirs, "preview") == 0         # Ordner fehlt
+    with pytest.raises(ValueError):
+        admin.clear_cache(dirs, "datenbank")
+
+
+def test_clear_cache_never_touches_foreign_files(tmp_path):
+    """Original heilig (ADR 0041): Zeigt ein Cache-Pfad versehentlich auf einen
+    Ordner mit eigenen Dateien, löscht „Löschen" dort nur fmls Cache-Dateien.
+    Vorher verschwand der ganze Ordner bzw. jede Datei ohne ``.flac`` im Namen."""
+    dirs = _caches(tmp_path)
+    for kind in admin.CACHE_KINDS:
+        admin.clear_cache(dirs, kind)
+    left = {str(p.relative_to(tmp_path / "cache")) for p in (tmp_path / "cache").rglob("*")
+            if p.is_file()}
+    assert left == {"thumbs/urlaub.jpg", "thumbs/ab/notiz.txt",
+                    "audio/Album/01 Lied.mp3", "audio/cd/lied.flac"}
+
+
+def test_slow_counts_caches_one_run(tmp_path, db_path):
+    """„Cache zählen" setzt Thumbnail-Zeile UND Aufschlüsselung (#227)."""
+    dirs = _caches(tmp_path)
+    slow = admin.SlowCounts(db_path, dirs["thumbs"],
+                            caches={"audio": dirs["audio"], "preview": dirs["preview"]})
+    assert slow.count_cache()["count"] == 2
+    snap = slow.snapshot()
+    assert snap["cache"]["bytes"] == 4
+    assert [p["count"] for p in snap["caches"]["parts"]] == [2, 2, 2, 0]
 
 
 def test_prune_orphans_nur_unterhalb_pfad(db, tmp_path):
@@ -501,3 +560,41 @@ def test_package_versions_real_environment_matches_requirements():
     rows = admin.package_versions(root / "requirements.txt")
     assert [r["name"] for r in rows] == list(admin.RUNTIME_PACKAGES)
     assert all(r["ok"] for r in rows), rows
+
+
+def test_reject_issues_single_and_kind(db):
+    """#217: Probleme hängen am Pfad, Ablehnen am Hash — Pfad → Fundort →
+    Hash, dann Sperrliste; abgelehnte Einträge sind danach quittiert, Pfade
+    ohne Katalogeintrag bleiben offen und zählen als übersprungen. „Alle
+    dieser Art" trifft ALLE offenen, andere Arten bleiben unberührt."""
+    from feral.db.store import now_iso
+
+    for n, h in enumerate(("a1", "b2", "c3")):
+        _store_sized(db, h * 32, f"/bitrot/{n}.png", width=512, height=512)
+    ts = now_iso()
+    db.executemany(
+        """INSERT INTO scan_issues (path, kind, message, first_seen_at, last_seen_at)
+           VALUES (?, ?, 'x', ?, ?)""",
+        [("/bitrot/0.png", "thumbnail", ts, ts), ("/bitrot/1.png", "thumbnail", ts, ts),
+         ("/weg/ohne-eintrag.png", "thumbnail", ts, ts), ("/bitrot/2.png", "warning", ts, ts)],
+    )
+    db.commit()
+    first = db.execute("SELECT id FROM scan_issues WHERE path = '/bitrot/0.png'").fetchone()[0]
+
+    assert admin.reject_issues(db, issue_id=first) == {"rejected": 1, "resolved": 1, "skipped": 0}
+    assert admin.reject_issues(db, kind="thumbnail") == {"rejected": 1, "resolved": 1, "skipped": 1}
+
+    blocked = {r[0] for r in db.execute("SELECT file_hash FROM blocked_hashes")}
+    assert blocked == {"a1" * 32, "b2" * 32}
+    assert {r[0] for r in db.execute("SELECT file_hash FROM items")} == {"c3" * 32}
+    still_open = {(i["path"], i["kind"]) for i in admin.list_issues(db)}
+    assert still_open == {("/weg/ohne-eintrag.png", "thumbnail"), ("/bitrot/2.png", "warning")}
+    with pytest.raises(ValueError):
+        admin.reject_issues(db)
+    # Nur „kein Vorschaubild" lässt sich ablehnen, auch wenn jemand die Route
+    # mit einer anderen Art oder der Nummer einer Warnung aufruft.
+    warning = db.execute("SELECT id FROM scan_issues WHERE kind = 'warning'").fetchone()[0]
+    nothing = {"rejected": 0, "resolved": 0, "skipped": 0}
+    assert admin.reject_issues(db, kind="warning") == nothing
+    assert admin.reject_issues(db, issue_id=warning) == nothing
+    assert {r[0] for r in db.execute("SELECT file_hash FROM items")} == {"c3" * 32}

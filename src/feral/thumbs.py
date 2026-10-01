@@ -22,18 +22,20 @@ geschrieben — der Cache lebt komplett auf der Platte.
 
 from __future__ import annotations
 
+import heapq
 import io
+import itertools
 import os
 import sqlite3
 import subprocess
-import sys
 import threading
-from concurrent.futures import Future, ProcessPoolExecutor, wait
+from concurrent.futures import CancelledError, Future, ProcessPoolExecutor, wait
 from pathlib import Path
 
 from .db.manual import has_embedded_picture
 from .extract import pcd, psd
 from .messages import dump as msg_dump
+from .processes import ffmpeg_quiet_args
 from .tools import NO_WINDOW, find_binary, media_input
 from PIL import Image, UnidentifiedImageError
 
@@ -67,25 +69,14 @@ def fail_reason(cache_dir: str | Path, file_hash: str) -> str | None:
     return None
 
 
-def _thumb_worker_init(low_priority: bool = True) -> None:  # pragma: no cover
-    """Worker auf niedrige Priorität setzen (leiser Betrieb, Standard) —
-    oder mit ``low_priority=False`` volle Priorität („Vollgas-Modus":
-    anmachen und vorm Krach zur Kaffeemaschine flüchten, Feral Strawberry 2026-07-07)."""
-    from .processes import exit_when_parent_dies
+def _thumb_worker_init(low_priority: bool = True, quiet: bool = False) -> None:  # pragma: no cover
+    """Pool-Prozess einrichten: niedrige Priorität (Standard), mit
+    ``low_priority=False`` volle („Vollgas-Modus": anmachen und vorm Krach
+    zur Kaffeemaschine flüchten, Feral Strawberry 2026-07-07), mit ``quiet``
+    Hintergrund für CPU, Platte und Speicher (Leise-Modus, ADR 0093)."""
+    from .processes import init_pool_process
 
-    exit_when_parent_dies()   # keine Waisen nach hartem Ende des Elternprozesses (ADR 0067)
-    if not low_priority:
-        return
-    try:
-        if sys.platform == "win32":
-            import ctypes
-
-            handle = ctypes.windll.kernel32.GetCurrentProcess()
-            ctypes.windll.kernel32.SetPriorityClass(handle, 0x00004000)  # BELOW_NORMAL
-        else:
-            os.nice(10)
-    except Exception:
-        pass  # Priorität ist Komfort, kein Muss
+    init_pool_process(low_priority, quiet)   # keine Waisen (ADR 0067) + Priorität
 
 
 class ThumbPool:
@@ -95,19 +86,32 @@ class ThumbPool:
     in den Platten-Cache (atomar, ADR 0013), darum verträgt sich der Pool mit
     dem EINEN DB-Writer (ADR 0007). Der Executor entsteht lazy (Windows-spawn:
     kein Prozess-Start beim bloßen Import) und dedupliziert laufende Aufträge
-    je Datei-Hash, damit wiederholte Kachel-Anfragen keine Doppelarbeit machen.
+    je Schlüssel, damit wiederholte Kachel-Anfragen keine Doppelarbeit machen.
 
-    Standard-Größe: Kerne−2 — moderne Vielkerner sollen den Rückstand mit
-    voller Kraft aufholen (Feral Strawberry, 2026-07-07: Drosselung brachte nichts);
-    die niedrige Prozess-Priorität hält den Rechner dabei bedienbar.
-    Anders gewünscht? ``[cache] thumbnail_workers`` in der config.toml.
+    Vorrang (ADR 0093): Aufträge warten hier in einer Prioritäts-Schlange und
+    gehen erst an den Executor, wenn ein Prozess frei ist — nie mehr als
+    ``workers`` gleichzeitig. Kleinere ``priority`` zuerst (Kacheln 0,
+    Analysen beim Blättern 1); mit einem Prozess stellen sich Analysen so
+    hinter die sichtbaren Vorschaubilder, statt parallel zu starten.
+
+    Größe: Automatik (``processes.default_workers``) oder ``[cache]
+    thumbnail_workers``; ``reconfigure`` ändert Größe und Leise-Modus im
+    laufenden Betrieb (neue Aufträge gehen an einen neuen Executor, der alte
+    arbeitet seine angefangenen zu Ende).
     """
 
-    def __init__(self, workers: int | None = None, *, low_priority: bool = True) -> None:
-        self.workers = workers or max(2, (os.cpu_count() or 4) - 2)
+    def __init__(self, workers: int | None = None, *, low_priority: bool = True,
+                 quiet: bool = False) -> None:
+        from .processes import default_workers
+
+        self.workers = workers or default_workers()
         self.low_priority = low_priority
+        self.quiet = quiet
         self._executor: ProcessPoolExecutor | None = None
         self._pending: dict[str, Future] = {}
+        self._queue: list = []          # Heap: (priority, seq, key, fn, args, kwargs, proxy)
+        self._seq = itertools.count()
+        self._active = 0                # an einen Executor übergeben, noch nicht fertig
         self._lock = threading.Lock()
 
     def submit(
@@ -118,7 +122,7 @@ class ThumbPool:
         return self.submit_call(file_hash, generate_thumbnail, str(source), dest,
                                 media_kind=media_kind, size=size)
 
-    def submit_call(self, key: str, fn, *args, **kwargs) -> Future:
+    def submit_call(self, key: str, fn, *args, priority: int = 0, **kwargs) -> Future:
         """Beliebige reine Cache-Arbeit (picklebare Modulfunktion) einreihen,
         dedupliziert über ``key`` — auch die Audio-Analyse und der
         Wiedergabe-Proxy (A4, ADR 0086) laufen über diesen Pool."""
@@ -126,24 +130,71 @@ class ThumbPool:
             running = self._pending.get(key)
             if running is not None and not running.done():
                 return running
-            if self._executor is None:
-                self._executor = ProcessPoolExecutor(
-                    max_workers=self.workers, initializer=_thumb_worker_init,
-                    initargs=(self.low_priority,),
-                )
-            future = self._executor.submit(fn, *args, **kwargs)
-            self._pending[key] = future
-        future.add_done_callback(lambda _f, k=key: self._forget(k))
-        return future
+            proxy: Future = Future()
+            self._pending[key] = proxy
+            heapq.heappush(self._queue, (priority, next(self._seq), key, fn, args, kwargs, proxy))
+        self._pump()
+        return proxy
 
-    def _forget(self, file_hash: str) -> None:
+    def _pump(self) -> None:
+        """Wartende Aufträge an den Executor geben, solange Prozesse frei sind."""
+        while True:
+            with self._lock:
+                if not self._queue or self._active >= self.workers:
+                    return
+                _prio, _seq, key, fn, args, kwargs, proxy = heapq.heappop(self._queue)
+                if not proxy.set_running_or_notify_cancel():
+                    self._drop(key, proxy)
+                    continue
+                if self._executor is None:
+                    self._executor = ProcessPoolExecutor(
+                        max_workers=self.workers, initializer=_thumb_worker_init,
+                        initargs=(self.low_priority, self.quiet),
+                    )
+                try:
+                    inner = self._executor.submit(fn, *args, **kwargs)
+                except Exception as exc:   # Pool kaputt: ehrlich melden, nicht hängen
+                    self._drop(key, proxy)
+                    proxy.set_exception(exc)
+                    continue
+                self._active += 1
+            inner.add_done_callback(lambda f, k=key, p=proxy: self._done(k, p, f))
+
+    def _drop(self, key: str, proxy: Future) -> None:
+        if self._pending.get(key) is proxy:
+            del self._pending[key]
+
+    def _done(self, key: str, proxy: Future, inner: Future) -> None:
         with self._lock:
-            self._pending.pop(file_hash, None)
+            self._active -= 1
+            self._drop(key, proxy)
+        if inner.cancelled():
+            proxy.set_exception(CancelledError())
+        elif inner.exception() is not None:
+            proxy.set_exception(inner.exception())
+        else:
+            proxy.set_result(inner.result())
+        self._pump()
+
+    def reconfigure(self, workers: int, *, quiet: bool, low_priority: bool | None = None) -> None:
+        """Größe/Leise-Modus sofort ändern (ADR 0093)."""
+        with self._lock:
+            low = self.low_priority if low_priority is None else low_priority
+            if (workers, quiet, low) == (self.workers, self.quiet, self.low_priority):
+                return
+            self.workers, self.quiet, self.low_priority = workers, quiet, low
+            old, self._executor = self._executor, None
+        if old is not None:
+            old.shutdown(wait=False, cancel_futures=False)
+        self._pump()
 
     def shutdown(self) -> None:
         with self._lock:
             executor, self._executor = self._executor, None
+            queued, self._queue = self._queue, []
             self._pending.clear()
+        for item in queued:
+            item[-1].cancel()
         if executor is not None:
             executor.shutdown(wait=False, cancel_futures=True)
 
@@ -252,6 +303,7 @@ def _video_thumbnail(source: str | Path, tmp: Path, size: int) -> tuple[bool, st
         proc = subprocess.run(
             [
                 find_binary("ffmpeg") or "ffmpeg", "-v", "error", "-y",
+                *ffmpeg_quiet_args(),   # Leise: ein Thread (ADR 0093)
                 *media_input(source),
                 "-frames:v", "1",
                 "-vf", f"scale='min({size},iw)':-2",
@@ -396,7 +448,6 @@ def warm_thumbnails(
             progress(done, total, created, skipped, failed)
 
     batch: list[tuple[Future, str, str]] = []   # (Future, hash, issue_path)
-    batch_size = (pool.workers * 2) if pool is not None else 1
 
     def drain_batch() -> None:
         nonlocal done
@@ -442,7 +493,8 @@ def warm_thumbnails(
         else:
             batch.append((pool.submit(file_hash, source, dest, media_kind=media_kind, size=size),
                           file_hash, issue_path))
-            if len(batch) >= batch_size:
+            # Schubgröße je Runde neu: Leise/Normal wirkt mitten im Lauf (ADR 0093).
+            if len(batch) >= pool.workers * 2:
                 drain_batch()
     if batch:
         drain_batch()

@@ -127,7 +127,7 @@ meisten aus).
 Gespeichert wird jedes **Duell** (wer gegen wen gewann, wann) — das ist
 die Rohwahrheit, sie wird nie verändert. Der **Elo-Score** (Start 1000,
 K-Faktor 32) ist daraus nur abgeleitet und jederzeit reproduzierbar:
-**Admin → Wartung → „Ranking-Scores neu berechnen"** spielt das gesamte
+**Admin → Rankings → „Ranking-Scores neu berechnen"** spielt das gesamte
 Duell-Log deterministisch neu ab (Rescan-Prinzip); auch wer ausgeschieden
 ist, ergibt sich aus dem Log („Beide raus" setzt es, „Wieder rein" hebt es
 auf, die letzte Zeile zählt). Verschwindet ein Item

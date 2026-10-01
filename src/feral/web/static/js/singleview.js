@@ -112,8 +112,10 @@ export function initSingleView() {
       // Zurück in der Galerie darf die Panel-Vorschau wieder laufen: das
       // Panel hat in der Einzelansicht nur das Poster gezeigt (#89, kein
       // zweiter Stream neben der Bühne) — jetzt das Video daraus aufbauen.
+      // Ausnahme: weggeklapptes Panel (#219) — dort bleibt es beim Poster,
+      // bis das Aufklappen neu rendert.
       const poster = panel.querySelector(".ppreview img.pposter");
-      if (poster) {
+      if (poster && !document.body.classList.contains("panel-folded")) {
         poster.outerHTML = `<video src="${poster.dataset.video}" muted loop autoplay playsinline></video>`;
         wireMediaFallback(panel.querySelector(".ppreview"), STRINGS.noPreview);   // neues Element, neuer Fänger (#25)
       }

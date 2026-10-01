@@ -246,7 +246,7 @@ img.pe-icon {
 }
 /* Sprachumschalter (ADR 0054) und Dark/Light (#123): dezent wie der
    Sortier-Knopf; der eine zeigt DE/EN, der andere Mond/Sonne. */
-#langBtn, #themeBtn, #helpBtn {
+#langBtn, #themeBtn, #helpBtn, #bgPower, #bgPause {
   height: 30px;
   padding: 0 8px;
   font-size: 12px;
@@ -255,8 +255,11 @@ img.pe-icon {
   color: var(--dim);
   flex: none;
 }
-#langBtn:hover, #themeBtn:hover, #helpBtn:hover { color: var(--text); border-color: var(--accent-line); }
-#themeBtn, #helpBtn { padding: 0; width: 30px; display: inline-flex; align-items: center; justify-content: center; }
+#langBtn:hover, #themeBtn:hover, #helpBtn:hover, #bgPower:hover, #bgPause:hover { color: var(--text); border-color: var(--accent-line); }
+#themeBtn, #helpBtn, #bgPower, #bgPause { padding: 0; width: 30px; display: inline-flex; align-items: center; justify-content: center; }
+/* Anhalten (ADR 0093): angehalten in Akzentfarbe, als Hinweis, warum nichts
+   läuft. Der Leistungs-Knopf zeigt seinen Zustand nur übers Symbol. */
+#bgPause.on { color: var(--accent); border-color: var(--accent-line); }
 
 /* Sortier-Knopf + Popover (ADR 0039): ersetzt das System-<select>. */
 #sort {
@@ -757,7 +760,7 @@ body.view-audio #panel .ppreview .audiostage.hascover { padding-bottom: 14px; }
 .wv .loopr.open { border-right-style: dashed; min-width: 2px; }
 
 /* Abspielleiste (A5 #162, Optik-Referenz A0) — unten, über alle Ansichten */
-#pbar { flex: none; height: 90px; display: grid; grid-template-columns: auto minmax(160px, 280px) minmax(0, 1fr) auto;
+#pbar { flex: none; height: 108px; display: grid; grid-template-columns: auto minmax(160px, 280px) minmax(0, 1fr) auto;
   gap: 16px; align-items: center; padding: 0 14px; background: var(--panel); border-top: 1px solid var(--border); }
 #pbar .tr { display: flex; gap: 6px; align-items: center; }
 #pbar .tr button { width: 30px; height: 30px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center;
@@ -792,6 +795,17 @@ body.view-audio #panel .ppreview .audiostage.hascover { padding-bottom: 14px; }
 .section { padding: 14px; border-bottom: 1px solid var(--border); }
 .sechead { display: flex; align-items: center; gap: 7px; margin-bottom: 11px; }
 .sechead .secright { margin-left: auto; display: flex; gap: 5px; align-items: center; }
+/* Abschnitte einklappen (#219): Klick auf die Überschrift, Muster Sidebar. */
+.section[data-sec] > .sechead { cursor: pointer; user-select: none; }
+.section[data-sec] > .sechead .mlabel::before { content: "▾ "; color: var(--faint); }
+.section[data-sec].collapsed > .sechead .mlabel::before { content: "▸ "; }
+/* #panel davor: schlägt ID-Regeln der Kinder wie #pNotes { display: block }. */
+#panel .section[data-sec].collapsed > :not(.sechead) { display: none; }
+.section[data-sec].collapsed > .sechead { margin-bottom: 0; }
+.section[data-sec].collapsed { padding-top: 10px; padding-bottom: 10px; }
+.secsum { display: none; max-width: 150px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; color: var(--dim); font-size: 11px; }
+.section.collapsed .secsum { display: inline; }
 .klabel {
   font-family: var(--mono);
   font-size: 8.5px;
@@ -986,6 +1000,8 @@ body.view-audio #panel .ppreview .audiostage.hascover { padding-bottom: 14px; }
 }
 .actdot.idle { animation: none; background: #4bbf82; }
 .actdot.dead { animation: none; background: #e05252; }
+.actdot.paused { animation: none; background: var(--dim); }
+
 #activity.dead { color: #e05252; }
 .actqueue { opacity: .7; font-size: .85em; margin-left: 2px; }
 @keyframes actpulse {
@@ -1016,10 +1032,30 @@ body.view-audio #panel .ppreview .audiostage.hascover { padding-bottom: 14px; }
   color: var(--accent);
   text-shadow: 0 0 3px rgba(0, 0, 0, .9);
 }
+/* Finder-Tag-Farben (ADR 0097): Punkte wie im Finder, leicht überlappend. */
+.fdots { display: inline-flex; flex: none; vertical-align: middle; }
+.fdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .55);
+}
+.fdots .fdot + .fdot { margin-left: -2px; }
+.fc1 { background: var(--finder-1); }
+.fc2 { background: var(--finder-2); }
+.fc3 { background: var(--finder-3); }
+.fc4 { background: var(--finder-4); }
+.fc5 { background: var(--finder-5); }
+.fc6 { background: var(--finder-6); }
+.fc7 { background: var(--finder-7); }
+.tile .fdots { position: absolute; right: 6px; bottom: 16px; }
+.rname .fdots { margin-right: 6px; }
+.tagchip .fdot { width: 7px; height: 7px; box-shadow: none; }
+.tagchip .ffrom { color: var(--faint); font-size: 9px; }
 .tagchip { display: inline-flex; align-items: center; gap: 4px; text-transform: none; font-size: 10px; }
 .tagdel { background: none; border: none; padding: 0; color: var(--faint); font-size: 9px; cursor: pointer; }
 .tagdel:hover { color: var(--accent); }
-#pTagInput, #pModel {
+#pTagInput, #pModel, #pDate {
   width: 100%;
   margin-top: 8px;
   background: var(--panel2);
@@ -1044,7 +1080,9 @@ body.view-audio #panel .ppreview .audiostage.hascover { padding-bottom: 14px; }
   outline: none;
   resize: vertical;
 }
-#pTagInput:focus-visible, #pModel:focus-visible, #pNotes:focus-visible { border-color: var(--accent-line); }
+#pTagInput:focus-visible, #pModel:focus-visible, #pNotes:focus-visible, #pDate:focus-visible { border-color: var(--accent-line); }
+#pNotes { display: block; }
+#pDateErr { margin-top: 5px; font-size: 11px; }
 .multihint { margin: 10px 14px 0; }
 .badgechip.origin-manuell { color: #d9a441; border-color: #d9a44155; }
 
@@ -1058,6 +1096,23 @@ body.view-audio #panel .ppreview .audiostage.hascover { padding-bottom: 14px; }
   touch-action: none;
 }
 .vsplit:hover, .vsplit:active { background: var(--accent-dim); }
+/* Panel wegklappen (#219, Muster Lightroom): ein fester Streifen am
+   rechten Fensterrand ist der Umschalter, in beiden Zuständen an derselben
+   Stelle; der Pfeil auf halber Höhe zeigt die Richtung. Weggeklappt
+   verschwinden Panel und Breiten-Griff. */
+#panelFold {
+  flex: none; width: 16px; padding: 0; margin: 0; border: none; border-radius: 0;
+  border-left: 1px solid var(--border); background: var(--panel); color: var(--text);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+#panelFold .grip {
+  width: 100%; height: 56px; display: flex; align-items: center; justify-content: center;
+  background: var(--panel2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+#panelFold svg { width: 14px; height: 14px; }
+#panelFold:hover { color: var(--accent); background: var(--accent-dim); }
+#panelFold:hover .grip { background: transparent; }
+body.panel-folded #body > #panel, body.panel-folded #splitR { display: none; }
 
 /* ---------- Admin-Knopf: Slider-Icon aus dem Design ---------- */
 .sliders { display: flex; flex-direction: column; gap: 3px; width: 15px; margin: 0 auto; }
@@ -1275,8 +1330,8 @@ body.view-audio #panel .ppreview .audiostage.hascover { padding-bottom: 14px; }
 }
 #rankings[hidden] { display: none; }
 /* Musik beim Duellieren (#198): läuft ein Song, endet die Arena über der
-   Abspielleiste (#pbar, 90 px) — Stelle, Pause und ⏭ bleiben erreichbar. */
-body.has-pbar #rankings { bottom: 90px; }
+   Abspielleiste (#pbar, 108 px) — Stelle, Pause und ⏭ bleiben erreichbar. */
+body.has-pbar #rankings { bottom: 108px; }
 #rankings #rkTitle { font-size: 13px; font-weight: 600; }
 #rankings #rkBack, #rankings #rkEdit, #rankings #rkClose {
   background: rgba(255, 255, 255, .1);
@@ -1494,6 +1549,10 @@ body.view-audio #gridwrap { padding: 0; scrollbar-gutter: stable; }
   padding: 7px 14px 8px; background: transparent; box-shadow: none; border-bottom: 1px solid var(--border-soft); cursor: default; }
 .tile.arow:hover { background: color-mix(in srgb, var(--panel2) 70%, transparent); }
 .tile.arow.selected { background: var(--accent-dim); box-shadow: inset 3px 0 0 var(--accent); }
+/* Umsortieren bei „manuell" (#218): Griff am Namen, Einfügelinie oben/unten. */
+.tile.arow .rname[draggable="true"] { cursor: grab; }
+.tile.arow.dropbefore { box-shadow: inset 0 2px 0 var(--accent); }
+.tile.arow.dropafter { box-shadow: inset 0 -2px 0 var(--accent); }
 .arow .rtop { display: grid; grid-template-columns: var(--lcols); gap: 10px; align-items: center; }
 .arow .pbtn { width: 26px; height: 26px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center;
   justify-content: center; font-size: 10px; color: var(--text); background: var(--panel2); }
@@ -1532,6 +1591,32 @@ body.view-audio #gridwrap { padding: 0; scrollbar-gutter: stable; }
 .wv .plabel[data-lvl="2"] { bottom: calc(100% + 43px); }
 .wv .plabel[data-lvl="3"] { bottom: calc(100% + 63px); }
 .wv .plabel .t { font-family: var(--mono); color: var(--accent); margin-right: 5px; }
+/* Songtext mit Zeiten (#234): Abschnitte oben auf der Welle, aktuelle Zeile
+   unter der Welle der Leiste, mitlaufende Zeilen im Panel. */
+.wv .secs { position: absolute; inset: 0; pointer-events: none; }
+.wv .sec { position: absolute; top: 0; bottom: 0; box-sizing: border-box; border-left: 1px dashed var(--faint);
+  padding: 0 3px; font-size: 9px; line-height: 11px; color: var(--faint); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+/* Der Abschnitt am Abspielkopf: ganz, vorn, in Akzentfarbe (wie die
+   Kommentare an ihrer Stelle). */
+.wv .sec.on { max-width: none !important; overflow: visible; color: var(--accent); z-index: 2;
+  border-left-color: var(--accent-line); }
+.wv .sec i { font-style: normal; }
+.wv .sec.on i { background: var(--panel); padding: 0 3px; border-radius: 3px; }
+/* Zeile mittig unter der Welle der Leiste, UNTER den Kommentar-Dreiecken
+   (die ragen 7 px aus der Welle). Die Leiste ist dafür 108 statt 90 px hoch,
+   die Welle bleibt 60 px und rückt etwas nach oben. */
+#pbar .mid .wv { margin-bottom: 22px; }
+#pbar .wv .ly { position: absolute; left: 0; right: 0; top: calc(100% + 10px); text-align: center;
+  font-size: 13px; line-height: 16px; color: var(--text); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; pointer-events: none; }
+#pbar .wv .ly b { color: var(--accent); font-weight: 600; }
+.lysync { position: relative; max-height: 16em; overflow-y: auto; white-space: normal; }
+.lysync .lyl { padding: 1px 4px; border-radius: 4px; cursor: pointer; }
+.lysync .lyl:hover { background: var(--accent-dim); }
+.lysync .lyl.lysec { color: var(--faint); font-size: 11px; margin-top: 6px; }
+.lysync .lyl.on { color: var(--accent); background: var(--accent-dim); }
+.lysync .lyl.lysec.on { font-weight: 600; }
 #pintip { position: fixed; z-index: 60; pointer-events: none; font-size: 11px; background: var(--panel);
   border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; max-width: 260px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, .35); }
@@ -1545,6 +1630,17 @@ body.view-audio #gridwrap { padding: 0; scrollbar-gutter: stable; }
 #pComs .com:hover { background: var(--border-soft); }
 #pComs .comadd { font-size: 12px; padding: 4px 10px; }
 #pComs .com .t { flex: none; width: 34px; }
+/* Herkunft importierter Kommentare (#228): kleines Etikett vor dem Text. */
+.csrc {
+  flex: none;
+  margin-right: 5px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 9px;
+  color: var(--dim);
+  box-shadow: inset 0 0 0 1px var(--border);
+  white-space: nowrap;
+}
 #pComs .com .ctext { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 #pComs .com .ctext input { width: 100%; padding: 2px 6px; font-size: 12px; }
 #pComs .com .x { flex: none; margin-left: auto; background: none; border: 0; color: var(--faint); font-size: 10px;
@@ -1563,9 +1659,10 @@ body.view-audio #gridwrap { padding: 0; scrollbar-gutter: stable; }
 /* Im Vergleich sind die Zeilen der Player: die Abspielleiste weicht (Platz für Wellen). */
 body.list-compare #pbar { display: none; }
 #grid.pinlabels .wv .plabel.on { border-color: var(--accent-line); }
-#listhead .cmpnote { grid-column: 1 / -1; display: flex; gap: 14px; justify-content: space-between; align-items: baseline;
+#listhead .cmpnote, #listhead .manualnote { grid-column: 1 / -1; display: flex; gap: 14px; justify-content: space-between; align-items: baseline;
   margin: -7px -14px 6px; padding: 9px 14px; font-size: 11.5px; color: var(--dim); border-bottom: 1px solid var(--border-soft); }
-#listhead .cmpnote[hidden] { display: none; }
+#listhead .cmpnote[hidden], #listhead .manualnote[hidden] { display: none; }
+#listhead .manualnote.err { color: var(--accent); }
 #listhead .cmpnote b { color: var(--text); font-weight: 600; }
 #listhead .cmpnote .cmpgain { flex: none; }
 #midtools .cmpmatch { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 6px;

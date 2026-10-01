@@ -39,6 +39,9 @@
   <span id="modeBadge" hidden></span>
   <!-- Aktivität: Link in den Admin (eigenes Dokument, ADR 0074). -->
   <a id="activity" href="/admin" hidden></a>
+  <!-- Hintergrund (ADR 0093): Leistung Normal/Leise + Anhalten; Zustand hält der Server. -->
+  <button id="bgPower" type="button"></button>
+  <button id="bgPause" type="button"></button>
   <!-- Harter Sprachumschalter (ADR 0054): übersteuert die Browser-Sprache. -->
   <button id="langBtn" type="button"></button>
   <!-- Dark/Light (#123): Wahl in localStorage, geteilt mit dem Admin (appearance.js). -->
@@ -85,6 +88,9 @@
   </main>
   <div class="vsplit" id="splitR" title="Ziehen: Breite anpassen · Doppelklick: zurücksetzen"></div>
   <aside id="panel"></aside>
+  <!-- Umschalter fürs rechte Panel (#219, Muster Lightroom): fest am
+       rechten Fensterrand, in beiden Zuständen an derselben Stelle. -->
+  <button type="button" id="panelFold"></button>
 </div>
 
 <!-- Abspielleiste (A5 #162): läuft über den Ansichtswechsel weiter (player.js). -->

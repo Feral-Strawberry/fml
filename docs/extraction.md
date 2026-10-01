@@ -144,6 +144,13 @@ Chunk roh mit Quell-Label; ffprobe liefert nur Dauer, Codec, Samplerate,
 Kanäle, Bittiefe und Bitrate. Details und Beispiele der Quell-Labels in
 [Audio-Modul](audio.md#was-gespeichert-wird).
 
+Hat eine Audio-Datei im M4A- oder Matroska-Container eine
+**Text-Untertitel-Spur** (so legt Suno ab V6 den Songtext mit Zeiten ab),
+holt ein zusätzlicher ffmpeg-Lauf sie als SRT-Text, Quell-Label
+`"isobmff:stream1.subtitle"` (die Zahl ist die Nummer der Spur), Keyword
+`srt`, höchstens 1 MiB. Nur bei Audio: Bei einem Film müsste ffmpeg dafür
+die ganze Datei lesen. Fehlt ffmpeg, bleibt es bei einer Warnung.
+
 ## Robustheit
 
 Die Extraktion **stürzt bei kaputten Dateien nicht ab**. Probleme (falsche

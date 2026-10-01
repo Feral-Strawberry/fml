@@ -99,18 +99,28 @@ def _planned_rows(interpretations: Sequence[Interpretation]) -> list[tuple]:
     return rows
 
 
-def _suno_media_date(
+def _audio_media_date(
     conn: sqlite3.Connection, file_hash: str, interpretations: Sequence[Interpretation],
+    min_date: datetime | None,
 ) -> None:
-    """Suno-Erstellzeit wird Mediendatum (ADR 0083) — auch rückwirkend, damit
-    ``python -m feral.interpret`` für den Bestand genügt (Rescan-Prinzip).
-    Nur für Suno-Items: Bilddaten bleiben Sache der Scan-Kaskade."""
-    if not any(i.parser == suno.NAME for i in interpretations):
-        return
-    when = suno.created_at(raw_items_for(conn, file_hash))
-    if when is not None and when <= datetime.now(timezone.utc) + timedelta(days=1):
-        from ..importer import set_media_date   # Lazy: importer → interpret
-        set_media_date(conn, file_hash, when, "metadaten")
+    """Suno-Erstellzeit wird Mediendatum (ADR 0083), sonst das Jahr aus den
+    Musik-Tags (#220, ADR 0096) — auch rückwirkend, damit ``python -m
+    feral.interpret`` für den Bestand genügt (Rescan-Prinzip). Nur Audio:
+    Bilddaten bleiben Sache der Scan-Kaskade. Das Tag-Jahr nur im
+    Plausibilitätsfenster der Datumsregel (``min_date``, ADR 0075)."""
+    from ..importer import DEFAULT_MIN_DATE, TAG_YEAR, set_media_date   # Lazy: importer → interpret
+    upper = datetime.now(timezone.utc) + timedelta(days=1)
+    if any(i.parser == suno.NAME for i in interpretations):
+        when = suno.created_at(raw_items_for(conn, file_hash))
+        if when is not None and when <= upper:
+            set_media_date(conn, file_hash, when, "metadaten")
+            return
+    year = next((f.value for i in interpretations if i.parser == "audio"
+                 for f in i.fields if f.field == "year"), None)
+    if year is not None:
+        tag = datetime(int(year), 1, 1, tzinfo=timezone.utc)
+        if (min_date or DEFAULT_MIN_DATE) <= tag <= upper:
+            set_media_date(conn, file_hash, tag, TAG_YEAR)
 
 
 def reparse_database(
@@ -119,6 +129,7 @@ def reparse_database(
     progress: Callable[[ReparseReport], None] | None = None,
     chunk_size: int = DEFAULT_CHUNK,
     pool: Executor | None = None,
+    min_date: datetime | None = None,
 ) -> ReparseReport:
     """Interpretiere alle Items mit Roh-Metadaten neu (idempotent).
 
@@ -161,7 +172,7 @@ def reparse_database(
                 conn, file_hash=file_hash, interpretations=interpretations,
                 now=ts, commit=False,
             )
-            _suno_media_date(conn, file_hash, interpretations)
+            _audio_media_date(conn, file_hash, interpretations, min_date)
         conn.commit()
         if progress is not None:
             progress(report)

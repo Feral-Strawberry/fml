@@ -18,6 +18,25 @@ auf deinem Rechner: kein Cloud-Dienst, kein Konto, der Server ist nur unter
 > Hobby-Projekt in aktiver Entwicklung - mach Backups (siehe „Gut zu
 > wissen").
 
+## Neu in 2026.10
+
+- **Leise arbeiten, anhalten, weitermachen:** zwei Knöpfe in der
+  Kopfzeile schalten Hintergrundaufgaben auf **Leise** (ein Prozess,
+  niedrigste Priorität) oder halten sie an. Was wartet, übersteht einen
+  Neustart.
+- **Musiksammlung:** Interpret, Album und Genre aus den Tags, als Gruppen
+  in der Seitenleiste, in der Suche und als Sortierung „Album".
+- **Songtext mit Zeiten:** Beim Abspielen steht die laufende Zeile unter
+  der Welle, die Abschnitte (`[Chorus]`, `[Verse]`) sind auf der Welle
+  markiert, im Panel läuft der Text mit.
+- **Zeitkommentare austauschen:** Kommentare als Datei exportieren und in
+  einem anderen fml importieren, mit Herkunfts-Etikett.
+- **Mehr Platz, mehr Ordnung:** rechtes Panel einklappen oder ganz
+  wegklappen (Taste **P**), **Datum von Hand** für Dateien mit falschem
+  Datum, **Finder-Tags** unter macOS als farbige Tags.
+
+Alles im Einzelnen: [`CHANGELOG.de.md`](CHANGELOG.de.md).
+
 ## Drei Ziele, drei Modi
 
 Jede Aufnahme in fml ist ein Ordner plus ein **Modus**. Der Modus legt
@@ -134,17 +153,21 @@ Größenangaben.
   Kodak Photo CD und Video-Containern (WEBM/MP4/MOV - auch Videos tragen ComfyUI-Workflows).
   Schicht 2 interpretiert daraus durchsuchbare Felder: Prompt, Negativ,
   Modell, LoRAs, Seed, Sampler, Steps, Eingangsbild u. a., mit Parsern
-  für ComfyUI, A1111/Forge und XMP (Midjourney, Lightroom-Bewertungen).
+  für ComfyUI, A1111/Forge, XMP (Midjourney, Lightroom-Bewertungen),
+  Content Credentials (Gemini, ChatGPT, Firefly), Topaz, Video-Codecs und
+  Musik (Tags, Suno).
   Weil die Rohdaten gespeichert bleiben, wirken Parser-Verbesserungen
   **rückwirkend** auf den ganzen Bestand - ohne die Dateien neu zu lesen.
 - **Workflow-Ansicht:** der eingebettete ComfyUI-Workflow lässt sich als
   Node-Graph ansehen und als unverändertes `.json` herunterladen - per
   Drag&Drop direkt zurück in ComfyUI.
-- **Suche als ein Zustand aus Chips:** Sidebar-Klicks (Modell, LoRA,
-  Tag, Jahr, Dateityp, Format, Auflösung, Bewertung, Eingangsbild,
-  Fundort), getippte Begriffe und Grammatik-Ausdrücke landen als Chips in
-  **einem** kombinierbaren Suchzustand; zweimal dieselbe Facette heißt
-  ODER, die Zähler links rechnen im aktiven Filter live mit. Volltext
+- **Suche als ein Zustand aus Chips:** Sidebar-Klicks (Medienart,
+  Generator, Modell, LoRA, Jahr, Dateityp, Format, Auflösung, Bewertung,
+  Eingangsbild, Fundort), getippte Begriffe und Grammatik-Ausdrücke landen
+  als Chips in **einem** kombinierbaren Suchzustand; Cmd/Strg-Klick auf
+  einen zweiten Wert derselben Gruppe heißt ODER, die Zähler links rechnen
+  im aktiven Filter live mit. Tags und alles Weitere gibt es über
+  „+ Kriterium" und die Tipphilfe im Suchfeld. Volltext
   über Prompts, Tags, Notizen und Dateinamen antwortet auch bei 250.000
   Medien in Millisekunden. Für präzise Fälle gibt es die Grammatik
   (`model: flux | krea -tag: wip rating>=4 sort: created-ab`), und jeder
@@ -160,15 +183,22 @@ Größenangaben.
 - **Galerie für große Bestände:** virtualisiertes Grid (drei Dichten),
   Vollbild-**Lupe** zum schnellen Durchblättern (←/→ mit Vorladen, Tasten
   1-5 bewerten), **Einzelbildansicht** mit echtem Zoom
-  (Anpassen/50/100/200 %, Mausrad, Navigator) und breiter
-  Metadaten-Spalte. Videos und animierte WEBPs spielen ab.
-- **Kuratieren, auch in großen Schritten:** Bewertung, Tags, Notizen und
-  manuelle Modell-Zuordnung - einzeln, per Multiselect (Shift/Strg) oder
-  mit **„⚡ Sammel-Aktion" auf das komplette Suchergebnis**. Die
-  Sammel-Aktionen sind bewusst nicht-destruktiv: die Basisbewertung füllt
-  nur Unbewertete, Tags werden hinzugefügt, Notizen angehängt. Manuelles
+  (Anpassen/max. 100 %/50/100/200 %, Mausrad, Navigator) und breiter
+  Metadaten-Spalte. Videos und animierte WEBPs spielen ab. Das
+  Metadaten-Panel rechts lässt sich abschnittsweise einklappen oder mit
+  **P** ganz wegklappen, wenn die Galerie die Breite braucht.
+- **Kuratieren, auch in großen Schritten:** Bewertung, Tags, Notizen,
+  manuelle Modell-Zuordnung und ein **Datum von Hand** (für eingescannte
+  Fotos oder frisch gerippte alte CDs) - einzeln, per Multiselect (Shift/Strg) oder
+  mit **„⚡ Sammel-Aktion" auf das komplette Suchergebnis** (ist etwas
+  ausgewählt, ist im Dialog „Auswahl" vorgewählt). Die Sammel-Aktionen
+  gehen behutsam vor: die Basisbewertung füllt nur Unbewertete, Tags
+  werden hinzugefügt, Notizen angehängt; nur Modell und Datum ersetzen
+  einen vorhandenen manuellen Wert. Manuelles
   ist eine **eigene Datenschicht**, strikt getrennt von dem, was aus den
-  Dateien extrahiert wurde - nichts überschreibt einander.
+  Dateien extrahiert wurde - nichts überschreibt einander. Unter macOS
+  kommen die farbigen **Finder-Tags** als Tags mit; fml liest sie nur und
+  schreibt nie in den Finder zurück.
 - **Ablehnen statt löschen:** Entf (oder die Sammel-Aktion) entfernt
   Items aus dem Katalog und sperrt ihren Hash - **die Datei wird dabei
   nie angefasst**, egal in welchem Modus. Rückgängig: Eintrag aus der
@@ -178,13 +208,20 @@ Größenangaben.
 - **Audio-Modul (optional, ab Werk aus):** Musik von Suno, aus
   ComfyUI (YuE, ACE-Step, MiniMax) oder eigene Aufnahmen: MP3, FLAC, Ogg,
   WAV, AIFF, CAF, M4A, mit allen eingebetteten Tags, Songtext in der
-  Volltextsuche und Suno-Version aus den Content Credentials. Eine eigene
+  Volltextsuche und Suno-Version aus den Content Credentials. Auch die
+  gewöhnliche **Musiksammlung** ist zu Hause: Interpret, Album und Genre
+  aus den Tags, als Gruppen in der Seitenleiste und als Sortierung, die
+  ein Album in seiner Reihenfolge spielt. Eine eigene
   **Audioansicht** zeigt die Songs als Liste mit dreifarbiger Wellenform
   (Bass, Mitten, Höhen) auf gemeinsamer Zeitachse, jede Zeile mit eigenem
   Abspielkopf. Der Player gleicht die Lautheit an, damit beim Vergleichen
-  nicht die lautere Fassung gewinnt; dazu **Zeitkommentare** an Stellen
-  im Song („Chorus" bei 1:40), **Vergleichen** von bis zu sechs Fassungen
-  und **Cover** aus der eigenen Bibliothek, mit denen fertige Songs in die
+  nicht die lautere Fassung gewinnt; dazu **Songtext mit Zeiten** (die
+  laufende Zeile unter der Welle, Abschnitte auf der Welle),
+  **Zeitkommentare** an Stellen im Song („Chorus" bei 1:40), die sich als
+  Datei mit einem anderen fml **austauschen** lassen, **Vergleichen** von
+  bis zu sechs Fassungen, eine **eigene Reihenfolge** je gespeicherter
+  Suche zum Probehören einer Playlist und **Cover** aus der eigenen
+  Bibliothek, mit denen fertige Songs in die
   Galerie kommen. Die Audiodateien selbst ändert fml nie. Alles dazu:
   [`docs/audio.md`](docs/audio.md).
 - **Mehrere Instanzen:** fml kann mehrfach parallel laufen - jede Instanz
@@ -195,7 +232,9 @@ Größenangaben.
   [`docs/instanzen.md`](docs/instanzen.md).
 - **Wartung ohne Angst:** Thumbnails, Suchindex, Interpretation,
   Erstelldaten - alles ist aus den Dateien und Rohdaten reproduzierbar
-  und per Knopf neu erzeugbar (Admin → Wartung). Scan-Probleme (kaputte
+  und per Knopf neu erzeugbar (Admin → Wartung); die Karte **Cache**
+  zeigt je Art, was auf der Platte liegt, und gibt den Platz frei.
+  Scan-Probleme (kaputte
   Dateien, fehlende Fundorte) werden gesammelt gemeldet und bleiben nach
   dem Quittieren quittiert - auch über Neustarts hinweg.
 
@@ -212,7 +251,9 @@ Größenangaben.
   Benutzerverwaltung, kein Fernzugriff. Die Datenbank gehört auf eine
   lokale Platte, nicht auf ein Netzlaufwerk.
 - **Kein Abgleich zwischen Instanzen oder Rechnern:** Bewertungen und
-  Tags leben in der Datenbank der jeweiligen Instanz.
+  Tags leben in der Datenbank der jeweiligen Instanz. Einzige Ausnahme:
+  Zeitkommentare an Songs lassen sich als Datei von einem fml in ein
+  anderes übernehmen.
 - **Keine KI-Analyse der Bildinhalte** (noch nicht): fml liest, was in
   den Dateien steht - es errät keine Tags aus Pixeln. Eine lokale
   VLM-Anreicherung als klar getrennte Schicht ist geplant.
@@ -258,12 +299,13 @@ darauf hin, falls es fehlt.
 
 ### Einstieg, wenn du sammeln oder konsolidieren willst (Ziele 2 und 3)
 
-1. Admin → **Konfiguration** → Haken bei **Library-Verwaltung**, darunter
-   „Media Library (Import-Ziel)" auf einen Ordner mit genug Platz setzen.
+1. Admin → **Konfiguration** → „Media Library (Import-Ziel)" auf einen
+   Ordner mit genug Platz setzen, darunter den Haken bei
+   **Library-Verwaltung** setzen, speichern.
 2. Admin → **Quellen & Import** → ersten Quellordner wählen, Modus
-   **„kopieren"**, „einmal jetzt" → **Aufnehmen**. Ergebnis je Datei
-   steht in der Aktivität; die Quelle bleibt unangetastet, bis du dem
-   Ergebnis traust.
+   **„kopieren"**, „einmal jetzt" → **Aufnehmen**. Das Ergebnis steht
+   als Summenzeile in der Aktivität (Admin → Übersicht); die Quelle bleibt
+   unangetastet, bis du dem Ergebnis traust.
 3. Wiederholen für jede Sicherung/jeden Altordner - Dubletten erkennt der
    Import am Inhalt und legt sie nicht erneut ab.
 4. Wer die Quellordner leer haben will (Ziel 3), nimmt Modus
@@ -277,12 +319,17 @@ darauf hin, falls es fehlt.
   eine) enthält deine Bewertungen, Tags, Notizen, gespeicherten Suchen
   und alle extrahierten Metadaten - sichere sie mit. Der Thumbnail-Cache
   (`cache/`) ist egal, der baut sich selbst neu.
-- **Große Importe:** Hunderte GB sind okay - der Rechner bleibt dabei
-  standardmäßig leise (Thumbnails laufen mit niedriger Priorität). Eilig?
-  Admin → Konfiguration → „Volle Leistung (laut)".
+- **Große Importe:** Hunderte GB sind okay - Thumbnails laufen
+  standardmäßig mit niedriger Priorität. Soll der Rechner währenddessen
+  ruhig bleiben, schaltet der Leistungs-Knopf in der Kopfzeile auf
+  **Leise** (Blatt); **Anhalten** („Zz") unterbricht ganz, und beim
+  nächsten Start geht es dort weiter. Eilig? Admin → Konfiguration →
+  „Volle Leistung" (schneller, aber laut).
 - **Die Config ist eine Textdatei:** `config.toml` neben `start.bat`.
-  Alles daraus ist auch in der GUI editierbar (Admin → Konfiguration);
-  die kommentierte Referenz ist
+  Das Wichtigste daraus ist auch in der GUI editierbar (Admin →
+  Konfiguration); nur dort stehen der Pfad der Datenbank, die
+  Cache-Ordner und Feinheiten wie `[audio] true_peak`. Die kommentierte
+  Referenz ist
   [`config.example.toml`](config.example.toml).
 - **Geändert (September 2026) - Klick-Regel in der Seitenleiste wie in
   Lightroom:** ein Klick wählt einen Wert (und ersetzt den vorherigen

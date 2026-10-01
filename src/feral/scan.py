@@ -26,10 +26,12 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
 from .db import connect, store_extraction, store_interpretations
+from .db.manual import add_finder_tags
 from .db.store import now_iso, record_issue
 from .extract import container
 from .extract.container import ExtractorNotImplementedError, UnknownContainerError
 from .extract.types import ContainerExtraction
+from .finder import read_finder_tags
 from .hashing import hash_file
 from .interpret import interpret_items
 from .interpret.types import Interpretation
@@ -310,6 +312,9 @@ def _process_file(
         from .importer import set_media_date
 
         set_media_date(conn, file_hash, when, date_source)
+        # Finder-Tags (ADR 0097, nur macOS): „Re-Scan aller Fundorte" holt
+        # auch später im Finder vergebene Tags nach; entfernte bleiben stehen.
+        add_finder_tags(conn, file_hash, read_finder_tags(path), now_iso())
         conn.commit()
         _forget_outcome(conn, path)   # katalogisiert ⇒ file_locations übernimmt
     except sqlite3.Error as exc:

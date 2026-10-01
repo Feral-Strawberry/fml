@@ -49,13 +49,25 @@ FIELDS = frozenset({
     # Audio (ADR 0083, Issue #160)
     "lyrics", "title", "song_id", "parent_id", "relation", "bpm", "key",
     "audio_codec", "sample_rate", "channels", "bit_depth",
+    # Musiksammlung (#224, ADR 0094). ``album_artist``, ``track``, ``disc``
+    # und ``year`` bewusst NICHT: den Album-Interpreten deckt ``interpret:``
+    # ab, Nummern taugen nicht als Teilstring-Filter, und ``year:`` ist das
+    # Erstelldatum (in das das Tag-Jahr einfließt, #220).
+    "artist", "album", "genre",
 })
+
+# Gruppen-Schlüssel der Audioansicht (#224, ADR 0094): der Album-Interpret,
+# wo das Tag ihn nennt, sonst der Interpret — die übliche Sammlungs-Logik
+# (Sampler landen unter „Various Artists" statt in hundert Einzelnamen).
+# Kein Schicht-2-Feld, sondern ein effektiver Wert wie das Modell (ADR 0022);
+# englisch ``albumartist:``.
+INTERPRET = "interpret"
 
 # Whitelist der sort:-Direktive (ADR 0035). Muss die Schlüssel von
 # library._SORTS spiegeln (Test sichert das ab) — filters darf library
 # nicht importieren, library importiert filters.
 SORT_KEYS = frozenset({"added", "size", "name", "container", "rating", "created",
-                       "duration"})
+                       "duration", "album", "manual"})
 
 # Standardrichtung je Schlüssel (ADR 0039): "ab" = absteigend (Neuestes/
 # Größtes/Bestes zuerst), "auf" = aufsteigend (A–Z). Ein Richtungs-Suffix
@@ -64,6 +76,9 @@ SORT_KEYS = frozenset({"added", "size", "name", "container", "rating", "created"
 SORT_DEFAULT_DIRECTION = {
     "added": "ab", "size": "ab", "created": "ab", "rating": "ab",
     "name": "auf", "container": "auf", "duration": "ab",
+    # Album (#224): Interpret → Album → CD → Titel; manuell (#218): die
+    # Reihenfolge einer gespeicherten Suche.
+    "album": "auf", "manual": "auf",
 }
 
 
@@ -120,7 +135,8 @@ FUNDORTE = ("library", "extern")
 # auf das kanonische Feld ``tool``; ``codec:`` der kurze auf ``video_codec``
 # (Issue #71).
 _KEY_ALIASES = {"file": "datei", "location": "fundort", "generator": "tool",
-                "codec": "video_codec", "type": "typ", "duration": "dauer"}
+                "codec": "video_codec", "type": "typ", "duration": "dauer",
+                "albumartist": INTERPRET}
 _FORMAT_ALIASES = {"portrait": "hochformat", "square": "quadratisch",
                    "landscape": "querformat"}
 _SORT_DIRECTION_ALIASES = {"asc": "auf", "desc": "ab"}
@@ -332,7 +348,7 @@ def parse(expression: str) -> list[Predicate]:
             for v, _ in values:
                 if v.lower() != "workflow" and v.lower() not in FIELDS:
                     raise UserError("filterHasUnknown",
-                                    known=", ".join(sorted(FIELDS)))
+                                    known=", ".join(sorted(FIELDS | {INTERPRET})))
             preds.append(Predicate(kind="has", negated=negated,
                                    values=tuple((v.lower(), e) for v, e in values)))
         elif key == "format":
@@ -395,12 +411,12 @@ def parse(expression: str) -> list[Predicate]:
                                    values=tuple((v, False) for v, _ in values)))
         elif key == "rating":
             raise UserError("filterRatingSyntax")
-        elif key in FIELDS:
+        elif key in FIELDS or key == INTERPRET:
             preds.append(Predicate(kind="field", negated=negated, field=key,
                                    values=tuple(values)))
         else:
             raise UserError("filterUnknownField", field=key,
-                            known=", ".join(sorted(FIELDS)))
+                            known=", ".join(sorted(FIELDS | {INTERPRET})))
     if not preds:
         raise UserError("filterEmpty")
     return preds
@@ -590,6 +606,17 @@ def build_where(
                    f"WHERE field = 'model' AND {interp}) "
                    f"AND i.file_hash NOT IN (SELECT file_hash FROM annotations "
                    f"WHERE model IS NOT NULL)))")
+        elif p.kind == "field" and p.field == INTERPRET:
+            # Effektiver Album-Interpret (#224): das album_artist-Tag, und nur
+            # ohne dieses der Interpret des Titels.
+            aa = _value_match("value_text", p.values, params)
+            ar = _value_match("value_text", p.values, params)
+            sub = (f"(i.file_hash IN (SELECT file_hash FROM interpreted_metadata "
+                   f"WHERE field = 'album_artist' AND {aa}) "
+                   f"OR (i.file_hash IN (SELECT file_hash FROM interpreted_metadata "
+                   f"WHERE field = 'artist' AND {ar}) "
+                   f"AND i.file_hash NOT IN (SELECT file_hash FROM interpreted_metadata "
+                   f"WHERE field = 'album_artist' AND value_text != '')))")
         elif p.kind == "field":
             params.append(p.field)
             match = _value_match("value_text", p.values, params)

@@ -42,13 +42,14 @@ GROUPS = [
     ("layer2", {"de": "Schicht 2: Interpretation", "en": "Layer 2: interpretation"},
      ["interpreted_metadata"]),
     ("manual", {"de": "Manuelle Schicht", "en": "Manual layer"},
-     ["annotations", "tags", "item_tags", "time_comments", "covers", "smart_folders"]),
+     ["annotations", "tags", "item_tags", "time_comments", "covers", "smart_folders",
+      "folder_order"]),
     ("rankings", {"de": "Ranking-Modul", "en": "Ranking module"},
      ["rankings", "ranking_duels", "ranking_scores"]),
     ("fts", {"de": "Volltextindex", "en": "Full-text index"},
      ["search_index"]),
     ("ops", {"de": "Betrieb", "en": "Operations"},
-     ["blocked_hashes", "import_log", "scan_memory", "scan_issues", "app_state"]),
+     ["blocked_hashes", "import_log", "scan_memory", "scan_issues", "app_state", "task_queue"]),
 ]
 
 # Relationships that are deliberate references WITHOUT a foreign key: these

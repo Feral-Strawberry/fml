@@ -101,7 +101,38 @@ test("Widget zählt beobachtete Ordner und setzt den Navi-Zähler der Quellen", 
   const cnt = document.getElementById("navCnt-sources");
   assert.equal(cnt.hidden, false);
   assert.equal(cnt.textContent, "2");
-  assert.equal(document.getElementById("actw").getAttribute("href"), "/admin/overview");
+  assert.equal(document.getElementById("actlink").getAttribute("href"), "/admin/overview");
+});
+
+test("Widget (#236): Leistung + Anhalten neben dem Link, gleicher Serverzustand; angehalten sagt das Widget warum", async () => {
+  const power = document.getElementById("wPower"), pause = document.getElementById("wPause");
+  assert.equal(power.closest("a"), null, "Knöpfe nicht im Link (gültiges HTML)");
+  assert.equal(pause.closest("a"), null);
+  state.status = { ...state.status, watchers: [], quiet: false, paused: false, queue_pending: 0 };
+  await pollOnce(); await flush();
+  assert.equal(power.dataset.icon, "bolt");
+  assert.ok(!pause.classList.contains("on"));
+  mockApi.post("/api/background", () => ({ ok: true }));
+  click(pause);
+  await flush();
+  const sent = mockApi.calls.filter((c) => c.method === "POST" && c.path === "/api/background").at(-1);
+  assert.deepEqual(sent.body, { paused: true });
+  assert.ok(pause.classList.contains("on"), "Zz sofort in Akzentfarbe");
+
+  // Server meldet angehalten mit zwei wartenden, eine Aufgabe beendet noch ihre Datei.
+  state.status = { ...state.status, quiet: true, paused: true, queue_pending: 2,
+    running: true, label: { key: "taskThumbWarm" }, current_file: { key: "x", params: { index: 5, total: 10 } } };
+  await pollOnce(); await flush();
+  assert.equal(power.dataset.icon, "leaf", "Leise aus dem Serverzustand");
+  assert.equal(document.getElementById("wTask").textContent, "angehalten · 2 wartend");
+  assert.match(document.getElementById("wCount").textContent, /endet noch mit ihrer Datei/);
+  assert.equal(document.getElementById("wDot").className, "dot warn");
+  state.status = { ...state.status, running: false, label: null, current_file: null };
+  await pollOnce(); await flush();
+  assert.equal(document.getElementById("wCount").textContent, "");
+  assert.equal(document.getElementById("wBar").style.width, "0%");
+  state.status = { ...state.status, paused: false, quiet: false, queue_pending: 0 };
+  await pollOnce(); await flush();
 });
 
 test("Instanzname erscheint als Pille; Schema + Port unten in der Navi", async () => {

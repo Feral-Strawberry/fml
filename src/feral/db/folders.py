@@ -81,3 +81,23 @@ def list_folders(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             " FROM smart_folders ORDER BY name COLLATE NOCASE"
         )
     ]
+
+
+def get(conn: sqlite3.Connection, folder_id: int) -> dict[str, Any] | None:
+    """Ein Smart Folder oder ``None``."""
+    row = conn.execute(
+        "SELECT id, name, expression FROM smart_folders WHERE id = ?", (folder_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def write_order(conn: sqlite3.Connection, folder_id: int, hashes: list[str]) -> None:
+    """Manuelle Reihenfolge (#218, ADR 0095): die Liste wird 1..n neu
+    durchnummeriert. Items außerhalb der Liste (aus der Suche gefallen)
+    behalten ihre Zeile still."""
+    with conn:
+        conn.executemany(
+            """INSERT INTO folder_order (folder_id, file_hash, position) VALUES (?, ?, ?)
+               ON CONFLICT(folder_id, file_hash) DO UPDATE SET position = excluded.position""",
+            [(folder_id, h, float(k)) for k, h in enumerate(hashes, start=1)],
+        )

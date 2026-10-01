@@ -40,8 +40,18 @@ nav#adnav::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 
 .navlist .cnt { margin-left: auto; font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 999px; background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent-line); }
 .navlist .cnt.mute { background: transparent; color: var(--faint); border-color: var(--border); }
 .navfoot { margin-top: auto; position: relative; display: flex; flex-direction: column; gap: 10px; }
-.actw { display: block; padding: 10px 11px 11px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--border); }
+.actw { position: relative; border-radius: 10px; background: var(--panel2); border: 1px solid var(--border); }
 .actw:hover { border-color: var(--accent-line); }
+.actlink { display: block; padding: 10px 11px 11px; color: inherit; text-decoration: none; }
+/* Leistung + Anhalten (#236) oben rechts; die Aufgabenzeile macht Platz
+   und kürzt ihren Namen, statt umzubrechen. */
+.actbtns { position: absolute; top: 6px; right: 7px; display: flex; gap: 3px; z-index: 1; }
+.actbtns button { width: 24px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--dim); background: transparent; border: 1px solid transparent; border-radius: 6px; }
+.actbtns button:hover { color: var(--text); border-color: var(--accent-line); }
+.actbtns button svg { width: 13px; height: 13px; }
+#wPause.on { color: var(--accent); border-color: var(--accent-line); }
+.actw .actlink .row { padding-right: 52px; }
 .actw .row { display: flex; align-items: center; gap: 7px; font-size: 12px; }
 .actw .task { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .actw .meta { display: flex; justify-content: space-between; margin-top: 6px; font-family: var(--mono); font-size: 10px; color: var(--dim); }
@@ -272,7 +282,9 @@ input[type=text]:focus-visible, input[type=number]:focus-visible { border-color:
   .brand { justify-content: center; padding-bottom: 10px; }
   .back { justify-content: center; padding: 7px 0; }
   .navlist a { justify-content: center; padding: 9px 0; }
-  .actw { padding: 8px; } .actw .row { justify-content: center; }
+  .actlink { padding: 8px; } .actw .row { justify-content: center; }
+  .actbtns { position: static; justify-content: center; padding-top: 6px; flex-direction: column; align-items: center; }
+  .actw .actlink .row { padding-right: 0; }
   main#adpage { padding: 18px 16px 40px; }
 }
 
@@ -307,6 +319,8 @@ input[type=text]:focus-visible, input[type=number]:focus-visible { border-color:
 .dashhint { font-size: 11px; margin: 3px 0 8px; }
 .admsg { margin-top: 12px; font-size: 12px; color: var(--dim); }
 .issueresolve { color: var(--accent); cursor: pointer; font-size: 11px; }
+.issueresolve + .issueresolve { margin-left: 10px; }
+.issueresolve.danger { color: var(--bad); }
 .rbadges { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 4px; }
 .badgechip { font-family: var(--mono); font-size: 8.5px; font-weight: 700; letter-spacing: .5px; color: var(--dim); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; text-transform: uppercase; }
 .rsnippet { font-size: 11.5px; color: var(--dim); line-height: 1.4; }
@@ -415,6 +429,8 @@ input[type=text]:focus-visible, input[type=number]:focus-visible { border-color:
 .issuekind .isslist .result:first-child { border-top: none; padding-top: 0; }
 .kindfoot { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 10px; font-size: 11.5px; color: var(--dim); }
 .kindfoot button { margin-left: auto; font-size: 12px; padding: 4px 10px; }
+/* Zwei Knöpfe (Ablehnen + Quittieren, #217): nur der erste schiebt nach rechts. */
+.kindfoot button + button { margin-left: 0; }
 .blktools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 8px; }
 .blktools input[type="text"] { flex: 1; min-width: 200px; }
 .blktools button { font-size: 12px; padding: 4px 10px; }
@@ -429,3 +445,6 @@ input[type=text]:focus-visible, input[type=number]:focus-visible { border-color:
 .atable td:last-child { text-align: right; }
 .atable .arenadel { font-size: 12px; padding: 4px 10px; color: var(--dim); }
 .atable .arenadel:hover { color: var(--bad); border-color: rgba(224,82,82,.5); }
+/* Cache-Karte (#227): Ort lang → gekürzt, voller Pfad im Tooltip. */
+.cachetable td.mono { font-size: 11px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cachetable button { font-size: 12px; padding: 4px 10px; }

@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from .. import tools
 import sqlite3
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from importlib import metadata
 import re
 
@@ -148,6 +148,7 @@ def admin_info(
         "log_dir": str(Path(log_dir).resolve()) if log_dir else None,
         "orphans": stand["orphans"],
         "cache": stand["cache"],
+        "caches": stand["caches"],
         "checking": stand["checking"],
         "ffprobe": _tool_found("ffprobe"),
         "ffmpeg": _tool_found("ffmpeg"),
@@ -230,6 +231,99 @@ def _dir_stats(root: Path) -> tuple[int, int]:
     return count, size
 
 
+# -- Caches aufgeschlüsselt (#227) ---------------------------------------------------
+#
+# Alles in den Cache-Ordnern ist abgeleitet und entsteht bei Bedarf neu
+# (Rescan-Prinzip): Thumbnails (ADR 0013), Audio-Analysen (JSON) und
+# Wiedergabekopien (FLAC) im Audio-Cache (ADR 0086; beide teilen sich den
+# Ordner, getrennt nach Endung inkl. ``.fail``-Marker), Anzeigebilder
+# (Photo CD, #208). Ordner-Schlüssel: ``thumbs``, ``audio``, ``preview``.
+
+CACHE_KINDS = ("thumbs", "audio_analysis", "audio_proxy", "preview")
+
+
+def _cache_kind(root_key: str, name: str) -> str:
+    if root_key == "audio":
+        return "audio_proxy" if ".flac" in name else "audio_analysis"
+    return root_key
+
+
+def _cache_root(kind: str) -> str:
+    return "audio" if kind.startswith("audio_") else kind
+
+
+_CACHE_DIR = re.compile(r"[0-9a-f]{2}")
+_CACHE_FILE = re.compile(r"[0-9a-f]{64}\.[A-Za-z0-9.]+")
+
+
+def _cache_files(root: Path) -> Iterator[os.DirEntry]:
+    """Die Dateien, die fml selbst in einen Cache legt: ``<root>/<2 hex>/
+    <64 hex>.<endung>`` (Produkt, ``.fail``-Marker, ``.tmp``-Reste).
+
+    Gezählt und gelöscht wird NUR dieses Muster. Zeigt ein Cache-Pfad in der
+    ``config.toml`` versehentlich auf einen Ordner mit eigenen Dateien (etwa
+    die Musiksammlung), bleibt dort alles liegen (ADR 0041)."""
+    try:
+        subs = [e for e in os.scandir(root)
+                if e.is_dir(follow_symlinks=False) and _CACHE_DIR.fullmatch(e.name)]
+    except OSError:
+        return
+    for sub in subs:
+        try:
+            entries = list(os.scandir(sub.path))
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.is_file(follow_symlinks=False) and _CACHE_FILE.fullmatch(entry.name):
+                yield entry
+
+
+def cache_breakdown(dirs: dict[str, str | Path]) -> list[dict[str, Any]]:
+    """Je Cache-Art Anzahl, Bytes und Ort — EIN Lauf je Ordner."""
+    parts = {k: [0, 0] for k in CACHE_KINDS}
+    for root_key, root in dirs.items():
+        root = Path(root)
+        if not root.is_dir():
+            continue
+        for entry in _cache_files(root):
+            part = parts[_cache_kind(root_key, entry.name)]
+            part[0] += 1
+            part[1] += entry.stat(follow_symlinks=False).st_size
+    return [{"kind": k, "count": c, "bytes": b,
+             "path": str(Path(dirs[_cache_root(k)]).resolve()) if _cache_root(k) in dirs else None}
+            for k, (c, b) in parts.items()]
+
+
+def clear_cache(dirs: dict[str, str | Path], kind: str) -> int:
+    """Eine Cache-Art löschen; gibt die Zahl gelöschter Dateien zurück.
+    Gelöscht werden nur fmls eigene Cache-Dateien (``_cache_files``), nie
+    der Ordner als Ganzes; Analysen und Wiedergabekopien teilen sich den
+    Audio-Ordner und werden nach Endung getrennt."""
+    if kind not in CACHE_KINDS:
+        raise ValueError(f"unbekannte Cache-Art: {kind}")
+    root_key = _cache_root(kind)
+    root = Path(dirs[root_key])
+    if not root.is_dir():
+        return 0
+    count = 0
+    touched: set[str] = set()
+    for entry in _cache_files(root):
+        if _cache_kind(root_key, entry.name) != kind:
+            continue
+        try:
+            os.unlink(entry.path)
+        except OSError:
+            continue
+        count += 1
+        touched.add(os.path.dirname(entry.path))
+    for sub in touched:   # leer gewordene Unterordner mitnehmen
+        try:
+            os.rmdir(sub)
+        except OSError:
+            pass
+    return count
+
+
 # -- Gemerkter Stand der teuren Kennzahlen (#118, ADR 0077) ----------------------
 #
 # Verwaiste Fundorte (ein stat je Fundort) und Thumbnail-Cache (Verzeichnis-
@@ -271,7 +365,9 @@ def write_app_state(conn: sqlite3.Connection, key: str, value: Any) -> None:
 
 class SlowCounts:
     """Gemerkter Stand von ``orphans`` (verwaiste Fundorte) und ``cache``
-    (Thumbnail-Dateien + Bytes), je mit Zeitstempel ``at``.
+    (Thumbnail-Dateien + Bytes), je mit Zeitstempel ``at``. ``caches`` ist
+    die Aufschlüsselung aller Cache-Arten (#227) — derselbe Zähllauf setzt
+    beide, ``cache`` bleibt die Thumbnail-Zeile.
 
     Überlebt Neustarts (ADR-0077-Nachtrag): jeder gesetzte Stand geht mit
     einem **Herkunftsstempel** (Rechnername + Cache-Pfad) über ``persist``
@@ -280,17 +376,21 @@ class SlowCounts:
     sonst Zahlen eines anderen Rechners.
     """
 
-    KEYS = ("orphans", "cache")
-    EMPTY: dict[str, Any] = {"orphans": None, "cache": None, "checking": []}
+    KEYS = ("orphans", "cache")                  # im Hintergrund zählbar
+    STORED = ("orphans", "cache", "caches")      # gemerkt + persistiert
+    EMPTY: dict[str, Any] = {"orphans": None, "cache": None, "caches": None, "checking": []}
     STATE_PREFIX = "slow."
 
     def __init__(self, db_path: str | Path, thumb_cache: str | Path, *,
-                 persist: Callable[[str, dict[str, Any]], None] | None = None) -> None:
+                 persist: Callable[[str, dict[str, Any]], None] | None = None,
+                 caches: dict[str, str | Path] | None = None) -> None:
         self._db_path = str(db_path)
         self._thumb_cache = Path(thumb_cache)
+        # Weitere Cache-Ordner neben den Thumbnails (#227): audio, preview.
+        self._dirs: dict[str, str | Path] = {"thumbs": self._thumb_cache, **(caches or {})}
         self._persist = persist
         self._lock = threading.Lock()
-        self._stand: dict[str, dict[str, Any] | None] = {"orphans": None, "cache": None}
+        self._stand: dict[str, dict[str, Any] | None] = {k: None for k in self.STORED}
         self._checking: set[str] = set()     # läuft gerade im Hintergrund
         self._again: set[str] = set()        # Wunsch kam während eines Laufs
 
@@ -301,19 +401,18 @@ class SlowCounts:
     def load(self, conn: sqlite3.Connection) -> None:
         """Gemerkte Stände aus ``app_state`` übernehmen (nur mit passendem Stempel)."""
         stamp = self.stamp()
-        for key in self.KEYS:
+        for key in self.STORED:
             value = read_app_state(conn, self.STATE_PREFIX + key)
             if not isinstance(value, dict) or value.get("stamp") != stamp:
                 continue
             stand = {k: v for k, v in value.items() if k != "stamp"}
-            if "count" in stand and "at" in stand:
+            if ("count" in stand or "parts" in stand) and "at" in stand:
                 with self._lock:
                     self._stand[key] = stand
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            return {"orphans": self._stand["orphans"], "cache": self._stand["cache"],
-                    "checking": sorted(self._checking)}
+            return {**self._stand, "checking": sorted(self._checking)}
 
     # -- setzen (Ergebnis liegt schon vor) --------------------------------------
 
@@ -340,7 +439,12 @@ class SlowCounts:
         return self.set_orphans(len(orphan_locations(conn, limit=None)))
 
     def count_cache(self) -> dict[str, Any]:
-        return self.set_cache(*_dir_stats(self._thumb_cache))
+        """Alle Cache-Ordner in einem Lauf (#227); liefert die Thumbnail-Zeile
+        wie bisher, die Aufschlüsselung steht danach unter ``caches``."""
+        parts = cache_breakdown(self._dirs)
+        self._set("caches", {"parts": parts, "at": _now_iso()})
+        thumbs = parts[0]
+        return self.set_cache(thumbs["count"], thumbs["bytes"])
 
     # -- im Hintergrund zählen (nach Aufgaben) -----------------------------------
 
@@ -537,6 +641,56 @@ def resolve_issues(
     return cur.rowcount
 
 
+# Problem-Arten, deren Medien sich aus der Probleme-Seite ablehnen lassen
+# (#217). Serverseitig durchgesetzt: Ablehnen löscht die manuelle Schicht
+# des Mediums, eine Extraktor-Warnung ist dafür kein Grund.
+REJECTABLE_KINDS = frozenset({"thumbnail"})
+
+
+def reject_issues(
+    conn: sqlite3.Connection, *, issue_id: int | None = None, kind: str | None = None,
+    thumb_cache: str | Path | None = None,
+) -> dict[str, int]:
+    """Die Medien offener Probleme ablehnen (#217): ein Eintrag oder alle
+    offenen einer Art — nicht nur die angezeigten.
+
+    Probleme hängen am Pfad, Ablehnen braucht den Hash: Pfad → Fundort →
+    Hash. Abgelehnt wird über die Sammel-Aktion (``apply_bulk(reject=True)``:
+    Sperrliste, Thumbnail weg; Dateien bleiben, ADR 0041). Einträge mit
+    Katalogeintrag gelten danach als erledigt (quittiert); Pfade ohne
+    Katalogeintrag bleiben offen und werden als ``skipped`` gezählt.
+    """
+    from .bulk import apply_bulk
+
+    if issue_id is None and kind is None:
+        raise ValueError("reject_issues braucht issue_id oder kind")
+    where, param = ("id = ?", issue_id) if issue_id is not None else ("kind = ?", kind)
+    kinds = sorted(REJECTABLE_KINDS)
+    rows = conn.execute(
+        f"""SELECT s.id, l.file_hash FROM scan_issues s
+             LEFT JOIN file_locations l ON l.path = s.path
+            WHERE s.resolved = 0 AND s.{where}
+              AND s.kind IN ({",".join("?" * len(kinds))})""",
+        (param, *kinds),
+    ).fetchall()
+    hits: dict[int, set[str]] = {}
+    for row in rows:
+        hits.setdefault(row[0], set())
+        if row[1]:
+            hits[row[0]].add(row[1])
+    done = [i for i, hs in hits.items() if hs]
+    hashes = sorted({h for hs in hits.values() for h in hs})
+    rejected = 0
+    if hashes:
+        summary = apply_bulk(conn, hashes=hashes, reject=True, thumb_cache=thumb_cache)
+        rejected = int(summary.get("rejected", 0))
+    if done:
+        conn.executemany("UPDATE scan_issues SET resolved = 1 WHERE id = ?",
+                         [(i,) for i in done])
+        conn.commit()
+    return {"rejected": rejected, "resolved": len(done), "skipped": len(hits) - len(done)}
+
+
 def orphan_locations(
     conn: sqlite3.Connection, *, limit: int | None = 50, under: str | None = None
 ) -> list[dict[str, Any]]:
@@ -565,16 +719,6 @@ def prune_orphan_locations(conn: sqlite3.Connection, *, under: str | None = None
     with conn:
         conn.executemany("DELETE FROM file_locations WHERE id = ?", [(i,) for i in ids])
     return len(ids)
-
-
-def clear_thumb_cache(thumb_cache: str | Path) -> int:
-    """Leere den Thumbnail-Cache (inkl. `.fail`-Marker). Gibt die Anzahl gelöschter
-    Dateien zurück. Gefahrlos: Thumbnails regenerieren sich beim Ansehen (ADR 0013)."""
-    root = Path(thumb_cache)
-    count, _ = _dir_stats(root)
-    if root.is_dir():
-        shutil.rmtree(root)
-    return count
 
 
 # -- Import-Regeln auf den Bestand (ADR 0046) --------------------------------------

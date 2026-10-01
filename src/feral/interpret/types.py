@@ -66,6 +66,10 @@ der Parser ``suno``:
     parent_id        Clip-ID des Eltern-Songs (nur wo die Datei sie nennt)
     relation         Beziehung zum Eltern-Song: 'extend', 'cover', 'remaster',
                      'edit', 'speed_edit', 'section_replace', 'stitch', 'derived'
+    lyrics_synced    Songtext mit Zeiten als JSON ``[[start_ms, end_ms|null,
+                     "Zeile"], …]`` (Untertitel-Spur, ID3 SYLT, LRC; #234)
+    song_sections    Abschnittsmarken als JSON ``[[start_ms, "Chorus"], …]``
+                     (reine Klammerzeilen des getimten Songtexts; #234)
     bpm              Tempo (TBPM, ACE-Step ``bpm``)
     key              Tonart (TKEY, ACE-Step ``keyscale``)
     audio_codec      Codec der ersten Tonspur, wie ffprobe ihn nennt
@@ -73,6 +77,15 @@ der Parser ``suno``:
     sample_rate      Abtastrate in Hz ('48000')
     channels         Kanalzahl ('2')
     bit_depth        Bittiefe verlustfreier Formate ('16', '24')
+
+Musiksammlung (Issue #224, ADR 0094) — aus den Tags, Parser ``audio``:
+
+    artist           Interpret des Titels (TPE1, Vorbis ARTIST; mehrfach möglich)
+    album_artist     Album-Interpret (TPE2, ALBUMARTIST) — Sampler: 'Various Artists'
+    album            Album (TALB, ALBUM)
+    track, disc      Titel- und CD-Nummer, nur die Zahl ('3' aus '3/12')
+    year             Jahr aus den Tags ('1987'); speist die Datums-Kaskade
+    genre            Genre als Name (ID3v1-Nummern übersetzt; mehrfach möglich)
 
 Ein Feld darf mehrfach vorkommen (z. B. mehrere `prompt`-Kandidaten in einem
 ComfyUI-Graphen); die Reihenfolge bleibt erhalten.

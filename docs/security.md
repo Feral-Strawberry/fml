@@ -40,6 +40,23 @@ Internet: nie blind vertrauen.
   64 MiB gelesen, abgeschnittene Blöcke werden erkannt, komprimierte
   ID3-Frames werden gedeckelt entpackt, eingebettete Bilder nur beschrieben, nie gespeichert. Mit
   zehntausenden verstümmelten Dateien geprüft: kein Absturz, kein Hänger.
+- **Songtext mit Zeiten** (Untertitel-Spur, ID3 `SYLT`, LRC im
+  Songtext-Tag) ist gedeckelt: höchstens 512 KiB Text je Quelle, 2.000
+  Zeilen, 500 Zeichen je Zeile; aus einer Datei liest fml höchstens vier
+  Untertitel-Spuren zu je 1 MiB. Präparierte Zeilen (zehntausende
+  Zeitstempel, endlose Klammerfolgen) enden in Sekundenbruchteilen.
+- **Finder-Tags (macOS)** kommen mit der Datei und gelten als fremde
+  Eingabe: das Attribut wird nur bis 1 MiB gelesen, höchstens 64 Tags zu
+  je 200 Zeichen, ohne Entity-Auflösung.
+- **Ein Parserfehler bleibt bei seiner Datei.** Scheitert ein
+  Interpretations-Parser an den Metadaten einer Datei, fällt er für diese
+  Datei aus; Scan und „Neu interpretieren" laufen weiter, die Roh-Metadaten
+  bleiben gespeichert.
+- **Kommentar-Dateien eines anderen fml** (Zeitkommentare importieren)
+  sind fremde Eingabe: höchstens 20 MB, geprüft vor dem Einlesen, festes
+  Format mit Längen- und Mengengrenzen (2.000 Kommentare je Song), nur als
+  `application/json`. Übernommen werden ausschließlich Kommentartext, Stelle
+  und Herkunft; Dateien fasst der Import nicht an.
 - **ffmpeg/ffprobe** (Videos, Audio) bekommen jede Datei als lokale Datei:
   `-protocol_whitelist file` und ein absoluter `file:`-Pfad. Eine präparierte
   Datei (etwa eine versteckte Playlist) kann ffmpeg nicht zu Netzzugriffen
@@ -51,11 +68,17 @@ Internet: nie blind vertrauen.
 - Alle Datenbank-Abfragen sind **parametrisiert** — kein Metadaten- oder
   Suchtext wird je in SQL zusammengesetzt. Die Volltextsuche (FTS5) quotet die
   Suchbegriffe, Feld- und Sortier-Namen kommen aus festen Whitelists.
+- **Die Warteschlange** steht in der Datenbank, damit sie einen Neustart
+  übersteht: je Aufgabe ein Name aus einer festen Liste und Parameter als
+  JSON, nie ausführbarer Code. Im Übersichtsmodus kommt aus dieser
+  Sicherung kein Auftrag zurück, der Dateien kopiert, verschiebt oder
+  löscht.
 
 **Anzeige (in der Browser-Oberfläche):**
 
 - Jeder aus einer Datei stammende Text (Prompt, Roh-Metadaten, Songtitel und
-  Songtext, Dateiname, Tags, Zeitkommentare, Suchtreffer) wird beim Einsetzen in die Seite **HTML-escaped** — eingebetteter
+  Songtext samt Abschnittsnamen, Dateiname, Tags, Zeitkommentare und ihre
+  Herkunft, Suchtreffer) wird beim Einsetzen in die Seite **HTML-escaped** — eingebetteter
   Schadcode wird als Text angezeigt, nicht ausgeführt.
 - Die Workflow-Graph-Vorschau erzwingt für alle Koordinaten aus dem fremden JSON
   **Zahlen**, sodass kein Wert aus dem SVG ausbrechen kann; Farbwerte aus dem
@@ -84,6 +107,13 @@ Internet: nie blind vertrauen.
   einem Pfad, der nur aus dem geprüften Hash gebildet wird; fml schreibt nie
   in die Originale. Ein **Cover** ist ein Verweis zwischen zwei
   katalogisierten Items, kein Upload und kein Pfad.
+- **Cache löschen** (Admin → Wartung) entfernt nur Dateien, die fml selbst
+  dort abgelegt hat (Muster `<2 Hex-Zeichen>/<Hash>.<Endung>`), nie einen
+  Ordner als Ganzes. Zeigt ein Cache-Pfad in der `config.toml` versehentlich
+  auf einen Ordner mit eigenen Dateien, bleiben diese liegen.
+- **Finder-Attribute beim Import (macOS):** Die Kopie in der Library
+  bekommt die erweiterten Attribute der Quelle, nachdem ihr Inhalt per Hash
+  geprüft ist; Zugriffslisten (ACL) werden bewusst nicht übernommen.
 
 ## Restrisiken & Betriebsempfehlung
 
@@ -98,6 +128,20 @@ Internet: nie blind vertrauen.
   über ein privates VPN wie Tailscale), öffnet diese Liste automatisch —
   dann gilt umso mehr die Empfehlung darüber. Alle Antworten tragen
   zusätzlich `X-Content-Type-Options: nosniff`.
+- **Fremde Webseiten können nichts ändern.** Eine Seite in einem anderen
+  Tab kann Anfragen an `127.0.0.1` schicken, während fml läuft. Jede
+  ändernde Anfrage (alles außer GET) muss deshalb von fmls eigener
+  Oberfläche stammen: Der Browser nennt die Herkunft im `Origin`-Kopf, und
+  passt sie nicht zum Server, wird die Anfrage abgewiesen (403) und im
+  Serverlog vermerkt. Skripte ohne Browser (curl) sind davon nicht
+  betroffen. Wer fml hinter einen Reverse-Proxy stellt, muss den
+  `Host`-Kopf unverändert durchreichen, sonst trifft die Prüfung auch die
+  eigene Oberfläche.
+- **Eine `feral.sqlite` aus fremder Hand nicht öffnen.** Die Datenbank
+  enthält neben dem Katalog auch die wartenden Aufgaben mit ihren Pfaden.
+  fml führt daraus nur bekannte Aufgaben aus und im Übersichtsmodus keine
+  dateischreibenden; trotzdem gilt: nur eigene Datenbanken und eigene
+  Backups starten.
 - **Der Ordner-Browser ist mächtig.** Die Admin-Oberfläche kann Verzeichnisse
   auf dem ganzen Rechner auflisten (für die Auswahl von Quell-/Zielordnern). Das
   ist gewollt, aber ein Grund mehr, den Server nicht nach außen zu öffnen.

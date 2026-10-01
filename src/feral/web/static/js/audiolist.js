@@ -13,7 +13,7 @@
 
 import { STRINGS } from "./strings.js";
 import { canPlay, fmtDuration, libraryView } from "./api.js";
-import { dotsHtml } from "./curate.js";
+import { colorDotsHtml, dotsHtml } from "./curate.js";
 import { galleryItemAt, galleryTotal, listComparing } from "./gallery.js";
 import { emit, on } from "./main.js";
 import {
@@ -22,6 +22,7 @@ import {
 } from "./player.js";
 import { rulerTicks } from "./waveform.js";
 import { commentsOf, seedComments } from "./comments.js";
+import { seedSections } from "./lyrics.js";
 
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>
@@ -59,15 +60,19 @@ export function commonPrefix(a, b) {
 export function rowHtml(item, prev) {
   const { stem, ext } = splitName(item.name || item.file_hash.slice(0, 12));
   const p = commonPrefix(stem, prev ? splitName(prev.name).stem : "");
-  const who = item.model || item.tool || "";
-  const whoTitle = [item.tool, item.model].filter(Boolean).join(" · ");
+  // Musiksammlung (#224): Interpret · Album aus den Tags, sonst wie bisher
+  // der KI-Erzeuger (Modell/Tool).
+  const music = [item.artist, item.album].filter(Boolean).join(" · ");
+  const who = music || item.model || item.tool || "";
+  const whoTitle = music || [item.tool, item.model].filter(Boolean).join(" · ");
   const playable = canPlay(item);
   seedComments(item.file_hash, item.comments);   // Zeitkommentare kommen mit der Zeile (#163)
+  seedSections(item.file_hash, item.sections);   // Songabschnitte ebenso (#234)
   return `
     <div class="rtop">
       <button type="button" class="pbtn"${playable ? "" : " disabled"}
               title="${esc(playable ? STRINGS.audioPlay : STRINGS.audioUnplayable)}">▶</button>
-      <div class="rname" title="${esc(item.name || "")}">${item.cover || item.artwork ? `<img class="rcov" alt="" title="${esc(item.cover ? STRINGS.coverFinalTitle : STRINGS.artworkTitle)}">` : ""}<span class="pre">${esc(stem.slice(0, p))}</span><b>${esc(stem.slice(p))}</b>${ext ? `<span class="ext">.${esc(ext)}</span>` : ""}</div>
+      <div class="rname" title="${esc(item.name || "")}">${colorDotsHtml(item.colors)}${item.cover || item.artwork ? `<img class="rcov" alt="" title="${esc(item.cover ? STRINGS.coverFinalTitle : STRINGS.artworkTitle)}">` : ""}<span class="pre">${esc(stem.slice(0, p))}</span><b>${esc(stem.slice(p))}</b>${ext ? `<span class="ext">.${esc(ext)}</span>` : ""}</div>
       <span class="rtool" title="${esc(whoTitle)}">${esc(who)}</span>
       <span class="rdur">${fmtDuration(item.duration)}</span>
       <span class="rlufs" title="${esc(STRINGS.listColLoudnessTitle)}"></span>
@@ -83,7 +88,7 @@ let axis = 0;   // Sekunden der vollen Wellenbreite (0 = unbekannt: je Zeile die
 
 /** Spaltenköpfe der Liste mit Lineal der gemeinsamen Zeitachse. */
 export function listHeadHtml() {
-  return `<div class="cmpnote" hidden></div><span></span><span class="mlabel">${STRINGS.listColName}</span>
+  return `<div class="cmpnote" hidden></div><div class="manualnote" hidden></div><span></span><span class="mlabel">${STRINGS.listColName}</span>
     <span class="mlabel h-tool">${STRINGS.listColTool}</span>
     <span class="mlabel num">${STRINGS.listColDuration}</span>
     <span class="mlabel num h-lufs">${STRINGS.listColLoudness}</span>

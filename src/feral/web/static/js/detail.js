@@ -8,8 +8,9 @@
 
 import { STRINGS } from "./strings.js";
 import { wireReveal, removeCover, loadThumb, getAudioAnalysis, fmtLoudness, getItem, getTags, getModels, mediaUrl, openLocation, releaseVideos, wireMediaFallback, workflowUrl, thumbUrl, canPlay, mediaHtml, kindLabel as mediaKindLabel, fmtDuration, wireUnplayable, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
-import { applyModel, applyRating, applyTag, note, tagRemove } from "./curate.js";
+import { applyDate, applyModel, applyRating, applyTag, colorDotsHtml, note, tagRemove } from "./curate.js";
 import { mountCommentSection } from "./comments.js";
+import { panelLinesHtml } from "./lyrics.js";
 import { emit, on } from "./main.js";
 
 const esc = (s) =>
@@ -66,6 +67,16 @@ function siblingPredicates(d) {
   return preds;
 }
 
+// Blöcke einklappen (#219): Klick auf die Überschrift eines Abschnitts mit
+// data-sec klappt ihn ein; gemerkt über Neustarts für ALLE Medien (Muster
+// sidebar.js „feral-sb-collapsed"). Roh-Metadaten und Fundorte sind eigene
+// <details> und bleiben, wie sie sind.
+const COLLAPSED_KEY = "feral-panel-collapsed";
+function loadCollapsed() {
+  try { return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) || "[]")); }
+  catch { return new Set(); }
+}
+
 const sechead = (title, right = "") => `
   <div class="sechead"><span class="dot"></span><span class="mlabel">${title}</span>
     <span class="secright">${right}</span></div>`;
@@ -76,9 +87,15 @@ const dotsHtml = (rating) =>
     `<span class="rdot${rating && n <= rating ? " on" : ""}" data-n="${n}" title="${n}★"></span>`,
   ).join("");
 
+function parseSynced(values) {
+  try { return values ? JSON.parse(values[0]) : []; } catch { return []; }
+}
+
 function generationHtml(d) {
   if (!d.interpreted.length) {
-    return `<div class="section">
+    // Auch ohne Interpretation mit Überschrift: sonst bliebe ein eingeklappter
+    // Abschnitt (#219) unsichtbar und ließe sich nicht wieder aufklappen.
+    return `<div class="section" data-sec="gen">${sechead(STRINGS.sectionGeneration)}
       <div class="callout">
         <b>${STRINGS.panelNoInterpretation}</b>
         <div>${STRINGS.panelNoInterpretationHint}</div>
@@ -115,8 +132,14 @@ function generationHtml(d) {
         ${esc(by.get("seed").join(" · "))} <span class="copyhint">${STRINGS.panelCopy}</span></div></div>`);
   }
   if (chips.length) html += `<div class="kvgrid">${chips.join("")}</div>`;
+  // Songtext mit Zeiten (#234): Zeilen statt Fließtext, laufen beim Abspielen mit.
+  const synced = parseSynced(by.get("lyrics_synced"));
   for (const f of BLOCK_FIELDS) {
     if (!by.has(f)) continue;
+    if (f === "lyrics" && synced.length) {
+      html += `<div class="kvblock"><div class="klabel">${label(f)}</div>${panelLinesHtml(d.file_hash, synced)}</div>`;
+      continue;
+    }
     html += by.get(f).map((v) => `
       <div class="kvblock"><div class="klabel">${label(f)}</div>
         <div class="vblock${f === "negative_prompt" ? " vdim" : ""}">${esc(v)}</div></div>`).join("");
@@ -126,7 +149,7 @@ function generationHtml(d) {
       <div class="chiprow">${by.get("lora").map((v) => `<span class="badgechip">${esc(v)}</span>`).join("")}</div></div>`;
   }
   const misc = [...by.keys()].filter((f) =>
-    !["model", "seed", "lora", "tool", ...CHIP_FIELDS, ...BLOCK_FIELDS].includes(f));
+    !["model", "seed", "lora", "tool", "lyrics_synced", "song_sections", ...CHIP_FIELDS, ...BLOCK_FIELDS].includes(f));
   if (misc.length) {
     html += `<div class="kvgrid">${misc.map((f) => `
       <div><div class="klabel">${label(f)}</div>
@@ -140,9 +163,11 @@ function generationHtml(d) {
     html += `<button type="button" class="accentbtn" id="pSiblings"
       title="${STRINGS.siblingsTitle}">🎲 ${STRINGS.siblingsBtn}</button>`;
   }
+  // Eingeklappt bleibt das Modell als knappe Zusammenfassung im Kopf stehen.
+  const sum = by.has("model") ? `<span class="secsum">${esc(by.get("model")[0])}</span>` : "";
   const toolBadge = by.has("tool") ? `<span class="badgechip origin-interpretiert">${esc(by.get("tool")[0])}</span>` : "";
   const parserBadge = `<span class="badgechip" title="${STRINGS.panelParserTitle}">${esc(parsers.join(", "))}</span>`;
-  return `<div class="section">${sechead(STRINGS.sectionGeneration, toolBadge + " " + parserBadge)}${html}</div>`;
+  return `<div class="section" data-sec="gen">${sechead(STRINGS.sectionGeneration, sum + toolBadge + " " + parserBadge)}${html}</div>`;
 }
 
 /** Fundort als Breadcrumb (ADR-0041-Nachtrag, Issue #37): jedes Ordner-
@@ -183,6 +208,7 @@ export function initDetail() {
   let curRating = null; // aktueller Stand fürs Toggle (gleiche Zahl löscht)
   let selCount = 1;     // Größe der aktuellen Auswahl (Multiselect-Hinweis)
   let curModel = "";    // angezeigtes manuelles Modell (Doppel-Submit vermeiden)
+  const collapsed = loadCollapsed();   // eingeklappte Abschnitte (#219)
 
   function renderManual(manual) {
     curManual = manual;
@@ -195,13 +221,17 @@ export function initDetail() {
     const tags = panel.querySelector("#pTags");
     if (tags) {
       tags.innerHTML = manual.tags.length
-        ? manual.tags.map((t) =>
-            `<span class="badgechip tagchip">${esc(t)}<button type="button" class="tagdel" data-tag="${esc(t)}" title="${STRINGS.curateTagRemove}">✕</button></span>`,
-          ).join("")
+        ? manual.tags.map((t) => {
+            // Finder-Tags (ADR 0097): Farbpunkt + Herkunftsmarke „Finder".
+            const meta = manual.tag_meta?.[t];
+            return `<span class="badgechip tagchip"${meta?.finder ? ` title="${esc(STRINGS.curateTagFinder)}"` : ""}>${meta?.color ? colorDotsHtml([meta.color]) : ""}${esc(t)}${meta?.finder ? `<span class="ffrom">${esc(STRINGS.curateTagFinderShort)}</span>` : ""}<button type="button" class="tagdel" data-tag="${esc(t)}" title="${STRINGS.curateTagRemove}">✕</button></span>`;
+          }).join("")
         : `<span class="vdim">${STRINGS.curateNoTags}</span>`;
     }
     const notes = panel.querySelector("#pNotes");
     if (notes && document.activeElement !== notes) notes.value = manual.notes || "";
+    const date = panel.querySelector("#pDate");
+    if (date && document.activeElement !== date) date.value = manual.media_date || "";
   }
 
   async function fillVocabulary() {
@@ -303,7 +333,10 @@ export function initDetail() {
     // Medien-Weiche über den gemeinsamen Helfer (#158); nur der Video-
     // Poster bei offener Einzelansicht ist panel-eigen. Audio bekommt den
     // eigenen Player (A5 #162); er spielt nie von selbst.
-    const media = d.media_kind === "video" && singleOpen && canPlay(d)
+    // Weggeklapptes Panel (#219) ebenso: kein Stream hinter dem Anfasser —
+    // beim Aufklappen rendert show() neu, dann mit Video.
+    const folded = document.body.classList.contains("panel-folded");
+    const media = d.media_kind === "video" && (singleOpen || folded) && canPlay(d)
       ? `<img class="pposter" src="${thumbUrl(d.file_hash)}" data-video="${mediaUrl(d.file_hash)}" alt="">`
       : mediaHtml(d, { video: "muted loop autoplay playsinline" });
     const codec = d.media_kind === "video" ? codecLabel(videoCodecFacts(d)) : "";
@@ -349,39 +382,46 @@ export function initDetail() {
       ${selCount > 1 ? `<div class="callout multihint">
         <b>${selCount} ${STRINGS.multiSelected}</b>
         <div>${STRINGS.multiSelectedHint}</div></div>` : ""}
-      ${d.media_kind === "audio" ? `<div class="section" id="pComs"></div>` : ""}
-      <div class="section" id="pCurate">${sechead(STRINGS.sectionCurate)}
+      ${d.media_kind === "audio" ? `<div class="section" id="pComs" data-sec="comments"></div>` : ""}
+      <div class="section" id="pCurate" data-sec="curate">${sechead(STRINGS.sectionCurate)}
         <div class="chiprow" id="pTags"></div>
         <input id="pTagInput" list="tagVocab" placeholder="${STRINGS.curateTagPlaceholder}">
         <datalist id="tagVocab"></datalist>
         <input id="pModel" list="modelVocab" placeholder="${STRINGS.curateModelPlaceholder}">
         <datalist id="modelVocab"></datalist>
         <textarea id="pNotes" rows="2" placeholder="${STRINGS.curateNotesPlaceholder}"></textarea>
+        <input id="pDate" autocomplete="off" placeholder="${esc(STRINGS.curateDatePlaceholder)}" title="${esc(STRINGS.curateDateTitle)}">
+        <div class="vdim" id="pDateErr" hidden></div>
       </div>
       ${generationHtml(d)}
-      ${hasWorkflow ? `<div class="section">${sechead(STRINGS.sectionWorkflow, wfEmbedded ? "ComfyUI" : STRINGS.workflowGeneratedBadge)}
+      ${hasWorkflow ? `<div class="section" data-sec="workflow">${sechead(STRINGS.sectionWorkflow, wfEmbedded ? "ComfyUI" : STRINGS.workflowGeneratedBadge)}
         <button type="button" class="accentbtn" id="pWfOpen">${STRINGS.panelViewGraph} →</button>
         <a class="wfdl" href="${workflowUrl(d.file_hash)}" download="workflow_${esc(d.file_hash.slice(0, 12))}.json">${STRINGS.workflowDownload}</a>
         ${infotext ? `<a class="wfdl" href="#" id="pInfoCopy">${STRINGS.infotextCopy}</a>` : ""}
       </div>` : ""}
-      <div class="section">
-        <details><summary>${STRINGS.sectionRawMetadata} (${d.raw.length})</summary>
-          <table class="rawtable">${rawRows}</table></details>
-        <details><summary>${STRINGS.sectionLocations} (${d.locations.length})</summary>
-          <div class="locs">${locRows}</div></details>
-      </div>
-      <div class="section">${sechead(STRINGS.sectionFile)}
+      <div class="section" data-sec="file">${sechead(STRINGS.sectionFile)}
         <div class="filerows">
           <div><span>${STRINGS.fileFormat}</span><span class="vmono">${esc(d.container)}</span></div>
           <div><span>${STRINGS.fileSize}</span><span class="vmono">${fmtBytes(d.file_size)}</span></div>
           ${d.media_kind === "audio" ? `<div><span>${STRINGS.fileLoudness}</span><span class="vmono" id="pLoud">${STRINGS.loudnessPending}</span></div>` : ""}
           ${d.embedded_picture ? `<div class="embrow"><span>${STRINGS.fileEmbeddedPicture}</span><span class="cvemb" title="${esc(STRINGS.coverEmbedded)}"><img alt=""></span></div>` : ""}
-          <div><span>${STRINGS.fileCreated}</span><span class="vmono">${esc(d.media_date || STRINGS.fileCreatedUnknown)}</span></div>
+          <div><span>${STRINGS.fileCreated}</span><span class="vmono">${esc(d.media_date || STRINGS.fileCreatedUnknown)}${d.manual.media_date ? ` <span class="vdim" title="${esc(STRINGS.fileCreatedManualTitle)}">✎ ${esc(STRINGS.fileCreatedManual)}</span>` : ""}</span></div>
           <div><span>${STRINGS.fileAdded}</span><span class="vmono">${esc((d.first_seen_at || "").slice(0, 19).replace("T", " "))}</span></div>
           <div><span>SHA-256</span><span class="vmono" title="${esc(d.file_hash)}">${esc(d.file_hash.slice(0, 16))}…</span></div>
         </div>
+      </div>
+      <!-- Roh-Metadaten + Fundorte ganz unten (#219): die aufklappbaren
+           <details> stehen gesammelt untereinander. -->
+      <div class="section">
+        <details><summary>${STRINGS.sectionRawMetadata} (${d.raw.length})</summary>
+          <table class="rawtable">${rawRows}</table></details>
+        <details><summary>${STRINGS.sectionLocations} (${d.locations.length})</summary>
+          <div class="locs">${locRows}</div></details>
       </div>`;
 
+    for (const sec of panel.querySelectorAll(".section[data-sec]")) {
+      sec.classList.toggle("collapsed", collapsed.has(sec.dataset.sec));
+    }
     curHash = d.file_hash;
     renderManual(d.manual);
     fillVocabulary();
@@ -420,6 +460,26 @@ export function initDetail() {
       if (e.key === "Enter") { takeModel(); modelInput.blur(); }
     });
     modelInput.addEventListener("blur", takeModel);
+    // Manuelles Datum (ADR 0096): Enter/Verlassen übernimmt, leer = zurück
+    // zum abgeleiteten Datum; ungültige Eingabe bleibt stehen, mit Meldung.
+    const dateInput = panel.querySelector("#pDate");
+    const dateErr = panel.querySelector("#pDateErr");
+    const takeDate = async () => {
+      const v = dateInput.value.trim();
+      if (v === (curManual?.media_date || "")) return;
+      try {
+        await applyDate(v);
+        dateErr.hidden = true;
+        show(d.file_hash);   // „Erstellt" im Datei-Block neu
+      } catch (err) {
+        dateErr.textContent = err.message;
+        dateErr.hidden = false;
+      }
+    };
+    dateInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); dateInput.blur(); }
+    });
+    dateInput.addEventListener("blur", takeDate);
     const notesEl = panel.querySelector("#pNotes");
     notesEl.addEventListener("blur", () => {
       if (notesEl.value !== (d.manual.notes || "")) note(d.file_hash, notesEl.value);
@@ -482,6 +542,22 @@ export function initDetail() {
       }).catch(() => {});
     });
   }
+
+  // Ein Listener am Panel (überlebt jedes innerHTML und den Umzug in die
+  // Einzelansicht): Klick auf eine Abschnitts-Überschrift klappt ein/aus,
+  // Knöpfe und Links darin behalten ihre eigene Wirkung.
+  panel.addEventListener("click", (e) => {
+    const head = e.target.closest(".sechead");
+    const sec = head && head.closest(".section[data-sec]");
+    if (!sec || e.target.closest("button, a, input")) return;
+    const key = sec.dataset.sec;
+    collapsed.has(key) ? collapsed.delete(key) : collapsed.add(key);
+    sec.classList.toggle("collapsed", collapsed.has(key));
+    try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed])); } catch { /* privat */ }
+  });
+  // Panel weg-/aufgeklappt (#219): neu rendern — weggeklappt als Poster
+  // (kein versteckter Video-Stream), aufgeklappt wieder mit Video.
+  on("panel-folded", () => { if (curHash) show(curHash); });
 
   on("selection-changed", (d) => {
     // Leere Auswahl (Strg+Klick wählt auch das letzte Bild ab): Leerzustand.

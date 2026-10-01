@@ -3,13 +3,16 @@
 // Oben die Zusammenfassung mit dem Alle-Knopf (echte Gesamtzahl, ADR 0034),
 // darunter je Fehlerart eine Karte: Zähler, die jüngsten Einträge, „alle N
 // dieser Art quittieren"; Quittieren meldet die Zahl und lädt die Karten neu.
+// „kein Vorschaubild" (Bitrot nach Backups, #217) lässt sich zusätzlich
+// ABLEHNEN — einzeln sofort, „alle dieser Art" nach Rückfrage als Aufgabe;
+// abgelehnte Einträge sind danach quittiert, die Sperrliste lädt mit.
 // Die Sperrliste ist eine eigene Karte und wird GETRENNT geladen: seitenweise
 // (100 je Seite), mit Suche über Pfad/Hash/Grund und Zähler vom Server —
 // bei rein indexierten Laufwerken sind es tausende Einträge, ein 500er-
 // Deckel verschwieg den Rest. Entsperren einzeln oder (bestätigt) alle.
 
 import { STRINGS } from "../../strings.js";
-import { getIssues, resolveIssues, getBlocked, unblockHash } from "../../api.js";
+import { getIssues, resolveIssues, rejectIssues, getBlocked, unblockHash } from "../../api.js";
 import { serverMsg } from "../../servermsg.js";
 import { confirmDialog } from "../dialogs.js";
 import { setNavCount } from "../nav.js";
@@ -25,6 +28,9 @@ let root = null;
 let blk = { q: "", offset: 0, total: 0, total_all: 0 };
 let searchTimer = 0;
 const el = (sel) => root.querySelector("#" + sel);
+
+// Arten, deren Medien sich hier ablehnen lassen (#217).
+const REJECTABLE = new Set(["thumbnail"]);
 
 const KIND_LABELS = () => ({
   failed: STRINGS.issuesKindFailed, warning: STRINGS.issuesKindWarning,
@@ -71,7 +77,7 @@ export async function load() {
   loadBlocked();
 }
 
-export function onTaskFinished() { loadIssues(); }
+export function onTaskFinished() { loadIssues(); loadBlocked(); }
 export function unmount() { clearTimeout(searchTimer); }
 
 // -- Probleme je Fehlerart -----------------------------------------------------------
@@ -100,21 +106,25 @@ function renderIssues(ov) {
   all.hidden = false;
   all.textContent = tpl(STRINGS.issuesResolveAll, { n: fmtNum(ov.total) });
   const labels = KIND_LABELS();
-  el("issKinds").innerHTML = ov.kinds.map((k) => `
+  el("issKinds").innerHTML = ov.kinds.map((k) => {
+    const rej = REJECTABLE.has(k.kind);
+    return `
     <div class="card issuekind" data-issuekind="${esc(k.kind)}">
       <div class="chead"><span class="mlabel">${esc(labels[k.kind] || k.kind)}</span>
         <span class="badgechip">${esc(k.kind)}</span><span class="right"><b>${fmtNum(k.count)}</b></span></div>
       <div class="isslist">${k.issues.map((i) => `
         <div class="result">
           <div class="rpath">${esc(i.path)}</div>
-          <div class="rbadges"><a class="issueresolve" data-issue="${i.id}">${STRINGS.issuesResolveOne}</a></div>
+          <div class="rbadges">${rej ? `<a class="issueresolve danger" data-reject="${i.id}" title="${esc(STRINGS.issuesRejectOneTitle)}">${STRINGS.issuesRejectOne}</a>` : ""}<a class="issueresolve" data-issue="${i.id}">${STRINGS.issuesResolveOne}</a></div>
           <div class="rsnippet">${esc(serverMsg(i.message))} · ${esc((i.last_seen_at || "").slice(0, 19))}</div>
         </div>`).join("")}</div>
       <div class="kindfoot">
         <span>${k.count > k.issues.length ? tpl(STRINGS.issuesLatest, { n: fmtNum(k.issues.length), total: fmtNum(k.count) }) : ""}</span>
+        ${rej ? `<button type="button" class="danger" data-reject-kind="${esc(k.kind)}" data-count="${k.count}">${tpl(STRINGS.issuesRejectKind, { n: fmtNum(k.count) })}</button>` : ""}
         <button type="button" data-kind="${esc(k.kind)}">${tpl(STRINGS.issuesResolveKind, { n: fmtNum(k.count) })}</button>
       </div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 
 async function resolve({ issueId = null, kind = null } = {}) {
@@ -124,6 +134,24 @@ async function resolve({ issueId = null, kind = null } = {}) {
     msg.textContent = tpl(STRINGS.issuesResolved, { n: fmtNum(r.resolved) });
   } catch (err) { msg.innerHTML = `<span class="warn">${esc(err.message)}</span>`; }
   loadIssues();
+}
+
+async function reject({ issueId = null, kind = null, count = 0 } = {}) {
+  const msg = el("issMsg");
+  if (kind) {
+    const ok = await confirmDialog(
+      tpl(STRINGS.issuesRejectKindConfirm, { n: fmtNum(count), kind: KIND_LABELS()[kind] || kind }),
+      { ok: STRINGS.issuesRejectOne, danger: true });
+    if (!ok) return;
+  }
+  try {
+    const r = await rejectIssues(issueId, kind);
+    msg.textContent = r.queued ? STRINGS.maintQueued
+      : tpl(r.skipped ? STRINGS.issuesRejectedSkipped : STRINGS.issuesRejected,
+            { n: fmtNum(r.rejected), skipped: fmtNum(r.skipped) });
+  } catch (err) { msg.innerHTML = `<span class="warn">${esc(err.message)}</span>`; }
+  loadIssues();
+  loadBlocked();
 }
 
 // -- Sperrliste: getrennt, seitenweise, mit Suche ---------------------------------
@@ -184,6 +212,10 @@ async function unblock(hash) {
 // -- Klicks -------------------------------------------------------------------------
 
 async function onClick(e) {
+  const rej = e.target.closest("[data-reject]");
+  if (rej) return void reject({ issueId: rej.dataset.reject });
+  const rejKind = e.target.closest("[data-reject-kind]");
+  if (rejKind) return void reject({ kind: rejKind.dataset.rejectKind, count: +rejKind.dataset.count });
   const one = e.target.closest("[data-issue]");
   if (one) return void resolve({ issueId: one.dataset.issue });
   const kind = e.target.closest("[data-kind]");

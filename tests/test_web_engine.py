@@ -272,7 +272,10 @@ def test_failing_task_does_not_kill_worker(engine, media):
     engine.enqueue_folder(media)          # muss danach trotzdem laufen
     s = _wait_idle(engine, until_label="taskScan")
     assert s["report"]["media_files"] == 2
-    assert s["last_result"]["key"] == "sumFailed"
+    # Eigene Zusammenfassung des Scans (#233), der Fehlschlag steht im Verlauf.
+    assert s["last_result"]["key"] == "sumScan"
+    assert {"key": "sumImportNew", "params": {"n": 2}} in s["last_result"]["params"]["parts"]
+    assert [h["ok"] for h in s["history"][:2]] == [True, False]
 
 
 def test_rescan_only_touches_existing_paths(engine, media, tmp_path):
@@ -302,6 +305,43 @@ def test_rescan_uses_configured_min_date(engine, media, tmp_path):
                            "min_date": "1970-01-01"})
     s = _wait_idle(engine, until_label="taskRescan")
     assert s["report"]["ausgefiltert"] == 0 and s["report"]["known_items"] == 2
+
+
+def test_recheck_filtered_catalogs_after_lowered_min_date(engine, media, tmp_path):
+    """#230: Aussortiertes steht nur im Stat-Gedächtnis (ADR 0042) — Watcher
+    überspringen es unverändert. „Aussortierte neu prüfen" schickt genau
+    diese Pfade mit den neuen Regeln durch den Scan: gesenktes min_date ⇒
+    katalogisiert, Gedächtnis-Zeile weg; verschwundene Pfade werden vergessen."""
+    import os
+    import sqlite3
+    os.utime(media / "a.png", (0, 0))              # 1970er-Stempel
+    (media / "c.png").write_bytes(PNG_A)
+    os.utime(media / "c.png", (0, 0))
+    engine.enqueue_folder(media)
+    s = _wait_idle(engine, until_label="taskScan")
+    assert s["report"]["ausgefiltert"] == 2
+    (media / "c.png").unlink()
+
+    def memory():
+        conn = sqlite3.connect(tmp_path / "feral.sqlite")
+        try:
+            return dict(conn.execute("SELECT path, outcome FROM scan_memory").fetchall())
+        finally:
+            conn.close()
+
+    # Unveränderte Regeln: bleibt aussortiert, der Weg c.png wird vergessen.
+    engine.enqueue_recheck_filtered()
+    s = _wait_idle(engine, until_label="taskRecheckFiltered")
+    assert s["report"]["scanned_files"] == 1 and s["report"]["ausgefiltert"] == 1
+    assert memory() == {str(media / "a.png"): "ausgefiltert"}
+    assert s["last_result"] == {"key": "sumRecheckFiltered",
+                                "params": {"taken": 0, "still": 1, "gone": 1}}
+
+    engine.enqueue_recheck_filtered({"min_kante": 0, "max_kante": 0, "formate": [],
+                                     "min_date": "1970-01-01"})
+    s = _wait_idle(engine, until_label="taskRecheckFiltered")
+    assert s["report"]["ausgefiltert"] == 0 and s["report"]["new_items"] == 1
+    assert memory() == {}
 
 
 # -- Hotfolder (Block 4.2, ADR 0025) -----------------------------------------------

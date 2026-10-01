@@ -11,7 +11,7 @@
 // Server-Antwort + 'bulk-applied' (Grid und Sidebar frischen auf).
 
 import { STRINGS } from "./strings.js";
-import { bulkApply, getTags, getModels } from "./api.js";
+import { bulkApply, exportComments, getTags, getModels, libraryView } from "./api.js";
 import { emit, on } from "./main.js";
 import { registerDialog } from "./overlays.js";
 import { chipText } from "./search.js";
@@ -98,10 +98,20 @@ export function initBulkDialog() {
           <datalist id="bulkmodellist"></datalist>
         </div>
         <div class="bulkrow">
+          <label>${STRINGS.bulkDate}</label>
+          <input type="text" class="sdname bulkdate" autocomplete="off" placeholder="${STRINGS.bulkDateHint}">
+        </div>
+        <div class="bulkrow">
           <label>${STRINGS.bulkNote}</label>
           <textarea class="sdname bulknote" rows="2"
                     placeholder="${STRINGS.bulkNoteHint}"></textarea>
         </div>
+        ${libraryView() === "audio" ? `
+          <div class="bulkrow">
+            <label>${STRINGS.bulkComments}</label>
+            <button type="button" class="bulkexport">${STRINGS.bulkExport}</button>
+            <span class="sdhint bulkexportmsg">${STRINGS.bulkExportHint}</span>
+          </div>` : ""}
         <div class="bulkrow">
           <label>${STRINGS.bulkReject}</label>
           <label class="bulkrejectlbl"><input type="checkbox" class="bulkreject">
@@ -138,6 +148,7 @@ export function initBulkDialog() {
       + (d.matched > d.tagged ? ` (${fmt(d.matched - d.tagged)} ${STRINGS.bulkResultSkipped})` : ""));
     if ("model_set" in d) lines.push(`${STRINGS.bulkResultModel}: ${fmt(d.model_set)}`);
     if ("noted" in d) lines.push(`${STRINGS.bulkResultNoted}: ${fmt(d.noted)}`);
+    if ("date_set" in d) lines.push(`${STRINGS.bulkResultDate}: ${fmt(d.date_set)}`);
     overlay.innerHTML = `
       <div class="pickbox savebox bulkbox">
         <div class="pickhead"><b>${esc(STRINGS.bulkDone)}</b>
@@ -156,6 +167,8 @@ export function initBulkDialog() {
     if (tag) fields.add_tag = tag;
     const model = overlay.querySelector(".bulkmodel").value.trim();
     if (model) fields.model = model;
+    const date = overlay.querySelector(".bulkdate").value.trim();
+    if (date) fields.media_date = date;   // ADR 0096
     const note = overlay.querySelector(".bulknote").value.trim();
     if (note) fields.note = note;
     // Ablehnen (ADR 0041) läuft allein — die Kombination wäre nie gewollt.
@@ -194,7 +207,35 @@ export function initBulkDialog() {
     }
   }
 
+  // Zeitkommentare exportieren (#228): nur lesend, darum ohne Scharfstellen;
+  // die Antwort wird im Browser zur Datei.
+  async function exportNow(btn) {
+    const sel = selectionHashes();
+    btn.disabled = true;
+    try {
+      const data = await exportComments(useSelection() ? { hashes: sel } : { filter: current.expression });
+      const count = data.items.reduce((n, it) => n + it.comments.length, 0);
+      if (!data.items.length) { showError(STRINGS.bulkExportNone); return; }
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${STRINGS.bulkExportFile}-${data.exported_at.slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      overlay.querySelector(".bulkexportmsg").textContent =
+        STRINGS.bulkExportDone.replace("{items}", fmt(data.items.length)).replace("{comments}", fmt(count));
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   overlay.addEventListener("click", (e) => {
+    const exp = e.target.closest(".bulkexport");
+    if (exp) { exportNow(exp); return; }
     const star = e.target.closest(".bstar");
     if (star) {
       const n = parseInt(star.dataset.n, 10);

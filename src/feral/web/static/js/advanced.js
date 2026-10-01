@@ -76,6 +76,17 @@ const CATS = [
     { label: STRINGS.lyricsWithout, count: d.facets.lyrics?.ohne ?? 0,
       title: "-has: lyrics", pred: pred("has", "lyrics", { negated: true }) },
   ]},
+  // Musiksammlung (#224): Interpret (Album-Interpret, sonst Titel-Interpret),
+  // Album, Genre — exakte Werte, nur in der Audioansicht.
+  ...[["interpret", "interprets", STRINGS.groupByInterpret],
+      ["album", "albums", STRINGS.groupByAlbum],
+      ["genre", "genres", STRINGS.groupByGenre]].map(([field, key, label]) => ({
+    key: field, label, neg: true, scope: ["audio"], rows: (d) =>
+      (d.facets[key] || []).map((x) => ({
+        label: x.name, count: x.count, title: `${field}: "${x.name}"`,
+        pred: exactField(field, x.name),
+      })),
+  })),
   { key: "tool", label: STRINGS.groupByGenerator, neg: true, rows: (d) =>
     (d.facets.tools || []).map((x) => ({
       label: Object.hasOwn(STRINGS.generatorLabels, x.tool) ? STRINGS.generatorLabels[x.tool] : x.tool,
@@ -205,6 +216,7 @@ export function initAdvanced() {
   on("engine-idle", invalidate);
   on("annotation-changed", invalidate);
   on("model-changed", invalidate);
+  on("date-changed", invalidate);
   on("items-rejected", invalidate);
   on("audio-enabled", (d) => { audioEnabled = !!d?.enabled; });
   // Ansichtswechsel (ADR 0085): andere Zähl-Basis, andere Kategorien.
@@ -409,6 +421,11 @@ export function initAdvanced() {
     }
     for (const x of data.facets.loras || []) {
       push(STRINGS.chipFieldLabels.lora, x.lora, x.count, exactField("lora", x.lora));
+    }
+    for (const [field, key] of [["interpret", "interprets"], ["album", "albums"], ["genre", "genres"]]) {
+      for (const x of data.facets[key] || []) {
+        push(STRINGS.chipFieldLabels[field], x.name, x.count, exactField(field, x.name));
+      }
     }
     for (const x of data.facets.tags || []) {
       push(STRINGS.chipKindLabels.tag, x.tag, x.count,

@@ -63,6 +63,8 @@ In der [Web-GUI](gui.md) versteht die Suche zwei Formen:
 | `claim_generator`, `software_agent` | exakte Rohstrings aus dem C2PA-Manifest (z. B. `DALL-E/3.0 c2pa-rs/0.28.4`, `GPT-4o`, `Adobe Firefly 1.0`) - damit lassen sich Engines unterscheiden, sobald die Metadaten es hergeben |
 | `video_codec`, `video_profile`, `pixel_format` | Codec, Profil und Pixelformat des ersten Video-Streams, wie ffprobe sie nennt (`prores` / `HQ` / `yuv422p10le`; `hevc` / `Main 10`; `h264` / `High` / `yuv420p`); Kurzform im Suchfeld: `codec: prores` (siehe [unten](#video-codec-und-abspielbarkeit)) |
 | `lyrics`, `title` | Songtext und Titel-Tag einer Musikdatei (der Songtext ist in der Volltextsuche) |
+| `lyrics_synced`, `song_sections` | Songtext mit Zeiten (je Zeile Start und Ende in Millisekunden) und die Abschnittsmarken daraus (`[Chorus]`, `[Verse]` …), aus Untertitel-Spur, ID3 `SYLT` oder LRC im Songtext-Tag; siehe [Audio](audio.md#was-fml-aus-musik-liest) |
+| `artist`, `album_artist`, `album`, `track`, `disc`, `year`, `genre` | Musiksammlung aus den Tags: Interpret, Album-Interpret, Album, Titel- und CD-Nummer, Jahr, Genre; siehe [Audio](audio.md#musiksammlung-interpret-album-genre) |
 | `song_id`, `parent_id`, `relation` | Song-ID beim Dienst (Suno), Eltern-Song und Beziehung (`extend`, `cover`, `remaster`, `edit` …), soweit die Datei sie nennt |
 | `bpm`, `key` | Tempo und Tonart |
 | `audio_codec`, `sample_rate`, `channels`, `bit_depth` | Technik der ersten Tonspur, wie ffprobe sie nennt (`flac` / `48000` / `2` / `24`) |

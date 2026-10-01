@@ -11,6 +11,10 @@
 export const REF_LUFS = -14;
 /** Obergrenze für den True Peak nach dem Anheben — darüber übersteuert es. */
 export const PEAK_CEILING = -1;
+/** Dasselbe für Sample Peak (``[audio] true_peak = false``, #225): 1 dB mehr
+ *  Abstand, weil die Kurve zwischen den Proben höher ausschlagen kann und
+ *  der Browser beim Umrechnen auf 48 kHz genau diese Werte erzeugt. */
+export const SAMPLE_PEAK_CEILING = -2;
 
 const BANDS = ["low", "mid", "high"];
 const BAR = 2;     // Balkenbreite in CSS-Pixeln
@@ -18,14 +22,16 @@ const STEP = 3;    // Balken + Lücke
 
 /** Verstärkung in dB, die ein Song für den Angleich braucht: Bezug minus
  *  integrierte Lautheit. Lautes wird abgesenkt; Leises nur so weit
- *  angehoben, wie der True Peak unter PEAK_CEILING bleibt (sonst übersteuert
+ *  angehoben, wie der Peak unter seiner Grenze bleibt (sonst übersteuert
  *  die Wiedergabe). Ohne Messung (Stille, keine Analyse): 0. */
 export function matchGainDb(loudness) {
   const i = loudness?.integrated;
   if (i == null || !Number.isFinite(i)) return 0;
   let g = REF_LUFS - i;
-  const tp = loudness.true_peak;
-  if (g > 0 && tp != null && Number.isFinite(tp)) g = Math.min(g, Math.max(0, PEAK_CEILING - tp));
+  const sample = loudness.sample_peak !== undefined;
+  const peak = sample ? loudness.sample_peak : loudness.true_peak;
+  const ceiling = sample ? SAMPLE_PEAK_CEILING : PEAK_CEILING;
+  if (g > 0 && peak != null && Number.isFinite(peak)) g = Math.min(g, Math.max(0, ceiling - peak));
   return Math.round(g * 10) / 10;
 }
 

@@ -17,11 +17,11 @@ on the **pure standard library** (`hashlib`, `zlib`, `struct`, `json`,
 
 | Package | Version | Where | Why not built in-house |
 |---------|---------|-------|------------------------|
-| **Pillow** | `==12.3.0` | `src/feral/extract/image_pillow.py`: image containers other than PNG (JPEG, WEBP, TIFF, GIF, BMP); `src/feral/thumbs.py`: image thumbnails | *The* Python imaging library for 20+ years, present in every AI stack, reviewed millions of times (foundation library, not a niche package). Parsing dozens of container formats ourselves would be disproportionate and error-prone. Extraction uses Pillow only as a **container opener**; thumbnailing was explicitly planned as a Pillow case in the project brief. (ADR 0008/0013) |
+| **Pillow** | `==12.3.0` | `src/feral/extract/image_pillow.py`: image containers other than PNG (JPEG, WEBP, TIFF, GIF, BMP); `src/feral/extract/pcd.py`: Kodak Photo CD decoding; `src/feral/thumbs.py`: image thumbnails and display images for TIFF, PSD and Photo CD | *The* Python imaging library for 20+ years, present in every AI stack, reviewed millions of times (foundation library, not a niche package). Parsing dozens of container formats ourselves would be disproportionate and error-prone. Extraction uses Pillow only as a **container opener**; thumbnailing was explicitly planned as a Pillow case in the project brief. (ADR 0008/0013) |
 
 | System program | Where | Why |
 |----------------|-------|-----|
-| **ffprobe/ffmpeg** | `src/feral/extract/video_ffprobe.py`: video container tags (WEBM/MKV, MP4/MOV); `src/feral/thumbs.py`: video poster frames; `src/feral/audio_analysis.py`: loudness (`ebur128`), three-band waveform and lossless FLAC playback copies for audio | The 20-year-old de-facto standard for media containers; `ffprobe` prints container tags as JSON, `ffmpeg` extracts the poster frame. No pip package, called via `subprocess`. **Optional:** without ffmpeg, videos are still catalogued (without metadata/thumbnail); a later scan or viewing fetches both. Installation: macOS `brew install ffmpeg`, Debian/Ubuntu `apt install ffmpeg`, Windows `winget install ffmpeg`. (ADR 0008/0013) |
+| **ffprobe/ffmpeg** | `src/feral/extract/video_ffprobe.py`: video container tags (WEBM/MKV, MP4/MOV), duration and stream facts of audio files, all tags of M4A and audio-only Matroska, and (via ffmpeg) the subtitle track that carries timed lyrics; `src/feral/thumbs.py`: video poster frames; `src/feral/audio_analysis.py`: loudness (`ebur128`), three-band waveform and lossless FLAC playback copies for audio; `src/feral/diagnose.py`: codec overview of the catalogued videos | The 20-year-old de-facto standard for media containers; `ffprobe` prints container tags as JSON, `ffmpeg` extracts the poster frame. No pip package, called via `subprocess`. **Optional:** without ffmpeg, videos are still catalogued (without metadata/thumbnail); a later scan or viewing fetches both. Installation: macOS `brew install ffmpeg`, Debian/Ubuntu `apt install ffmpeg`, Windows `winget install ffmpeg`. (ADR 0008/0013) |
 
 ### Web interface (ADR 0001)
 
@@ -47,7 +47,7 @@ Each is pinned and hashed like a direct dependency.
 | h11 | `==0.16.0` | uvicorn | HTTP/1.1 protocol implementation |
 | idna | `==3.18` | anyio | internationalized domain names |
 | pydantic-core | `==2.46.4` | pydantic | validation core (compiled, binary wheels) |
-| typing-extensions | `==4.16.0` | fastapi, pydantic, starlette, anyio | backports of typing features |
+| typing-extensions | `==4.16.0` | fastapi, pydantic, pydantic-core, starlette, anyio, typing-inspection | backports of typing features |
 | typing-inspection | `==0.4.2` | fastapi, pydantic | runtime inspection of type hints |
 
 ### Installer
@@ -123,7 +123,7 @@ adds these packages, also pinned and hashed.
   build the parsers ourselves (from the tools' documentation, ADR 0004) and
   keep control over the raw format.
 - **jsdom / Playwright**: for the frontend tests (ADR 0064) a DOM stub of
-  about 450 lines of our own is enough; jsdom would be an npm tree,
+  about 550 lines of our own is enough; jsdom would be an npm tree,
   Playwright a browser download. Playwright stays in reserve for
   rendering/video regressions.
 - **watchdog (hot folder)**: was reconsidered for stage 4; stdlib polling

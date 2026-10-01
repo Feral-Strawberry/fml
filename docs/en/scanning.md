@@ -21,6 +21,11 @@ python -m feral.scan /path/to/folder --db ./feral.sqlite
   Created if needed.
 - `--quiet` (optional): no intermediate progress output.
 
+The [import rules](import.md) (minimum/maximum size, excluded formats,
+oldest plausible date) and the audio module switch apply here as well.
+The command-line scan reads them from the `config.toml` in the
+**current directory**; there is no `--config` option for this.
+
 ## Example output
 
 ```
@@ -77,7 +82,7 @@ python -m feral.diagnose video-codecs --db ./feral.sqlite
 
 It walks the locations of all videos, calls `ffprobe` on the file header
 only (under a second even for 4 GB) and prints a table: codec · profile ·
-pixel format · browser (`ok` / `eingeschränkt` = limited / `NEIN` = no) ·
+pixel format · browser (`ok` / `limited` / `NO`) ·
 number of files · example path. Nothing is written.
 
 - `--min-size 1G` — only videos from this size (`500M`, `2G`, …).

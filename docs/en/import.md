@@ -25,13 +25,18 @@ root = "/path/to/collection"
 frequency "once now", **Add**. The library side is the same in every mode:
 new content is **copied** to `collection/YYYY/MM/DD/`, the copy is
 verified against the source by hash and cataloged immediately (no extra
-scan needed). The mode determines only what happens to the **source**
-(ADR 0031):
+scan needed). The copy keeps its timestamps and, on macOS, its
+**extended file attributes** too, including the Finder tags (colored
+labels). The Finder tags also become fml tags (see
+[GUI → Curating](gui.md#curating-rating-tags-notes)); that applies to
+duplicates as well, whose source is deleted afterwards. The mode
+determines only what happens to the **source** (ADR 0031):
 
 - **"copy"** — the source is **never touched**; the import is purely
-  reading. The per-file result (new/duplicate/error/…) is in the import
-  log (Admin → Activity); nothing changes in the source folder itself.
-  The right mode for third-party folders and tool outputs.
+  reading. The result (new/duplicate/error/…) is a summary line in the
+  admin overview's Activity, per file in the DB table `import_log` (see
+  [Report](#report)); nothing changes in the source folder itself. The
+  right mode for third-party folders and tool outputs.
 - **"move"** (with explicit confirmation) — successfully imported files
   are **deleted** from the source after verification; the folder empties
   itself. Only follow-up cases stay visibly behind. The outcome folder
@@ -77,12 +82,19 @@ folders:
   language files out, even if their content happens to look like a known
   format. Camera RAW files (Sony ARW, Nikon NEF, Canon CR2, DNG) are
   recognized specifically instead of slipping through as TIFF.
-- **Earliest plausible date** (`[import] min_date`, default 2015-01-01):
+- **Oldest plausible date** (`[import] min_date`, default 2015-01-01):
   a file whose creation date is plausible neither from its metadata nor
   from its file timestamp (before `min_date` or in the future, e.g.
   1970-01-01) is **not ingested** — it counts as a rule hit just like an
   image that is too small. This rule is always active; lower `min_date`
   if you want to keep old material.
+
+Changed rules also reach back to **files filtered while cataloging**:
+after saving (or at the next start, if the rules were changed by hand in
+`config.toml`), fml checks the files filtered so far once with the new
+rules (task "Re-check filtered files", also a button under Admin →
+Maintenance). So if you lower `min_date` to `1980-01-02` for an old music
+collection, the older songs enter the catalog without a new scan.
 
 Both dimension rules apply only to **images with known dimensions** —
 never to videos, and nothing is guessed without dimensions. During import
@@ -117,7 +129,10 @@ migrated to a watch folder at startup.)
 ## Date
 
 Files are sorted by **creation date**: the embedded date from the metadata
-(if present), otherwise the older plausible filesystem timestamp. If there
+(if present), for music otherwise the year from the tags, otherwise the
+older plausible filesystem timestamp. A date set by hand (see
+[GUI](gui.md#curating-rating-tags-notes)) only changes the catalog, not
+the file's place in the library. If there
 is no plausible date (before `min_date`, e.g. 1970-01-01, or in the
 future), the date rule above applies: the file is **not imported** and
 lands visibly in `_ausgefiltert/` — instead of in a wrong date folder or in

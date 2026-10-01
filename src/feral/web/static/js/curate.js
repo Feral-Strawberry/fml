@@ -19,6 +19,12 @@ export const dotsHtml = (rating) =>
     `<span class="rdot${rating && n <= rating ? " on" : ""}" data-n="${n}" title="${n}★"></span>`,
   ).join("");
 
+/** Farbpunkte der Tag-Farben eines Items (Finder-Tags, ADR 0097); leer ohne Farben. */
+export const colorDotsHtml = (colors) =>
+  colors?.length
+    ? `<span class="fdots">${colors.map((c) => `<i class="fdot fc${Number(c)}"></i>`).join("")}</span>`
+    : "";
+
 let current = null;       // {hash, index, hashes?} — letzte Auswahl
 let currentRating = null; // fürs Toggle-Verhalten (gleiche Zahl löscht)
 
@@ -81,6 +87,18 @@ export function applyModel(model) {
   // (bewusst eigenes Event: Modell-Zuweisung ist selten, Rating-Klicks nicht).
   done?.then(() => emit("model-changed", { hashes }));
   return done;
+}
+
+/** Manuelles Datum für die AUSWAHL setzen ("" löscht; ADR 0096). Wirft bei
+ *  ungültiger Eingabe — das Panel zeigt die Meldung an. */
+export async function applyDate(value) {
+  const hashes = selectionHashes();
+  if (!hashes.length) return null;
+  const d = await batchAnnotate(hashes, { media_date: value });
+  emit("annotation-changed", { hash: hashes[0], manual: d.manual });
+  // Jahr-Zähler und Sortierung „Erstellt" ändern sich (wie beim Modell).
+  emit("date-changed", { hashes });
+  return d.manual;
 }
 
 /** Rating schreiben (0/null löscht) — Einzel-Item. */

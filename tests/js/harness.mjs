@@ -122,6 +122,13 @@ export function mockAdminApi() {
     // Gemerkter Stand der teuren Zähler (#118): {…, at} oder null = nie gezählt.
     orphans: { count: 0, at: "2026-09-13T10:00:00Z" },
     cache: { count: 1, bytes: 5e6, at: "2026-09-13T10:00:00Z" }, checking: [],
+    // Aufschlüsselung aller Caches (#227), derselbe Zähllauf.
+    caches: { at: "2026-09-13T10:00:00Z", parts: [
+      { kind: "thumbs", count: 1, bytes: 5e6, path: "/x/cache/thumbnails" },
+      { kind: "audio_analysis", count: 4, bytes: 2e4, path: "/x/cache/audio" },
+      { kind: "audio_proxy", count: 2, bytes: 8e7, path: "/x/cache/audio" },
+      { kind: "preview", count: 0, bytes: 0, path: "/x/cache/preview" },
+    ] },
     open_issues: 0, blocked_count: 0,
     db_path: "/x/feral.sqlite", log_dir: "/x/logs", ffprobe: true, ffmpeg: true,
   }));

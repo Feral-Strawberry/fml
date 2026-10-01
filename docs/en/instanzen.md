@@ -36,15 +36,18 @@ distinguishable by instance name, accent color and port.
 | watch folder list, library management on/off | ✔ | |
 | program folder (code, `.venv`) | | ✔ |
 | media files on disk | | ✔ (read only, except for imports by the managing instance) |
-| thumbnail cache | | ✔ if the DBs sit in the same folder (see below) |
+| caches (thumbnails, audio, display images) and log files | | ✔ if the DBs sit in the same folder (see below) |
 
-The thumbnail cache lives in the `cache/` folder **next to the respective
-DB file**. If several instance DBs sit in the same folder (the simplest
-setup), they share the cache — which is harmless and even economical,
-because thumbnails are addressed by file hash: the same file gets the same
-thumbnail in every instance and is computed only once. Worth knowing:
-"Clear cache" (Admin → Maintenance) then affects all instances; the
-thumbnails rebuild themselves on viewing.
+The caches live in the `cache/` folder **next to the respective DB file**
+(`cache/thumbnails`, `cache/audio`, `cache/preview`). If several instance
+DBs sit in the same folder (the simplest setup), they share the caches —
+which is harmless and even economical, because everything in them is
+addressed by file hash: the same file gets the same thumbnail in every
+instance and is computed only once. Worth knowing: **Delete** in the
+"Cache" card (Admin → Maintenance) then affects all instances; everything
+in there is rebuilt by itself when needed. Such instances also write the
+log files together (`logs/fml-web.log`, `logs/fml-worker.log` next to the
+DB).
 
 ## Creating a second instance (step by step)
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import platform
@@ -21,6 +22,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from ..messages import error_payload as _err, load as msg_load, msg
@@ -31,6 +33,7 @@ from ..config import (
     model_sort as cfg_model_sort,
     thumbnail_low_priority as cfg_thumb_low_priority,
     slow_request_ms as cfg_slow_request_ms,
+    background_default as cfg_background_default,
     thumbnail_workers as cfg_thumb_workers,
     ui_show_dupes as cfg_show_dupes,
     library_root as cfg_library_root,
@@ -39,12 +42,14 @@ from ..config import (
     instance_name as cfg_instance_name,
     rankings_enabled as cfg_rankings_enabled,
     audio_enabled as cfg_audio_enabled,
+    audio_true_peak as cfg_audio_true_peak,
     web_port as cfg_web_port,
     load_config,
     thumbnail_size,
     update_config_file,
 )
 from ..db import connect, folders as folders_db, manual, optimize
+from ..processes import effective_workers
 from ..db import rankings as rankings_db
 from ..interpret import a1111_graph
 from .. import reveal
@@ -55,12 +60,13 @@ from ..thumbs import (
 from .. import audio_analysis
 from . import admin as admin_lib
 from . import bulk as bulk_lib
+from . import exchange
 from . import filters, library
 from .cache import COLD_KEY, EpochCache
 from .media import ABORTED_KEY, MediaFileResponse
 from . import rankings as rankings_lib
 from ..logsetup import WEB_LOG, WORKER_LOG, tail as log_tail
-from .engine import AlreadyQueued, ScanEngine
+from .engine import FILE_WRITING_TASKS, AlreadyQueued, ScanEngine
 from .worker import default_pool_workers
 from .. import __version__ as feral_version
 
@@ -161,10 +167,28 @@ class ConfigUpdate(BaseModel):
     audio_enabled: bool | None = None
     # Langsam-Schwelle in ms (#110): 0 = nie warnen; None = unangetastet.
     slow_request_ms: int | None = None
+    # Startwert des Hintergrund-Modus (ADR 0093): normal | quiet.
+    background: str | None = None
+
+
+class BackgroundRequest(BaseModel):
+    # Zwei unabhängige Schalter (ADR 0093); None = unverändert.
+    quiet: bool | None = None      # Leistung: Leise statt Normal
+    paused: bool | None = None     # Warteschlange angehalten
 
 
 class RatingUpdate(BaseModel):
     rating: int | None = None  # 0/None löscht, 1–5 setzt (ADR 0017)
+
+
+class FolderOrderRequest(BaseModel):
+    """Manuelle Reihenfolge (#218, ADR 0095): ``hash`` vor ``before`` bzw.
+    hinter ``after`` setzen (genau eins von beiden)."""
+
+    hash: str
+    before: str | None = None
+    after: str | None = None
+    view: str | None = None
 
 
 class NotesUpdate(BaseModel):
@@ -226,13 +250,23 @@ class BatchAnnotateRequest(BaseModel):
     """Sammel-Aktion für die Multiselect-Auswahl (ADR 0022).
 
     Nur gesendete Aktionen werden ausgeführt: ``rating`` (0 löscht),
-    ``add_tag`` (hängt an), ``model`` ("" löscht das manuelle Modell).
+    ``add_tag`` (hängt an), ``model`` ("" löscht das manuelle Modell),
+    ``media_date`` ("" löscht das manuelle Datum, ADR 0096).
     """
 
     hashes: list[str]
     rating: int | None = None
     add_tag: str | None = None
     model: str | None = None
+    media_date: str | None = None
+
+
+class CommentExportRequest(BaseModel):
+    """Zeitkommentare exportieren (#228): Scope wie bei den Sammel-Aktionen."""
+
+    filter: str = ""
+    hashes: list[str] | None = None
+    view: str | None = None
 
 
 class BulkApplyRequest(BaseModel):
@@ -251,6 +285,8 @@ class BulkApplyRequest(BaseModel):
     add_tag: str | None = None
     model: str | None = None
     note: str | None = None
+    # Manuelles Datum für alle Treffer (ADR 0096): „1997", „1997-05", „1997-05-12".
+    media_date: str | None = None
     reject: bool = False
     # Grundbereich der Ansicht (ADR 0085): „das Suchergebnis" ist das, was
     # die Ansicht zeigt — in der Galerie nie die unsichtbaren Songs.
@@ -279,6 +315,18 @@ def _host_only(header: str) -> str:
     if value.startswith("["):                # IPv6-Literal: [::1]:8765
         return value.partition("]")[0].lstrip("[")
     return value.rsplit(":", 1)[0] if ":" in value else value
+
+
+# Anfragen, die nichts ändern; alle anderen prüft der Wächter auf ihre Herkunft.
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _origin_matches(origin: str, host: str) -> bool:
+    """Kommt die Anfrage von einer Seite dieses Servers? Verglichen wird die
+    Autorität des ``Origin``-Kopfs (Host samt Port) mit dem ``Host``-Kopf.
+    ``null`` (Sandbox, Datei) und alles ohne http(s)-Schema passt nie."""
+    scheme, sep, authority = origin.strip().lower().partition("://")
+    return bool(sep) and scheme in ("http", "https") and authority == host.strip().lower()
 
 
 _log = logging.getLogger("feral.web")
@@ -385,7 +433,15 @@ class _SlowRequestLog:
 
 
 class _HostGuard:
-    """Reine ASGI-Middleware: Host-Allowlist + nosniff-Header."""
+    """Reine ASGI-Middleware: Host-Allowlist, Herkunftsprüfung für ändernde
+    Anfragen und nosniff-Header.
+
+    Herkunft (ADR 0100): Ein Browser schickt bei jedem POST von einer fremden
+    Seite den ``Origin``-Kopf mit, auch bei einem schlichten Formular ohne
+    Preflight. Passt er nicht zum ``Host`` dieser Anfrage, kommt sie nicht
+    von fmls eigener Oberfläche und wird abgewiesen (403). Anfragen ohne
+    ``Origin`` (curl, Skripte) bleiben erlaubt; meldet der Browser dort
+    ``Sec-Fetch-Site`` als fremd, gilt dasselbe."""
 
     def __init__(self, app: Any, allowed_hosts: list[str] | None = None) -> None:
         self.app = app
@@ -404,10 +460,19 @@ class _HostGuard:
                 message = {**message, "headers": headers}
             await send(message)
 
-        if self.allowed is not None:
-            raw = next((v for k, v in scope.get("headers", []) if k == b"host"), b"")
-            if _host_only(raw.decode("latin-1")) not in self.allowed:
-                reject = PlainTextResponse("Invalid host header", status_code=400)
+        headers = {k: v.decode("latin-1") for k, v in scope.get("headers", [])}
+        host = headers.get(b"host", "")
+        if self.allowed is not None and _host_only(host) not in self.allowed:
+            reject = PlainTextResponse("Invalid host header", status_code=400)
+            return await reject(scope, receive, send_with_nosniff)
+        if scope.get("method") not in _SAFE_METHODS:
+            origin = headers.get(b"origin")
+            foreign = (not _origin_matches(origin, host) if origin is not None
+                       else headers.get(b"sec-fetch-site") in ("cross-site", "same-site"))
+            if foreign:
+                _log.warning("refused: cross-origin %s %s (origin %s)",
+                             scope.get("method"), scope.get("path"), origin)
+                reject = PlainTextResponse("Cross-origin request refused", status_code=403)
                 return await reject(scope, receive, send_with_nosniff)
         await self.app(scope, receive, send_with_nosniff)
 
@@ -436,10 +501,21 @@ def create_app(
     # Serverlog (#64, ADR 0067): Ordner neben der Datenbank; der Web-Prozess
     # schreibt fml-web.log (Aufbau in __main__), der Worker fml-worker.log.
     log_dir = Path(log_dir) if log_dir else Path(db_path).resolve().parent / "logs"
+    # Hintergrund (ADR 0093): Leistung + Pause, zuletzt in der Galerie
+    # gewählt (app_state), sonst Leistung aus [performance] background.
+    with contextlib.closing(connect(db_path)) as conn:
+        stored = admin_lib.read_app_state(conn, "background")
+    if not isinstance(stored, dict):
+        stored = {"quiet": (config_path is not None and
+                            cfg_background_default(load_config(config_path)) == "quiet"),
+                  "paused": False}
+    start_quiet, start_paused = bool(stored.get("quiet")), bool(stored.get("paused"))
     # Worker-Prozess für Langläufer (ADR 0067); Pool-Größe wie beim
-    # Thumbnail-Pool ([cache] thumbnail_workers, sonst Kerne − 2).
+    # Thumbnail-Pool ([cache] thumbnail_workers, sonst Automatik). Die
+    # Warteschlange überlebt Neustarts (ADR 0093).
     engine = ScanEngine(db_path, log_dir=log_dir, pool_workers=thumb_workers,
-                        thumb_workers=thumb_workers, thumb_low_priority=thumb_low_priority)
+                        thumb_workers=thumb_workers, thumb_low_priority=thumb_low_priority,
+                        quiet=start_quiet, paused=start_paused, persist_queue=True)
     thumb_cache = Path(thumb_cache) if thumb_cache else Path(db_path).resolve().parent / "cache" / "thumbnails"
     # Abgeleitete Audio-Daten (A4 #161): Analyse + Wiedergabe-Proxy, eigener
     # Ordner neben dem Thumbnail-Cache ([cache] audio).
@@ -448,7 +524,11 @@ def create_app(
     preview_cache = Path(preview_cache) if preview_cache else Path(db_path).resolve().parent / "cache" / "preview"
     # Ein Prozess-Pool für ALLE Thumbnail-Generierung (ADR 0020) — On-Demand
     # aus /api/thumb und der Warmer teilen ihn sich; entsteht lazy.
-    thumb_pool = ThumbPool(workers=thumb_workers, low_priority=thumb_low_priority)
+    # Leise: EIN Prozess, aber nur etwas unter normal (kein Hintergrund,
+    # keine Kern-Festlegung) — sichtbare Kacheln schlagen so die
+    # Warteschlangen-Arbeit (ADR 0093).
+    thumb_pool = ThumbPool(workers=effective_workers(thumb_workers, start_quiet),
+                           low_priority=thumb_low_priority or start_quiet)
     # Gemerkter Stand der teuren Admin-Kennzahlen (#118, ADR 0077): verwaiste
     # Fundorte und Cache-Größe werden nie beim Seitenladen gezählt, sondern
     # auf Klick oder nach passenden Aufgaben im Hintergrund.
@@ -461,15 +541,20 @@ def create_app(
             return {}
         engine.run_write(msg("taskStandSave"), write)
 
-    slow_counts = admin_lib.SlowCounts(db_path, thumb_cache, persist=_persist_stand)
+    cache_dirs = {"thumbs": str(thumb_cache), "audio": str(audio_cache),
+                  "preview": str(preview_cache)}
+    slow_counts = admin_lib.SlowCounts(db_path, thumb_cache, persist=_persist_stand,
+                                       caches={"audio": audio_cache, "preview": preview_cache})
     _SLOW_AFTER = {
         # Fundorte ändern sich durch Aufnahme (auch verschieben aus einer
         # katalogisierten Quelle), Re-Scan und Rausverschieben; Aufräumen setzt
         # den Stand direkt in seinem Endpunkt.
-        "orphans": {"scan_files", "rescan", "import_folder", "import_files", "moveout"},
+        "orphans": {"scan_files", "rescan", "recheck_filtered", "import_folder",
+                    "import_files", "moveout"},
         # Cache-Dateien entstehen beim Vorwärmen und fallen beim Ablehnen
         # (Import-Regeln, Rausverschieben) weg; Cache leeren setzt direkt.
-        "cache": {"thumb_warm", "import_rules", "moveout"},
+        "cache": {"thumb_warm", "audio_warm", "import_rules", "moveout", "issues_reject",
+                  "cache_clear"},
     }
 
     def _recount_after(name: str, ok: bool) -> None:
@@ -498,11 +583,15 @@ def create_app(
         # Modul-Schalter je Aufruf frisch (ADR 0083) — wirkt ohne Neustart.
         return config_path is not None and cfg_audio_enabled(load_config(config_path))
 
+    def true_peak() -> bool:
+        # Peak-Art der Analyse (#225) je Aufruf frisch, wie der Modul-Schalter.
+        return config_path is None or cfg_audio_true_peak(load_config(config_path))
+
     def warm_audio_auto() -> None:
         # Nachläufer nach Import/Watch/Einschalten (A4 #161): nur mit Modul;
         # ohne neue Audio-Items ist der Lauf ein schneller Leerlauf.
         if audio_on():
-            engine.enqueue_audio_warm(audio_cache, auto=True)
+            engine.enqueue_audio_warm(audio_cache, auto=True, true_peak=true_peak())
 
     def configured_min_date() -> datetime:
         # Untergrenze der Datumsregel (ADR 0019/0075) als UTC-datetime — für
@@ -523,6 +612,11 @@ def create_app(
     def _require_verwaltung() -> None:
         if not verwaltung_enabled():
             raise HTTPException(status_code=403, detail=msg("errOverviewMode"))
+
+    # Gesicherte Warteschlange wieder einreihen (ADR 0093), vor den Watchern.
+    # Im Übersichtsmodus kommt kein dateischreibender Auftrag zurück: die
+    # Hände-weg-Garantie (ADR 0041) gilt auch für Aufgaben von vor dem Neustart.
+    engine.restore_queue(skip=frozenset() if verwaltung_enabled() else FILE_WRITING_TASKS)
 
     # fundort:-Prädikat + Library/Extern-Zahlen (ADR 0041, I2): filters darf
     # config nicht importieren — die Root kommt über diesen Provider, je
@@ -812,6 +906,7 @@ def create_app(
         dupes: bool = Query(False),
         total: bool = Query(True),
         view: str | None = Query(None),
+        folder: int | None = Query(None),
     ) -> dict:
         with read_conn() as conn:
             vp = view_preds(conn, view, request.scope)
@@ -824,6 +919,7 @@ def create_app(
                     # Gemeinsame Zeitachse der Audioliste (ADR 0087): mit
                     # der ersten Seite, nur in der Audioansicht.
                     with_max_duration=total and view == "audio",
+                    folder=folder,   # Sortierung „manuell" (#218)
                 )
             except ValueError as exc:   # ungültiger Filterausdruck (ADR 0018)
                 raise HTTPException(status_code=400, detail=_err(exc))
@@ -838,6 +934,7 @@ def create_app(
         filter: str | None = Query(None),
         dupes: bool = Query(False),
         view: str | None = Query(None),
+        folder: int | None = Query(None),
     ) -> dict:
         # Galerie-Rücksprung (ADR 0060): Position eines Items in der
         # aktuellen Treffermenge — Parameter spiegeln /api/items, gefilterte
@@ -849,7 +946,7 @@ def create_app(
                 index = library.item_position(
                     conn, hash, sort=sort, model=model, rating=rating,
                     filter_expr=filter, dupes=dupes, cache=hits_cache,
-                    view_preds=vp,
+                    view_preds=vp, folder=folder,
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=_err(exc))
@@ -1111,6 +1208,26 @@ def create_app(
         if "id" not in result:
             raise HTTPException(status_code=400,
                                 detail=result.get("summary") or msg("errUpdateFailed"))
+        return result
+
+    @app.post("/api/folders/{folder_id}/order")
+    def folder_order(folder_id: int, req: FolderOrderRequest) -> dict:
+        # Umsortieren in der Audioliste (Ziehen, Alt+↑/↓) bei Sortierung
+        # „manuell"; ein kurzer Schreibgriff, danach lädt die Liste neu.
+        for h in (req.hash, req.before, req.after):
+            if h is not None:
+                _require_hash(h)
+        with read_conn() as conn:
+            vp = view_preds(conn, req.view, None)
+        result = engine.run_write(
+            msg("taskFolderOrder"),
+            lambda conn, _p: {"index": library.move_in_folder(
+                conn, folder_id, req.hash, before=req.before, after=req.after,
+                view_preds=vp)},
+        )
+        if "index" not in result:
+            raise HTTPException(status_code=400,
+                                detail=result.get("summary") or msg("folderOrderInvalid"))
         return result
 
     @app.delete("/api/folders/{folder_id}")
@@ -1410,8 +1527,15 @@ def create_app(
             raise HTTPException(status_code=400, detail=msg("errBatchSize"))
         for file_hash in req.hashes:
             _require_hash(file_hash)
-        if req.rating is None and req.add_tag is None and req.model is None:
+        if (req.rating is None and req.add_tag is None and req.model is None
+                and req.media_date is None):
             raise HTTPException(status_code=400, detail=msg("errNoAction"))
+        if req.media_date and req.media_date.strip():
+            try:
+                manual.parse_manual_date(req.media_date)   # vor dem Writer prüfen
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=_err(err))
+        min_date = configured_min_date()
         if req.rating is not None and req.rating not in range(6):
             raise HTTPException(status_code=400, detail=msg("ratingRange"))
 
@@ -1425,6 +1549,9 @@ def create_app(
                         manual.add_tag(conn, file_hash, req.add_tag)
                     if req.model is not None:
                         manual.set_model(conn, file_hash, req.model)
+                    if req.media_date is not None:
+                        manual.set_media_date(conn, file_hash, req.media_date,
+                                              min_date=min_date)
                     updated += 1
                 except ValueError:
                     continue   # unbekanntes Item: überspringen, Rest anwenden
@@ -1450,13 +1577,20 @@ def create_app(
         # Alles VOR dem Writer prüfen — run_write verpackt Aufgaben-Fehler in
         # ein summary-Dict statt zu werfen (Muster create_folder).
         if req.reject and any(
-            v is not None for v in (req.rating, req.add_tag, req.model, req.note)
+            v is not None for v in (req.rating, req.add_tag, req.model, req.note,
+                                    req.media_date)
         ):
             raise HTTPException(status_code=400, detail=msg("errRejectExclusive"))
         if not req.reject and all(
-            v is None for v in (req.rating, req.add_tag, req.model, req.note)
+            v is None for v in (req.rating, req.add_tag, req.model, req.note,
+                                req.media_date)
         ):
             raise HTTPException(status_code=400, detail=msg("errNoAction"))
+        if req.media_date is not None:
+            try:
+                manual.parse_manual_date(req.media_date)
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=_err(err))
         if req.rating is not None and req.rating not in (1, 2, 3, 4, 5):
             raise HTTPException(status_code=400, detail=msg("errBaseRating"))
         try:
@@ -1477,6 +1611,7 @@ def create_app(
                 add_tag=req.add_tag,
                 model=req.model,
                 note=req.note,
+                media_date=req.media_date,
                 reject=req.reject,
                 thumb_cache=thumb_cache,
             )
@@ -1485,6 +1620,81 @@ def create_app(
         # 250k bleiben deutlich unter dem Timeout.
         result = engine.run_write(msg("taskBulk"), fn, timeout=300.0)
         if "matched" not in result:
+            raise HTTPException(status_code=500,
+                                detail=result.get("summary") or msg("errBulkFailed"))
+        return result
+
+    # -- Zeitkommentare austauschen (#228, ADR 0098) --------------------------------
+
+    @app.post("/api/comments/export")
+    def comments_export(req: CommentExportRequest) -> dict:
+        # Nur lesend; das Frontend speichert die Antwort als Datei.
+        if req.hashes is not None:
+            if not req.hashes or len(req.hashes) > 2000:
+                raise HTTPException(status_code=400, detail=msg("errBatchSize"))
+            for file_hash in req.hashes:
+                _require_hash(file_hash)
+        try:
+            with read_conn() as conn:
+                return exchange.export_comments(
+                    conn, hashes=req.hashes, filter_expr=req.filter,
+                    view_preds=view_preds(conn, req.view, None))
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=_err(err))
+
+    async def _exchange_body(request: Request) -> dict:
+        # Fremde Datei: Größe VOR dem Parsen deckeln. Nur application/json —
+        # ein Formular-POST einer fremden Seite (text/plain, ohne Preflight)
+        # kommt so nie durch (der Body wird hier selbst gelesen).
+        if not request.headers.get("content-type", "").startswith("application/json"):
+            raise HTTPException(status_code=415, detail=msg("exchangeNotJson"))
+        too_large = HTTPException(status_code=413, detail=msg(
+            "exchangeTooLarge", mb=exchange.MAX_BYTES // (1024 * 1024)))
+        if int(request.headers.get("content-length") or 0) > exchange.MAX_BYTES + 4096:
+            raise too_large
+        body = bytearray()
+        async for chunk in request.stream():
+            body += chunk
+            if len(body) > exchange.MAX_BYTES + 4096:
+                raise too_large
+        try:
+            payload = json.loads(body)
+        except (ValueError, RecursionError):   # auch absurd tief Verschachteltes
+            raise HTTPException(status_code=400, detail=msg("exchangeNotJson"))
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail=msg("exchangeNotJson"))
+        return payload
+
+    def _exchange_items(payload: dict) -> list:
+        try:
+            return exchange.parse_exchange(payload.get("data"))
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=_err(err))
+
+    @app.post("/api/admin/comments/preview")
+    async def comments_import_preview(request: Request) -> dict:
+        items = _exchange_items(await _exchange_body(request))
+
+        def run() -> dict:
+            with read_conn() as conn:
+                return exchange.preview_import(conn, items)
+        return await run_in_threadpool(run)
+
+    @app.post("/api/admin/comments/import")
+    async def comments_import(request: Request) -> dict:
+        payload = await _exchange_body(request)
+        items = _exchange_items(payload)
+        try:
+            source = exchange.clean_source(payload.get("source") if isinstance(
+                payload.get("source"), str) else None)
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=_err(err))
+        include = payload.get("include_song_id") is True
+        result = await run_in_threadpool(
+            engine.run_write, msg("taskCommentImport"),
+            lambda conn, _p: exchange.apply_import(conn, items, source=source,
+                                                   include_song_id=include))
+        if "added" not in result:
             raise HTTPException(status_code=500,
                                 detail=result.get("summary") or msg("errBulkFailed"))
         return result
@@ -1693,6 +1903,14 @@ def create_app(
                     "errPreviewFailed", reason=msg_load(reason or "")))
         return MediaFileResponse(proxy, media_type="audio/flac", cache_control=immutable)
 
+    @app.get("/api/audio/lyrics/{file_hash}")
+    def audio_lyrics(file_hash: str) -> dict:
+        """Songtext mit Zeiten (#234) für Player und Panel: ``lines`` und
+        ``sections`` (siehe ``library.synced_lyrics``), leer ohne getimten Text."""
+        _require_hash(file_hash)
+        with read_conn() as conn:
+            return library.synced_lyrics(conn, file_hash)
+
     @app.get("/api/audio/analysis/{file_hash}")
     def audio_analysis_json(file_hash: str) -> Response:
         """Lautheit + dreibandige Wellenform (A4 #161). Muster /api/thumb:
@@ -1714,8 +1932,9 @@ def create_app(
             resolved = library.resolve_media(conn, file_hash) if audio is not None else None
         if resolved is None:
             raise HTTPException(status_code=404, detail=msg("errNoAudioAnalysis"))
+        # Hinter Kacheln, Anzeigebildern und Wiedergabekopien (ADR 0093).
         thumb_pool.submit_call(f".json:{file_hash}", audio_analysis.generate_analysis,
-                               resolved[0], dest)
+                               resolved[0], dest, true_peak(), priority=1)
         return Response(status_code=202, headers={"Cache-Control": "no-store", "Retry-After": "1"})
 
     # -- Chip-Suche (Block S3, ADR 0035) -----------------------------------
@@ -1791,6 +2010,30 @@ def create_app(
         count = engine.enqueue_folder(req.path, configured_rules())
         return {"queued_files": count}
 
+    def reshape_web_pool() -> None:
+        """Pool des Web-Prozesses an Leistung + Config anpassen (ADR 0093):
+        Leise = 1 Prozess, dann immer etwas unter normal („Volle Leistung"
+        gilt nur im Modus Normal)."""
+        cfg = load_config(config_path) if config_path is not None else {}
+        configured = cfg_thumb_workers(cfg) if config_path is not None else thumb_workers
+        low = cfg_thumb_low_priority(cfg) if config_path is not None else thumb_low_priority
+        thumb_pool.reconfigure(effective_workers(configured, engine.quiet), quiet=False,
+                               low_priority=low or engine.quiet)
+
+    def apply_background(*, quiet: bool | None = None, paused: bool | None = None) -> None:
+        """Leistung/Pause sofort anwenden (ADR 0093): Worker über den
+        Steuerblock, Pool des Web-Prozesses direkt; gemerkt in app_state."""
+        engine.set_background(quiet=quiet, paused=paused)
+        reshape_web_pool()
+        state = {"quiet": engine.quiet, "paused": engine.paused}
+        engine.run_write(msg("taskBackgroundSave"), lambda conn, _p: admin_lib.write_app_state(
+            conn, "background", state))
+
+    @app.post("/api/background")
+    def background(req: BackgroundRequest) -> dict:
+        apply_background(quiet=req.quiet, paused=req.paused)
+        return {"quiet": engine.quiet, "paused": engine.paused}
+
     @app.get("/api/status")
     def status() -> dict:
         if app.state.idle_watch is not None:
@@ -1835,7 +2078,8 @@ def create_app(
                 engine.enqueue_files(files,
                                      label=msg("taskWatchBatch", name=name,
                                                n=len(files)),
-                                     rules=configured_rules())
+                                     rules=configured_rules(),
+                                     priority=True)   # Vorrang vor langen Läufen (ADR 0093)
                 if thumb_cache is not None:
                     engine.enqueue_thumb_warm(thumb_cache, thumb_size, auto=True)
                 warm_audio_auto()
@@ -1861,6 +2105,7 @@ def create_app(
                 files, source_root=root, target_root=Path(target),
                 min_date=min_date, source_mode=source_mode,
                 remove_empty=remove_empty, rules=configured_rules(),
+                priority=True,   # Vorrang vor langen Läufen (ADR 0093)
             )
             if thumb_cache is not None:
                 engine.enqueue_thumb_warm(thumb_cache, thumb_size, auto=True)
@@ -1942,7 +2187,42 @@ def create_app(
             with contextlib.suppress(HTTPException):
                 _start_watch_source(src)
 
-    # Autostart beim App-Start.
+    def recheck_if_rules_changed() -> bool:
+        """Aussortiertes neu prüfen, sobald die Import-Regeln andere sind als
+        beim letzten Lauf (#230-Nachtrag): egal, ob im Admin, per Hand in der
+        config.toml oder vom Windows-Starter geändert. Der Stand liegt in
+        ``app_state`` (``filter_rules``); ohne Stand (erster Start nach dem
+        Update) zählt das als geändert, einmal je Installation."""
+        rules = configured_rules()
+        now = json.dumps(_filter_rules(rules), sort_keys=True)
+        with contextlib.closing(connect(db_path)) as conn:
+            stored = admin_lib.read_app_state(conn, "filter_rules")
+        if stored == now:
+            return False
+        # Aussortiertes kennt nur das Stat-Gedächtnis, Watcher überspringen es
+        # unverändert (ADR 0042) — einmal mit den neuen Regeln prüfen.
+        engine.enqueue_recheck_filtered(rules)
+        engine.run_write(msg("taskStandSave"), lambda conn, _p: admin_lib.write_app_state(
+            conn, "filter_rules", now) or {})
+        return True
+
+    def backfill_subtitles_once() -> None:
+        """Songtext mit Zeiten (#234): Die Untertitel-Spur liest Schicht 1 erst
+        seit diesem Update. Einmal je Installation die schon katalogisierten
+        Songs mit Spur nachholen (Merker ``subtitle_backfill`` in app_state);
+        die Aufgabe selbst überlebt Neustarts in der Warteschlange."""
+        if not audio_on():
+            return
+        with contextlib.closing(connect(db_path)) as conn:
+            if admin_lib.read_app_state(conn, "subtitle_backfill"):
+                return
+        engine.enqueue_audio_subtitles(configured_rules())
+        engine.run_write(msg("taskStandSave"), lambda conn, _p: admin_lib.write_app_state(
+            conn, "subtitle_backfill", 1) or {})
+
+    # Autostart beim App-Start (geänderte Regeln zuerst, #230-Nachtrag).
+    recheck_if_rules_changed()
+    backfill_subtitles_once()
     _start_all_watches()
 
     # -- Admin & Wartung (Stufe 2A, ADR 0014) --------------------------------
@@ -2041,6 +2321,26 @@ def create_app(
         )
         return count
 
+    @app.post("/api/admin/issues/reject")
+    def admin_issues_reject(issue_id: int | None = None, kind: str | None = None) -> dict:
+        # #217: ein Eintrag sofort (kurzer Schreibgriff), alle einer Art als
+        # Aufgabe — es können tausende sein (Bitrot nach Backups).
+        if issue_id is not None:
+            return engine.run_write(
+                msg("taskIssuesReject"),
+                lambda conn, _p: admin_lib.reject_issues(
+                    conn, issue_id=issue_id, thumb_cache=thumb_cache),
+            )
+        if kind not in admin_lib.REJECTABLE_KINDS:   # nur „kein Vorschaubild"
+            raise HTTPException(status_code=400, detail=msg("errNoAction"))
+        with read_conn() as conn:
+            expected = conn.execute(
+                "SELECT COUNT(*) FROM scan_issues WHERE resolved = 0 AND kind = ?", (kind,)
+            ).fetchone()[0]
+        engine.enqueue("issues_reject", {"kind": kind, "thumb_cache": str(thumb_cache)},
+                       msg("taskIssuesReject"))
+        return {"queued": "issues_reject", "expected": expected}
+
     @app.get("/api/admin/orphans")
     def admin_orphans(under: str | None = Query(None, max_length=1000),
                       sample: int = Query(20, ge=1, le=200)) -> dict:
@@ -2094,7 +2394,7 @@ def create_app(
 
     @app.post("/api/admin/reparse")
     def admin_reparse() -> dict:
-        engine.enqueue_reparse()
+        engine.enqueue_reparse(configured_rules())
         return {"queued": "Neu interpretieren (Schicht 2)"}
 
     @app.post("/api/admin/backfill-dates")
@@ -2111,6 +2411,14 @@ def create_app(
     def admin_rescan() -> dict:
         engine.enqueue_rescan(configured_rules())
         return {"queued": "Re-Scan aller bekannten Fundorte"}
+
+    @app.post("/api/admin/recheck-filtered")
+    def admin_recheck_filtered() -> dict:
+        # Aussortierte neu prüfen (#230) — z. B. nach gesenktem min_date für
+        # Scan-Orte ohne Watcher; beim Speichern geänderter Regeln automatisch.
+        engine.enqueue_recheck_filtered(configured_rules())
+        warm_audio_auto()
+        return {"queued": "recheck_filtered"}
 
     @app.post("/api/admin/integrity")
     def admin_integrity() -> dict:
@@ -2138,7 +2446,7 @@ def create_app(
         # Fehlgeschlagene und veraltete Analyse-Versionen.
         if not audio_on():
             raise HTTPException(status_code=400, detail=msg("errAudioOff"))
-        engine.enqueue_audio_warm(audio_cache, retry_failed=True)
+        engine.enqueue_audio_warm(audio_cache, retry_failed=True, true_peak=true_peak())
         return {"queued": True}
 
     @app.get("/api/admin/thumbcache")
@@ -2147,12 +2455,14 @@ def create_app(
         # Cache nur auf Knopfdruck; das Ergebnis ist der neue gemerkte Stand.
         return slow_counts.count_cache()
 
-    @app.post("/api/admin/thumbcache/clear")
-    def admin_thumbcache_clear() -> dict:
-        # Reiner Platten-Cache, keine DB — braucht den Writer-Thread nicht.
-        deleted = admin_lib.clear_thumb_cache(thumb_cache)
-        slow_counts.set_cache(0, 0)
-        return {"deleted": deleted}
+    @app.post("/api/admin/cache/clear")
+    def admin_cache_clear(kind: str = Query(..., max_length=40)) -> dict:
+        # #227: je Cache-Art als Aufgabe (Tausende Dateien); danach zählt
+        # der gemerkte Stand im Hintergrund neu (_SLOW_AFTER).
+        if kind not in admin_lib.CACHE_KINDS:
+            raise HTTPException(status_code=400, detail=msg("errNoAction"))
+        engine.enqueue("cache_clear", {"kind": kind, "dirs": cache_dirs}, msg("taskCacheClear"))
+        return {"queued": "cache_clear", "kind": kind}
 
     # -- Config aus der GUI ---------------------------------------------------
 
@@ -2182,6 +2492,7 @@ def create_app(
             "rankings_enabled": cfg_rankings_enabled(config),
             "audio_enabled": cfg_audio_enabled(config),
             "slow_request_ms": int(cfg_slow_request_ms(config)),
+            "background": cfg_background_default(config),
             "raw": p.read_text(encoding="utf-8") if p.is_file() else "",
         }
 
@@ -2189,6 +2500,8 @@ def create_app(
     def admin_config_save(update: ConfigUpdate) -> dict:
         if config_path is None:
             raise HTTPException(status_code=400, detail=msg("errNoConfig"))
+        if update.background is not None and update.background not in ("normal", "quiet"):
+            raise HTTPException(status_code=400, detail=msg("errBackgroundMode"))
         if not (16 <= update.thumbnail_size <= 2048):
             raise HTTPException(status_code=400, detail=msg("errThumbSize"))
         for loc in (update.locations or []):
@@ -2228,7 +2541,10 @@ def create_app(
         watch_payload = (
             _validate_watch_payload(update.watch) if update.watch is not None else None
         )
-        audio_was = cfg_audio_enabled(load_config(config_path))
+        cfg_before = load_config(config_path)
+        audio_was = cfg_audio_enabled(cfg_before)
+        pools_before = (cfg_thumb_workers(cfg_before), cfg_thumb_low_priority(cfg_before))
+        background_before = cfg_background_default(cfg_before)
         update_config_file(
             config_path,
             locations=(
@@ -2253,9 +2569,19 @@ def create_app(
             rankings_enabled=update.rankings_enabled,
             audio_enabled=update.audio_enabled,
             slow_request_ms=update.slow_request_ms,
+            background=update.background,
         )
         if update.slow_request_ms is not None:
             app.state.slow_request_ms = float(update.slow_request_ms)   # sofort (#110)
+        cfg_now = load_config(config_path)
+        pools_now = (cfg_thumb_workers(cfg_now), cfg_thumb_low_priority(cfg_now))
+        if pools_now != pools_before:
+            # Prozesszahl/Priorität ohne Neustart (#225, ADR 0093).
+            engine.set_pool_config(*pools_now)
+            reshape_web_pool()
+        if cfg_background_default(cfg_now) != background_before:
+            # Geänderter Startwert setzt auch die aktuelle Leistung (ADR 0093).
+            apply_background(quiet=cfg_background_default(cfg_now) == "quiet")
         if update.audio_enabled and not audio_was:
             # Audio-Modul eingeschaltet (ADR 0083): das Stat-Gedächtnis hält
             # Audiodateien als „unbekannt" (ADR 0042) — vergessen, damit der
@@ -2265,7 +2591,9 @@ def create_app(
                     "DELETE FROM scan_memory WHERE outcome = 'unbekannt'").rowcount})
             # Schon katalogisierte Audio-Items (Modul war früher an) gleich
             # analysieren; neu aufgenommene folgen über die Watch-Nachläufer.
-            engine.enqueue_audio_warm(audio_cache, auto=True)
+            engine.enqueue_audio_warm(audio_cache, auto=True, true_peak=true_peak())
+        if recheck_if_rules_changed():   # geänderte Import-Regeln (#230)
+            warm_audio_auto()
         # Watch-Quellen übernehmen Änderungen sofort: alle neu aufsetzen
         # (entfernte Quellen fallen dabei weg). Fehler hier ≠ Speicher-Fehler.
         _start_all_watches()
@@ -2283,6 +2611,12 @@ def create_app(
         Path(__file__).resolve().parents[3] / "requirements.txt")
 
     return app
+
+
+def _filter_rules(rules: dict[str, Any] | None) -> dict[str, Any]:
+    """Die Regeln, die ``ausgefiltert`` entscheiden (#230) — ohne den Audio-
+    Schalter: der sortiert als ``unbekannt`` aus und hat einen eigenen Weg."""
+    return {k: v for k, v in (rules or {}).items() if k != "audio"}
 
 
 def _require_hash(file_hash: str) -> None:

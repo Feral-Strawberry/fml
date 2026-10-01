@@ -100,6 +100,18 @@ export function initSidebar() {
         <div class="mlabel" title="${clickHint()}">${STRINGS.groupByMediaKind}<span class="sbactive"></span></div>
         <div id="sbMediaKinds"></div>
       </div>
+      <div class="sbgroup" data-group="interpret" data-scope="audio">
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByInterpret}<span class="sbactive"></span></div>
+        <div id="sbInterprets"></div>
+      </div>
+      <div class="sbgroup" data-group="album" data-scope="audio">
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByAlbum}<span class="sbactive"></span></div>
+        <div id="sbAlbums"></div>
+      </div>
+      <div class="sbgroup" data-group="genre" data-scope="audio">
+        <div class="mlabel" title="${clickHint()}">${STRINGS.groupByGenre}<span class="sbactive"></span></div>
+        <div id="sbGenres"></div>
+      </div>
       <div class="sbgroup" data-group="lyrics" data-scope="audio">
         <div class="mlabel">${STRINGS.groupByLyrics}<span class="sbactive"></span></div>
         <div id="sbLyrics"></div>
@@ -164,6 +176,11 @@ export function initSidebar() {
   const yearsBox = nav.querySelector("#sbYears");
   const mediaKindsBox = nav.querySelector("#sbMediaKinds");
   const lyricsBox = nav.querySelector("#sbLyrics");
+  const musicBoxes = {
+    interprets: nav.querySelector("#sbInterprets"),
+    albums: nav.querySelector("#sbAlbums"),
+    genres: nav.querySelector("#sbGenres"),
+  };
 
   // Geltungsbereich je Gruppe (ADR 0084 Punkt 5): data-scope nennt die
   // Medienarten, für die eine Gruppe Sinn ergibt; sichtbar ist sie, wenn
@@ -182,10 +199,14 @@ export function initSidebar() {
   // auf die Überschrift; Zustand überlebt in localStorage. Der Sammelblock
   // „Weitere Kriterien" (ADR 0084) ist ab Werk zugeklappt — sein Zustand
   // steht deshalb unter eigenem Schlüssel als „aufgeklappt".
+  // Ab Werk zugeklappt sind außerdem Genre (#224) — ihr Zustand steht
+  // ebenso als „aufgeklappt" unter eigenem Schlüssel.
   const COLLAPSED_KEY = "feral-sb-collapsed";
-  const MORE_OPEN_KEY = "feral-sb-more-open";
+  const OPEN_KEYS = { more: "feral-sb-more-open", genre: "feral-sb-genre-open" };
   const collapsed = new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) || "[]"));
-  if (localStorage.getItem(MORE_OPEN_KEY) !== "1") collapsed.add("more");
+  for (const [group, key] of Object.entries(OPEN_KEYS)) {
+    if (localStorage.getItem(key) !== "1") collapsed.add(group);
+  }
   const openMonths = new Set();   // aufgeklappte Jahre (Session-Gedächtnis)
   for (const group of nav.querySelectorAll(".sbgroup[data-group]")) {
     group.classList.toggle("collapsed", collapsed.has(group.dataset.group));
@@ -197,8 +218,8 @@ export function initSidebar() {
     const key = group.dataset.group;
     collapsed.has(key) ? collapsed.delete(key) : collapsed.add(key);
     group.classList.toggle("collapsed", collapsed.has(key));
-    if (key === "more") localStorage.setItem(MORE_OPEN_KEY, collapsed.has(key) ? "0" : "1");
-    else localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed].filter((k) => k !== "more")));
+    if (OPEN_KEYS[key]) localStorage.setItem(OPEN_KEYS[key], collapsed.has(key) ? "0" : "1");
+    else localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed].filter((k) => !OPEN_KEYS[k])));
     refreshActiveMarks();
   });
 
@@ -221,6 +242,9 @@ export function initSidebar() {
     megapixels: (p) => p.kind === "mp",
     inputimage: isField("input_image"),
     lyrics: isField("lyrics"),
+    interpret: isField("interpret"),
+    album: isField("album"),
+    genre: isField("genre"),
     fundort: (p) => p.kind === "fundort",
   };
   const activeIn = (key) => {
@@ -486,6 +510,18 @@ export function initSidebar() {
           + chipRow(pred("has", "lyrics", { negated: true }), STRINGS.lyricsWithout,
                     "var(--faint)", f.lyrics.ohne, "-has: lyrics")
         : "";
+      // Interpret/Album/Genre (#224): exakte Werte aus den Tags, alphabetisch;
+      // Interpret = Album-Interpret, sonst Interpret des Titels (interpret:).
+      for (const [key, field, noun] of [["interprets", "interpret", STRINGS.nounInterprets],
+                                        ["albums", "album", STRINGS.nounAlbums],
+                                        ["genres", "genre", STRINGS.nounGenres]]) {
+        // Ohne Tags (KI-Musik) keine leere Gruppe — ausblenden.
+        musicBoxes[key].closest(".sbgroup").hidden = !(f[key] || []).length;
+        musicBoxes[key].innerHTML = byContext(f[key] || [], (x) => chipRow(
+          { kind: "field", negated: false, field, op: "=",
+            values: [{ value: x.name, exact: true }] },
+          x.name, "#b06fd6", x.count, `${field}: "${x.name}"`), noun);
+      }
       // Fundort (ADR 0041, I2): Gruppe nur bei konfigurierter Library —
       // sonst wäre alles „nur extern" und die Facette ohne Aussage.
       nav.querySelector('.sbgroup[data-group="fundort"]').hidden = !f.fundort;
@@ -749,6 +785,7 @@ export function initSidebar() {
   on("rankings-changed", loadArenas);
   on("annotation-changed", () => { loadCounts(); loadFolders(); });
   on("model-changed", () => { loadCounts(); loadFolders(); });  // ADR 0022
+  on("date-changed", () => { loadCounts(); loadFolders(); });   // ADR 0096
   on("items-rejected", () => { loadCounts(); loadFolders(); }); // ADR 0041
   on("cover-changed", () => { loadCounts(); loadFolders(); });  // Song kommt/geht (#165)
   on("folders-changed", loadFolders);

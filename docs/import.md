@@ -25,13 +25,18 @@ root = "/pfad/zum/bestand"
 Häufigkeit „einmal jetzt", **Aufnehmen**. Die Library-Seite ist in jedem
 Modus gleich: Neues wird nach `bestand/JJJJ/MM/TT/` **kopiert**, die Kopie
 per Hash gegen die Quelle verifiziert und sofort katalogisiert (kein
-zusätzlicher Scan nötig). Der Modus bestimmt allein, was mit der **Quelle**
-passiert (ADR 0031):
+zusätzlicher Scan nötig). Die Kopie behält Zeitstempel und unter macOS
+auch die **erweiterten Dateiattribute**, darunter die Finder-Tags (farbige
+Markierungen). Die Finder-Tags werden zusätzlich zu fml-Tags (siehe
+[Oberfläche → Kuratieren](gui.md#kuratieren-bewerten-tags-notizen)); das
+gilt auch für Dubletten, deren Quelle danach gelöscht wird. Der Modus
+bestimmt allein, was mit der **Quelle** passiert (ADR 0031):
 
 - **„kopieren"** — die Quelle wird **nie angefasst**, der Import ist rein
-  lesend. Das Ergebnis je Datei (neu/Dublette/Fehler/…) steht im
-  Import-Log (Admin → Aktivität); im Quellordner selbst ändert sich
-  nichts. Der richtige Modus für fremde Ordner und Tool-Outputs.
+  lesend. Das Ergebnis (neu/Dublette/Fehler/…) steht als Summenzeile in
+  der Aktivität der Admin-Übersicht, je Datei in der DB-Tabelle
+  `import_log` (siehe [Report](#report)); im Quellordner selbst ändert
+  sich nichts. Der richtige Modus für fremde Ordner und Tool-Outputs.
 - **„verschieben"** (mit ausdrücklicher Bestätigung) — erfolgreich
   Importiertes wird nach der Verifikation aus der Quelle **gelöscht**;
   der Ordner leert sich. Nur Nachschau-Fälle bleiben sichtbar liegen.
@@ -80,12 +85,20 @@ verschieben), Katalogisieren und Watchordner:
   wie ein bekanntes Format aussieht. Kamera-RAW-Dateien (Sony ARW, Nikon
   NEF, Canon CR2, DNG) werden eigens erkannt statt als TIFF
   durchzurutschen.
-- **Frühestes plausibles Datum** (`[import] min_date`, Standard
+- **Ältestes plausibles Datum** (`[import] min_date`, Standard
   2015-01-01): eine Datei, deren Erstelldatum weder aus den Metadaten
   noch aus dem Dateistempel plausibel ist (vor `min_date` oder in der
   Zukunft, z. B. 1.1.1970), wird **nicht aufgenommen** — sie gilt als
   Regel-Treffer wie ein zu kleines Bild. Diese Regel ist immer aktiv;
   wer Altes behalten will, senkt `min_date`.
+
+Geänderte Regeln wirken auch rückwärts auf **Aussortiertes beim
+Katalogisieren**: Nach dem Speichern (oder beim nächsten Start, wenn die
+Regeln von Hand in der `config.toml` geändert wurden) prüft fml die bisher
+aussortierten Dateien einmal mit den neuen Regeln (Aufgabe „Aussortierte neu prüfen",
+auch als Knopf unter Admin → Wartung). Wer also `min_date` für eine alte
+Musiksammlung auf `1980-01-02` senkt, bekommt die älteren Songs ohne
+Neu-Scan in den Katalog.
 
 Beide Maß-Regeln gelten nur für **Bilder mit bekannten Maßen** — Videos
 nie, und ohne Maße wird nicht geraten. Beim Import (verschieben-Modus)
@@ -122,7 +135,10 @@ Watchordner übernommen.)
 ## Datum
 
 Einsortiert wird nach dem **Erstelldatum**: eingebettetes Datum aus den
-Metadaten (falls vorhanden), sonst der ältere plausible Dateisystem-Stempel.
+Metadaten (falls vorhanden), bei Musik sonst das Jahr aus den Tags, sonst
+der ältere plausible Dateisystem-Stempel. Ein Datum von Hand (siehe
+[Oberfläche](gui.md#kuratieren-bewerten-tags-notizen)) ändert nur den
+Katalog, nicht den Platz der Datei in der Library.
 Gibt es kein plausibles Datum (vor `min_date`, z. B. 1.1.1970, oder in der
 Zukunft), greift die Datumsregel von oben: die Datei wird **nicht
 importiert** und landet sichtbar in `_ausgefiltert/` — statt in einem

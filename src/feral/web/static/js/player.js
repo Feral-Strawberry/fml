@@ -24,6 +24,7 @@ import { displayUrl, fmtDuration, getAudioAnalysis, loadThumb, releaseVideo, thu
 import { dbToGain, drawWave, fmtDb, matchGainDb } from "./waveform.js";
 import { on } from "./main.js";
 import { openCommentPrompt, paintPins, pinTime } from "./comments.js";
+import { followPanel, lineAt, paintSections } from "./lyrics.js";
 
 const MATCH_KEY = "feral-audio-match";
 const TEMPI = [1, 1.25, 1.5];   // schneller vorhören; langsamer braucht Musik nicht
@@ -226,6 +227,14 @@ export function toggle(item) {
 }
 
 export function pause() { if (isPlaying()) el.pause(); }
+
+/** Ab `sec` spielen, auch einen noch nicht geladenen Song, sofern er als
+ *  eingebetteter Player im Panel steht (Songtext-Zeile anklicken, #234). */
+export function playAt(hash, sec) {
+  if (cur?.file_hash === hash) { seek(cur, sec); if (!isPlaying()) toggle(cur); return; }
+  const w = document.querySelector(`.aplayer[data-hash="${hash}"]`);
+  if (w) play(itemOfWidget(w), sec);
+}
 
 /** Springen: der geladene Song sofort, jeder andere startet an der Stelle. */
 export function seek(item, sec) {
@@ -432,6 +441,7 @@ export function paintWave(wv, hash, { axis, duration }) {
   const cv = wv.querySelector("canvas");
   if (cv) drawWave(cv, a || null, { axis: ax, duration: dur, played: known && dur ? pos / dur : 0, gainDb: gainOf(hash) });
   paintPins(wv, hash, ax, cur?.file_hash === hash ? pos : null);   // Zeitkommentare (#163)
+  paintSections(wv, hash, ax, cur?.file_hash === hash ? pos : null);   // Abschnitte des Songtexts (#234)
   const ph = wv.querySelector(".ph");
   if (ph) {
     ph.hidden = !known || !ax;
@@ -505,7 +515,7 @@ function barSkeleton(bar) {
     </div>
     <div class="now"><span class="pcov" hidden></span><div class="nt"><div class="n"></div><div class="q"></div></div></div>
     <div class="mid"><span class="tm tpos"></span>
-      <div class="wv" title="${esc(STRINGS.audioSeek)}"><canvas></canvas><span class="loopr" hidden></span><span class="ph" hidden></span></div>
+      <div class="wv" title="${esc(STRINGS.audioSeek)}"><canvas></canvas><span class="loopr" hidden></span><span class="ph" hidden></span><span class="ly"></span></div>
       <span class="tm tdur"></span></div>
     <div class="opts">
       <button type="button" data-act="match" title="${esc(STRINGS.audioMatchTitle)}">≈ ${esc(STRINGS.audioMatch)}<span class="gain"></span></button>
@@ -542,6 +552,11 @@ function paintBar() {
   setText(bar.querySelector(".tpos"), fmtDuration(positionOf(hash)) || "0:00");
   setText(bar.querySelector(".tdur"), fmtDuration(dur));
   paintWave(bar.querySelector(".wv"), hash, { axis: dur, duration: dur });
+  // Songtext mit Zeiten (#234): aktuelle Zeile mittig unter der Welle, Panel folgt.
+  const ln = lineAt(hash, positionOf(hash));
+  setHtml(bar.querySelector(".ly"), ln && (ln.text || ln.section)
+    ? (ln.section ? `<b>${esc(ln.section)}</b>${ln.text ? " · " : ""}` : "") + esc(ln.text) : "");
+  followPanel(hash, positionOf(hash));
   const m = bar.querySelector('[data-act="match"]');
   m.classList.toggle("on", matchOn());
   setText(m.querySelector(".gain"), matchOn() && analyses.get(hash)

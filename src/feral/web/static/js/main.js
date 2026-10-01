@@ -11,6 +11,7 @@ import { initLibraryView } from "./libview.js";
 import { initAudioList } from "./audiolist.js";
 import { initPlayer } from "./player.js";
 import { initComments } from "./comments.js";
+import { initLyrics } from "./lyrics.js";
 import { initSidebar } from "./sidebar.js";
 import { initSearch } from "./search.js";
 import { initAdvanced } from "./advanced.js";
@@ -28,6 +29,8 @@ import { initOverlays } from "./overlays.js";
 import { initHelp, setHelpAvailable } from "./help.js";
 import { initTheme, initThemeToggle, applyInstance } from "./appearance.js";
 import { startStatusPolling, initActivityBadge } from "./status.js";
+import { initBackgroundButtons } from "./background.js";
+import { initPanelFold } from "./panelfold.js";
 
 // -- Event-Bus -----------------------------------------------------------------
 //
@@ -38,7 +41,8 @@ import { startStatusPolling, initActivityBadge } from "./status.js";
 //                         reset: true = „Alle Medien" (Sidebar) — Grid
 //                         oben, kein Rücksprung (Issue #33)
 //   'chip-toggle'       {pred}   — Facetten-Wert togglen (Sidebar → search.js)
-//   'sort-changed'      {sort}   — Galerie-Dropdown setzt die Sortierung
+//   'sort-changed'      {sort, explicit?} — Galerie-Dropdown setzt die Sortierung
+//                         (explicit: auch „added" als Chip, #224)
 //                         (search.js ersetzt den sort:-Chip; Block S6)
 //   'state-load'        {expression, label, folder?, arena?} — gespeicherte Suche/Arena als
 //                         Chips laden (folder = Ursprung für ☆-Dialog und
@@ -211,6 +215,7 @@ initTheme();
 initTopbar();
 initCounts();
 initPanelResize();
+initPanelFold();   // rechtes Panel wegklappen, Anfasser + Taste P (#219)
 
 // -- Erweiterungspunkte (Tasks 6–11) ---------------------------------------------
 //
@@ -239,12 +244,14 @@ initRankings(); // Ranking-Modul: Arenen mit Duell + Bestenliste (ADR 0045)
 initPlayer();    // eigener Audio-Player + Abspielleiste (A5 #162, ADR 0087)
 initAudioList(); // Audioansicht: Zeilen, Zeitachse, Tasten, Alle abspielen (ADR 0085/0087)
 initComments();  // Zeitkommentare: Pins, Taste K, Panel-Abschnitt (A6 #163, ADR 0088)
+initLyrics();    // Songtext mit Zeiten: Klick auf eine Panel-Zeile springt (#234)
 
 // Status-Poller (status.js, geteilt mit dem Admin-Dokument): Topbar-Badge,
 // und an der Flanke laufend→leer der Bus-Event 'engine-idle' (Grid, Sidebar,
 // Zähler laden neu). Der Admin selbst ist seit ADR 0074 ein eigenes Dokument
 // unter /admin — kein initAdmin() mehr in dieser Shell.
 initActivityBadge(document.getElementById("activity"));
+initBackgroundButtons(document.getElementById("bgPower"), document.getElementById("bgPause"));
 startStatusPolling({ onIdle: () => emit("engine-idle", {}) });
 
 // Nach abgeschlossenen Engine-Aufgaben (Scan/Wartung) Zähler auffrischen.

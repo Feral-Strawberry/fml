@@ -43,6 +43,24 @@ class TaskContext(Protocol):
         ...
 
 
+class TaskPaused(Exception):
+    """Halt an der Dateigrenze (ADR 0093): Pause, Beenden oder Vorrang eines
+    Watch-Batches. Wirft die Fortschrittsmeldung des Workers; ``params`` ist
+    die Fortsetzung (nur die restliche Arbeit) — ``None`` = mit denselben
+    Parametern neu starten (Aufgaben, die das Fehlende selbst neu suchen)."""
+
+    def __init__(self, params: dict[str, Any] | None = None) -> None:
+        super().__init__("paused")
+        self.params = params
+
+
+# Aufgaben, die ein Watch-Batch mitten im Lauf überholen darf (ADR 0093):
+# sie setzen nach dem Halt ohne Doppelarbeit fort (Dateiliste als
+# Fortsetzung bzw. Cache/DB zeigen, was fehlt).
+RESUMABLE = frozenset({"scan_files", "rescan", "recheck_filtered", "import_files",
+                       "thumb_warm", "audio_warm", "backfill_dates"})
+
+
 TaskFn = Callable[[sqlite3.Connection, dict[str, Any], Progress, TaskContext], dict[str, Any]]
 TASKS: dict[str, TaskFn] = {}
 
@@ -80,35 +98,117 @@ def _counters(**values: int) -> dict[str, int]:
 
 # -- Scannen ---------------------------------------------------------------------
 
-def _scan(conn, files: list[Path], rules, progress: Progress) -> dict[str, Any]:
+def _scan_list(conn, files: list[Path], params: dict[str, Any],
+               progress: Progress) -> ScanReport:
+    """Dateiliste scannen; beim Halt (ADR 0093) als Fortsetzung nur die
+    noch nicht gescannten Dateien mitgeben (die Meldung kommt NACH jeder
+    Datei — bis dahin ist alles committet)."""
+    done = 0
+
     def on_file(report: ScanReport, path: Path) -> None:
+        nonlocal done
+        done = report.scanned_files
         progress(report=report_dict(report), current=path.name)
 
-    report = scan_files(conn, files, progress=on_file, rules=rules)
+    try:
+        report = scan_files(conn, files, progress=on_file, rules=params.get("rules"))
+    except TaskPaused:
+        raise TaskPaused({**params, "files": [str(p) for p in files[done:]]}) from None
     progress(report=report_dict(report), current=None)
-    return {}
+    return report
+
+
+def _scan(conn, files: list[Path], params: dict[str, Any], progress: Progress) -> dict[str, Any]:
+    return {"summary": scan_summary(_scan_list(conn, files, params, progress))}
 
 
 @task("scan_files")
 def scan_files_task(conn, params, progress, ctx) -> dict[str, Any]:
     """Konkrete Dateien scannen (katalogisieren-Watchordner, ADR 0031)."""
-    return _scan(conn, [Path(p) for p in params["files"]], params.get("rules"), progress)
+    return _scan(conn, [Path(p) for p in params["files"]], params, progress)
 
 
 @task("rescan")
 def rescan_task(conn, params, progress, ctx) -> dict[str, Any]:
     """Alle bekannten, noch existierenden Fundorte erneut scannen — mit den
     Import-Regeln (min_date!) aus der Config, sonst liefe die Datumsregel
-    (ADR 0075) hier mit dem Standard 2015 statt dem konfigurierten Wert."""
-    files = [
-        Path(p)
-        for (p,) in conn.execute("SELECT DISTINCT path FROM file_locations")
-        if Path(p).is_file()
-    ]
-    return _scan(conn, files, params.get("rules"), progress)
+    (ADR 0075) hier mit dem Standard 2015 statt dem konfigurierten Wert.
+    ``files`` = Fortsetzung nach einem Halt (ADR 0093)."""
+    if "files" in params:
+        files = [Path(p) for p in params["files"]]
+    else:
+        files = [
+            Path(p)
+            for (p,) in conn.execute("SELECT DISTINCT path FROM file_locations")
+            if Path(p).is_file()
+        ]
+    return _scan(conn, files, params, progress)
+
+
+@task("recheck_filtered")
+def recheck_filtered_task(conn, params, progress, ctx) -> dict[str, Any]:
+    """Aussortierte neu prüfen (#230): Pfade mit Ausgang ``ausgefiltert`` im
+    Stat-Gedächtnis (ADR 0042) erneut scannen — nach geänderten Import-
+    Regeln (z. B. gesenktes min_date) erreicht sonst nichts diese Dateien.
+    Katalogisierte fallen dabei aus scan_memory heraus, weiter Aussortierte
+    bleiben mit neuem Stand drin; verschwundene Pfade werden vergessen.
+    ``files`` = Fortsetzung nach einem Halt (ADR 0093)."""
+    gone: list[str] = []
+    if "files" in params:
+        files = list(params["files"])
+    else:
+        rows = conn.execute(
+            "SELECT path FROM scan_memory WHERE outcome = 'ausgefiltert' ORDER BY path"
+        ).fetchall()
+        files = []
+        for (p,) in rows:
+            (files if Path(p).is_file() else gone).append(p)
+        if gone:
+            with conn:
+                conn.executemany("DELETE FROM scan_memory WHERE path = ?",
+                                 [(p,) for p in gone])
+
+    report = _scan_list(conn, [Path(p) for p in files], params, progress)
+    return {"summary": msg("sumRecheckFiltered", taken=report.media_files,
+                           still=report.ausgefiltert, gone=len(gone))}
+
+
+@task("audio_subtitles")
+def audio_subtitles_task(conn, params, progress, ctx) -> dict[str, Any]:
+    """Songtext mit Zeiten nachholen (#234): Songs, deren Untertitel-Spur
+    ffprobe schon kannte (``codec_type = subtitle``), deren Text Schicht 1
+    aber noch nicht hat, einmal neu durch den Scan schicken. Nur diese
+    Handvoll, kein Voll-Scan. ``files`` = Fortsetzung nach einem Halt."""
+    if "files" in params:
+        files = list(params["files"])
+    else:
+        rows = conn.execute(
+            """SELECT DISTINCT i.file_hash FROM items i
+                 JOIN raw_metadata r ON r.file_hash = i.file_hash
+                WHERE i.media_kind = 'audio' AND r.keyword = 'codec_type'
+                  AND r.value_text = 'subtitle'
+                  AND NOT EXISTS (SELECT 1 FROM raw_metadata s
+                                   WHERE s.file_hash = i.file_hash
+                                     AND s.source LIKE '%.subtitle')""").fetchall()
+        files = []
+        for (file_hash,) in rows:
+            paths = [p for (p,) in conn.execute(
+                "SELECT path FROM file_locations WHERE file_hash = ? ORDER BY id", (file_hash,))]
+            path = next((p for p in paths if Path(p).is_file()), None)
+            if path:
+                files.append(path)
+    return _scan(conn, [Path(p) for p in files], params, progress)
 
 
 # -- Import / Rausverschieben ------------------------------------------------------
+
+def _min_date(params: dict[str, Any]):
+    """``min_date`` der Aufgabe als datetime. In den Parametern steht ISO-Text
+    (JSON, ADR 0093); so kommt er auch aus der gesicherten Warteschlange."""
+    from ..importer import rule_min_date
+
+    return rule_min_date({"min_date": params.get("min_date")})
+
 
 def _import_counters(index: int, rep) -> dict[str, int]:
     return _counters(
@@ -133,7 +233,7 @@ def import_folder_task(conn, params, progress, ctx) -> dict[str, Any]:
 
     report = import_folder(
         conn, Path(params["source_root"]), target_root=Path(params["target_root"]),
-        min_date=params["min_date"], progress=on_file,
+        min_date=_min_date(params), progress=on_file,
         source_mode=params.get("source_mode", "einsortieren"),
         remove_empty=bool(params.get("remove_empty", False)), rules=params.get("rules"),
     )
@@ -150,12 +250,15 @@ def import_files_task(conn, params, progress, ctx) -> dict[str, Any]:
     source_mode = params.get("source_mode", "einsortieren")
     report = ImportReport()
     for index, path in enumerate(files, start=1):
-        progress(current=msg("progressFile", index=index, total=len(files), name=path.name),
-                 report=_import_counters(index, report))
+        try:
+            progress(current=msg("progressFile", index=index, total=len(files), name=path.name),
+                     report=_import_counters(index, report))
+        except TaskPaused:   # Halt VOR dieser Datei: sie und der Rest folgen (ADR 0093)
+            raise TaskPaused({**params, "files": [str(p) for p in files[index - 1:]]}) from None
         try:
             action, _detail = import_file(
                 conn, path, source_root=source_root, target_root=target_root,
-                min_date=params["min_date"], source_mode=source_mode,
+                min_date=_min_date(params), source_mode=source_mode,
                 rules=params.get("rules"),
             )
         except Exception as exc:  # Einzelfehler töten den Batch nicht
@@ -181,7 +284,7 @@ def moveout_task(conn, params, progress, ctx) -> dict[str, Any]:
                                   failed=rep.fehler))
 
     report = move_out(conn, library_root=params["library_root"],
-                      target_root=params["target_root"], min_date=params["min_date"],
+                      target_root=params["target_root"], min_date=_min_date(params),
                       progress=on_file)
     return {"summary": moveout_summary(report)}
 
@@ -225,7 +328,8 @@ def audio_warm_task(conn, params, progress, ctx) -> dict[str, Any]:
 
     retry_failed = bool(params.get("retry_failed", False))
     result = warm_audio(conn, params["cache_dir"], progress=on_progress,
-                        pool=ctx.thumb_pool(), retry_failed=retry_failed)
+                        pool=ctx.thumb_pool(), retry_failed=retry_failed,
+                        true_peak=bool(params.get("true_peak", True)))
     parts = [msg("sumThumbsNew", n=result["created"]),
              msg("sumThumbsSkipped", n=result["skipped"])]
     if result["failed"]:
@@ -289,8 +393,11 @@ def reparse_task(conn, params, progress, ctx) -> dict[str, Any]:
     # Pool nur auf Anfrage (ADR 0067, Messung): Parsen kostet 0,06 ms/Item,
     # der Pool-Start 14–30 Prozesse — auf 70k kein Gewinn (5,7 s vs. 5,3 s).
     pool = ctx.pool() if params.get("pool", False) else None
+    # Untergrenze der Datumsregel fürs Tag-Jahr der Songs (#220, ADR 0096).
+    from ..importer import rule_min_date
     report = reparse_database(conn, progress=on_chunk, pool=pool,
-                              chunk_size=int(params.get("chunk_size", 500)))
+                              chunk_size=int(params.get("chunk_size", 500)),
+                              min_date=rule_min_date(params.get("rules")))
     return {"summary": msg("sumReparse", interpreted=report.items_interpreted,
                            total=report.items_total, fields=report.fields_written)}
 
@@ -329,6 +436,24 @@ def import_rules_task(conn, params, progress, ctx) -> dict[str, Any]:
 
     n = apply_import_rules(conn, params.get("rules"), params.get("thumb_cache"))
     return {"summary": msg("sumImportRules", n=n)}
+
+
+@task("cache_clear")
+def cache_clear_task(conn, params, progress, ctx) -> dict[str, Any]:
+    """Eine Cache-Art löschen (#227); alles darin entsteht bei Bedarf neu."""
+    from .admin import clear_cache
+
+    n = clear_cache(params["dirs"], params["kind"])
+    return {"summary": msg("sumCacheClear", n=n)}
+
+
+@task("issues_reject")
+def issues_reject_task(conn, params, progress, ctx) -> dict[str, Any]:
+    """Alle offenen Probleme einer Art ablehnen (#217)."""
+    from .admin import reject_issues
+
+    r = reject_issues(conn, kind=params["kind"], thumb_cache=params.get("thumb_cache"))
+    return {"summary": msg("sumIssuesReject", n=r["rejected"], skipped=r["skipped"])}
 
 
 # -- Testhilfen (nur für die Testsuite: Prozess-Protokoll ehrlich prüfen) ----------
@@ -381,6 +506,23 @@ def import_summary(report, *, hotfolder: bool = False) -> dict[str, Any]:
     if report.leere_ordner:
         parts.append(msg("sumImportEmptyDirs", n=report.leere_ordner))
     return msg("sumHotfolderImport" if hotfolder else "sumImport", parts=parts)
+
+
+def scan_summary(report: ScanReport) -> dict[str, Any]:
+    """ScanReport → Meldungs-Dict (#233): Scan-Aufgaben hatten keine eigene
+    Zusammenfassung — Verlauf und Wartung zeigten dann die der VORIGEN
+    Aufgabe. Teile wie beim Import: nur belegte Zähler außer neu/bekannt."""
+    parts = [msg("sumImportNew", n=report.new_items),
+             msg("sumScanKnown", n=report.known_items)]
+    if report.skipped_unknown:
+        parts.append(msg("sumImportUnknown", n=report.skipped_unknown))
+    if report.ausgefiltert:
+        parts.append(msg("sumImportFiltered", n=report.ausgefiltert))
+    if report.blocked:
+        parts.append(msg("sumImportBlocked", n=report.blocked))
+    if report.failed:
+        parts.append(msg("sumImportErrors", n=len(report.failed)))
+    return msg("sumScan", parts=parts)
 
 
 def moveout_summary(report) -> dict[str, Any]:

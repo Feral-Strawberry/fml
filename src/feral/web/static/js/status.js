@@ -97,6 +97,10 @@ export function badgeHtml(s) {
   // Label ist seit Block M.2 ein Meldungs-Dict {key, params} → serverMsg()
   // (#63: vorher stand hier „[object Object]").
   const label = s.running ? serverMsg(s.label) : serverMsg((s.queue || [])[0]);
+  // Pausiert (ADR 0093): nichts läuft, die Anzeige nennt die Wartenden.
+  if (s.paused && !s.running && s.queue_pending) {
+    return `<span class="actdot paused"></span>${esc(STRINGS.activityPaused.replace("{n}", s.queue_pending))}`;
+  }
   if (busy) {
     return `<span class="actdot${dead ? " dead" : ""}"></span>${esc(label || STRINGS.activityRunning)}`
       + (s.queue_pending ? ` <span class="actqueue">+${s.queue_pending}</span>` : "");

@@ -276,3 +276,33 @@ test("Seed-Varianten nur mit Seed: Suno & Co. schreiben keinen (#159)", async ()
   await flush();
   assert.ok(panel().querySelector("#pSiblings"));
 });
+
+test("Abschnitte einklappen: Klick auf die Überschrift, gemerkt für alle Medien (#219)", async () => {
+  const f = (field, value) => ({ parser: "comfyui", parser_version: 1, field, value });
+  mockApi.get(/^\/api\/item\/[0-9a-f]+$/, () => ({
+    ...it, locations, raw: [], interpreted: [f("prompt", "rainy city"), f("model", "flux1-dev")],
+    manual: { rating: null, tags: [], notes: "", model: null },
+  }));
+  emit("selection-changed", { hash: it.file_hash, index: 0 });
+  await flush();
+  const gen = () => panel().querySelector('.section[data-sec="gen"]');
+  assert.ok(!gen().classList.contains("collapsed"), "ab Werk aufgeklappt");
+  gen().querySelector(".sechead .mlabel").dispatchEvent(new DomEvent("click", { bubbles: true }));
+  assert.ok(gen().classList.contains("collapsed"));
+  assert.deepEqual(JSON.parse(localStorage.getItem("feral-panel-collapsed")), ["gen"]);
+  // Eingeklappt bleibt das Modell als Zusammenfassung im Kopf.
+  assert.equal(gen().querySelector(".sechead .secsum").textContent, "flux1-dev");
+  // Nächstes Medium: derselbe Abschnitt bleibt zu, die anderen offen.
+  emit("selection-changed", { hash: hashOf(3), index: 2 });
+  await flush();
+  assert.ok(gen().classList.contains("collapsed"));
+  assert.ok(!panel().querySelector('.section[data-sec="file"]').classList.contains("collapsed"));
+  // Ein Knopf im Kopf behält seine eigene Wirkung und klappt nicht.
+  const btn = document.createElement("button");
+  gen().querySelector(".secright").appendChild(btn);
+  btn.dispatchEvent(new DomEvent("click", { bubbles: true }));
+  assert.ok(gen().classList.contains("collapsed"), "Knopf im Kopf behält seine eigene Wirkung");
+  gen().querySelector(".sechead").dispatchEvent(new DomEvent("click", { bubbles: true }));
+  assert.ok(!gen().classList.contains("collapsed"));
+  assert.deepEqual(JSON.parse(localStorage.getItem("feral-panel-collapsed")), []);
+});

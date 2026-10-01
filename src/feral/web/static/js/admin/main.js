@@ -12,6 +12,7 @@ import { initTheme } from "../appearance.js";
 import { startStatusPolling, onStatus, onTaskFinished } from "../status.js";
 import { PAGES, DEFAULT_PAGE } from "./register.js";
 import { initNav, markActive, renderWidget, setInstance, setDocumentTitle } from "./nav.js";
+import { initBackgroundButtons } from "../background.js";
 import { esc } from "./util.js";
 
 const pagesById = new Map(PAGES.map((p) => [p.id, p]));
@@ -91,6 +92,9 @@ document.addEventListener("fml:config-saved", loadInstance);
 
 initTheme();
 initNav(PAGES);
+// Leistung + Anhalten im Aktivitäts-Widget (#236): dieselben Bausteine und
+// derselbe Serverzustand wie in der Galerie-Kopfzeile.
+initBackgroundButtons(document.getElementById("wPower"), document.getElementById("wPause"));
 loadInstance();
 initRouter();
 onStatus((s) => {

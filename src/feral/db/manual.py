@@ -7,7 +7,7 @@ Tests injizierbar (Muster wie `store.py`).
 
 Konventionen:
 - `rating`: 1–5 Sterne; `0` oder `None` löscht die Bewertung.
-- Eine `annotations`-Zeile ohne Rating und ohne Notizen wird entfernt.
+- Eine `annotations`-Zeile ohne Rating, Notizen, Modell und Datum wird entfernt.
 - Tag-Namen werden getrimmt und case-insensitiv dedupliziert ("Portrait" ==
   "portrait"); Tags überleben das Entfernen vom letzten Item (Vokabular).
 - Unbekannter `file_hash` ⇒ ``ValueError`` (klarer als ein FK-Fehler).
@@ -17,7 +17,9 @@ Konventionen:
 
 from __future__ import annotations
 
+import re
 import sqlite3
+from datetime import date, datetime
 from typing import Any
 
 from ..messages import UserError
@@ -35,7 +37,8 @@ def _require_item(conn: sqlite3.Connection, file_hash: str) -> None:
 def _prune_empty(conn: sqlite3.Connection, file_hash: str) -> None:
     conn.execute(
         """DELETE FROM annotations
-            WHERE file_hash = ? AND rating IS NULL AND notes IS NULL AND model IS NULL""",
+            WHERE file_hash = ? AND rating IS NULL AND notes IS NULL AND model IS NULL
+              AND media_date IS NULL""",
         (file_hash,),
     )
 
@@ -129,6 +132,41 @@ def add_tag(
     return int(tag_id)
 
 
+def add_finder_tags(
+    conn: sqlite3.Connection, file_hash: str, tags: list[tuple[str, int]], ts: str,
+) -> int:
+    """Finder-Tags (``[(Name, Farbindex)]``, ADR 0097) als fml-Tags ans Item
+    hängen. Liefert die Zahl NEUER Zuordnungen.
+
+    Läuft im Import-/Scan-Schub, darum OHNE eigenen Commit (der Aufrufer
+    committet gebündelt). Die Tags hat der Nutzer im Finder gesetzt — sie
+    gehören darum zur manuellen Schicht, mit Herkunft ``'finder'``. Eine
+    schon vorhandene (auch manuelle) Zuordnung bleibt unverändert; eine
+    Farbe ≠ 0 wird zur Farbe des Tags. Unbekannter Hash ⇒ nichts.
+    """
+    if not tags or conn.execute(
+        "SELECT 1 FROM items WHERE file_hash = ?", (file_hash,)
+    ).fetchone() is None:
+        return 0
+    added = 0
+    for name, color in tags:
+        conn.execute(
+            "INSERT INTO tags (name, created_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING",
+            (name, ts),
+        )
+        if color:
+            conn.execute("UPDATE tags SET color = ? WHERE name = ?", (color, name))
+        added += conn.execute(
+            """INSERT INTO item_tags (file_hash, tag_id, created_at, source)
+               SELECT ?, id, ?, 'finder' FROM tags WHERE name = ?
+               ON CONFLICT(file_hash, tag_id) DO NOTHING""",
+            (file_hash, ts, name),
+        ).rowcount
+    if added:
+        update_search_index(conn, file_hash)   # ADR 0036: sofort findbar
+    return added
+
+
 def remove_tag(conn: sqlite3.Connection, file_hash: str, name: str) -> bool:
     """Tag vom Item lösen (der Tag selbst bleibt im Vokabular).
 
@@ -148,26 +186,88 @@ def remove_tag(conn: sqlite3.Connection, file_hash: str, name: str) -> bool:
     return cur.rowcount > 0
 
 
+# Eingabe eines manuellen Datums (ADR 0096): ISO in drei Genauigkeiten oder
+# die deutsche Punkt-Schreibweise (``12.05.1997``, ``05.1997``).
+_ISO_DATE = re.compile(r"^(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?$")
+_DOT_DATE = re.compile(r"^(?:(\d{1,2})\.)?(\d{1,2})\.(\d{4})$")
+
+
+def parse_manual_date(text: str) -> str:
+    """Eingabe → ``'1997'``, ``'1997-05'`` oder ``'1997-05-12'`` (so genau
+    wie eingegeben). Unmögliche oder künftige Daten ⇒ ``UserError``."""
+    t = (text or "").strip()
+    m = _ISO_DATE.match(t)
+    if m:
+        year, month, day = m.group(1), m.group(2), m.group(3)
+    else:
+        m = _DOT_DATE.match(t)
+        if not m:
+            raise UserError("dateInvalid", value=t)
+        day, month, year = m.group(1), m.group(2), m.group(3)
+    try:
+        when = date(int(year), int(month or 1), int(day or 1))
+    except ValueError:
+        raise UserError("dateInvalid", value=t) from None
+    if when > date.today() or when.year < 1000:
+        raise UserError("dateInvalid", value=t)
+    if day:
+        return f"{when:%Y-%m-%d}"
+    return f"{when:%Y-%m}" if month else f"{when:%Y}"
+
+
+def set_media_date(
+    conn: sqlite3.Connection, file_hash: str, text: str | None, *,
+    min_date: datetime | None = None, now: str | None = None,
+) -> str | None:
+    """Manuelles Datum setzen (ADR 0096); leerer Text oder None löscht es.
+
+    Das manuelle Datum wird nach ``items.media_date`` durchgeschrieben
+    (Sortierung, ``year:``-Filter und Seitenleiste laufen unverändert über
+    den Index); Löschen setzt dort wieder das abgeleitete Datum der Kaskade
+    (``min_date`` = Untergrenze der Datumsregel). Liefert das neue
+    ``items.media_date``."""
+    from ..importer import DEFAULT_MIN_DATE, derived_media_date   # Lazy: importer → db
+    _require_item(conn, file_hash)
+    value = parse_manual_date(text) if text and text.strip() else None
+    with conn:
+        _upsert_annotation(conn, file_hash, "media_date", value, now or now_iso())
+        _prune_empty(conn, file_hash)
+        effective = value or derived_media_date(
+            conn, file_hash, min_date=min_date or DEFAULT_MIN_DATE)
+        conn.execute("UPDATE items SET media_date = ? WHERE file_hash = ?",
+                     (effective, file_hash))
+    return effective
+
+
 def annotations_for(conn: sqlite3.Connection, file_hash: str) -> dict[str, Any]:
-    """Manuelle Schicht eines Items: {rating, notes, model, updated_at, tags, cover}."""
+    """Manuelle Schicht eines Items: {rating, notes, model, media_date,
+    updated_at, tags, tag_meta, cover}."""
     row = conn.execute(
-        "SELECT rating, notes, model, updated_at FROM annotations WHERE file_hash = ?",
+        """SELECT rating, notes, model, media_date, updated_at FROM annotations
+            WHERE file_hash = ?""",
         (file_hash,),
     ).fetchone()
-    tags = [
-        r["name"]
-        for r in conn.execute(
-            """SELECT t.name FROM item_tags it JOIN tags t ON t.id = it.tag_id
-                WHERE it.file_hash = ? ORDER BY t.name COLLATE NOCASE""",
-            (file_hash,),
-        )
-    ]
+    rows = conn.execute(
+        """SELECT t.name, t.color, it.source FROM item_tags it JOIN tags t ON t.id = it.tag_id
+            WHERE it.file_hash = ? ORDER BY t.name COLLATE NOCASE""",
+        (file_hash,),
+    ).fetchall()
+    tags = [r["name"] for r in rows]
+    # Finder-Tags (ADR 0097): Farbe und Herkunft nur, wo es welche gibt —
+    # ``tags`` bleibt die schlichte Namensliste für alle anderen Leser.
+    tag_meta = {
+        r["name"]: {"color": r["color"], "finder": r["source"] == "finder"}
+        for r in rows if r["color"] or r["source"] == "finder"
+    }
     return {
         "rating": row["rating"] if row else None,
         "notes": row["notes"] if row else None,
         "model": row["model"] if row else None,
+        # Manuelles Datum (ADR 0096) in der Genauigkeit der Eingabe.
+        "media_date": row["media_date"] if row else None,
         "updated_at": row["updated_at"] if row else None,
         "tags": tags,
+        "tag_meta": tag_meta,
         # Cover eines Songs (#165, ADR 0090): Hash des Bildes oder None.
         "cover": cover_of(conn, file_hash),
     }
@@ -201,11 +301,12 @@ def _comment_ms(at_ms: int) -> int:
 
 
 def list_comments(conn: sqlite3.Connection, file_hash: str) -> list[dict[str, Any]]:
-    """Zeitkommentare eines Items in zeitlicher Folge."""
+    """Zeitkommentare eines Items in zeitlicher Folge; ``source`` = Herkunft
+    importierter Kommentare (ADR 0098), sonst ``None``."""
     return [
         dict(r)
         for r in conn.execute(
-            """SELECT id, at_ms, text, created_at, updated_at FROM time_comments
+            """SELECT id, at_ms, text, created_at, updated_at, source FROM time_comments
                 WHERE file_hash = ? ORDER BY at_ms, id""",
             (file_hash,),
         )

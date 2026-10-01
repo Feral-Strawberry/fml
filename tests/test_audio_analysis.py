@@ -45,6 +45,28 @@ def test_parse_ebur128_summary_and_silence():
     assert aa.parse_ebur128("Conversion failed!") is None
 
 
+def test_parse_ebur128_sample_peak_gets_its_own_key():
+    """#225: ``peak=sample`` schreibt „Sample peak:“ — der Wert heißt dann
+    ``sample_peak``, damit Anzeige und Angleich die Art erkennen."""
+    sample = SUMMARY.replace("True peak:", "Sample peak:")
+    assert aa.parse_ebur128(sample) == {"integrated": -14.2, "lra": 5.3, "sample_peak": -0.1}
+
+
+def test_filter_graph_peak_kind():
+    assert "ebur128=peak=true:" in aa._filter_graph()
+    assert "ebur128=peak=sample:" in aa._filter_graph(true_peak=False)
+
+
+def test_config_true_peak_default_on_windows_preset_off():
+    import tomllib
+    from feral.config import audio_true_peak
+    assert audio_true_peak({}) is True
+    assert audio_true_peak({"audio": {"true_peak": False}}) is False
+    repo = Path(__file__).resolve().parent.parent
+    example = tomllib.loads((repo / "config.example.toml").read_text(encoding="utf-8"))
+    assert example["audio"]["true_peak"] is True
+
+
 def test_buckets_stream_across_chunk_boundaries():
     """Min/Max je Band, egal wie ffmpeg die Bytes zerstückelt."""
     frames = aa._FINE * 3 + 10                  # drei volle + ein angebrochener Bucket
@@ -179,6 +201,7 @@ def test_warm_audio_creates_missing_and_retries_failed(tmp_path):
         assert first == {"total": 2, "created": 2, "skipped": 0, "failed": 0}
         assert not aa.proxy_path(cache, h_aiff).exists()
         assert aa.warm_audio(conn, cache)["skipped"] == 2
+        assert "true_peak" in aa.read_analysis(aa.analysis_path(cache, h_aiff))["loudness"]
         # Der Admin-Knopf gibt gescheiterte Kopien für den nächsten Abspielversuch frei.
         marker = aa.fail_marker(aa.proxy_path(cache, h_aiff))
         marker.parent.mkdir(parents=True, exist_ok=True)
@@ -190,8 +213,12 @@ def test_warm_audio_creates_missing_and_retries_failed(tmp_path):
         aa.analysis_path(cache, h_flac).unlink()
         aa.fail_marker(aa.analysis_path(cache, h_flac)).write_text("früher gescheitert")
         assert aa.warm_audio(conn, cache)["created"] == 0
-        again = aa.warm_audio(conn, cache, retry_failed=True)
+        again = aa.warm_audio(conn, cache, retry_failed=True, true_peak=False)
         assert again["created"] == 1 and not aa.fail_marker(aa.analysis_path(cache, h_flac)).exists()
+        # Neu analysiert mit Sample Peak (#225); die vorhandene behält True Peak.
+        loud = aa.read_analysis(aa.analysis_path(cache, h_flac))["loudness"]
+        assert "sample_peak" in loud and "true_peak" not in loud
+        assert "true_peak" in aa.read_analysis(aa.analysis_path(cache, h_aiff))["loudness"]
     finally:
         conn.close()
 
@@ -254,6 +281,25 @@ def test_analysis_endpoint_202_then_200_and_preview_proxy(tmp_path):
             assert Path(r.path).read_bytes()[:4] == b"fLaC"
         r = preview(h_flac, native=None)              # FLAC → Original
         assert r.media_type == "audio/flac" and Path(r.path) == tmp_path / "c.flac"
+    finally:
+        app.state.engine.shutdown()
+        app.state.thumb_pool.shutdown()
+
+
+@needs_ffmpeg
+def test_analysis_queues_behind_tiles_in_the_pool(tmp_path):
+    """Analysen beim Blättern reihen sich hinter Kacheln ein (ADR 0093)."""
+    from feral.web.app import create_app
+
+    db = tmp_path / "t.sqlite"
+    h = _catalog(db, _tone(tmp_path / "a.flac"))
+    app = create_app(db, thumb_cache=tmp_path / "thumbs", audio_cache=tmp_path / "audio")
+    seen = []
+    app.state.thumb_pool.submit_call = (
+        lambda key, fn, *args, priority=0, **kw: seen.append((key, priority)))
+    try:
+        assert _endpoint(app, "/api/audio/analysis/{file_hash}")(h).status_code == 202
+        assert seen == [(f".json:{h}", 1)]
     finally:
         app.state.engine.shutdown()
         app.state.thumb_pool.shutdown()

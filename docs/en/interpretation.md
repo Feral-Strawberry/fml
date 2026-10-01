@@ -66,6 +66,8 @@ In the [web GUI](gui.md) the search understands two forms:
 | `claim_generator`, `software_agent` | exact raw strings from the C2PA manifest (e.g. `DALL-E/3.0 c2pa-rs/0.28.4`, `GPT-4o`, `Adobe Firefly 1.0`) - lets you tell engines apart as soon as the metadata allows it |
 | `video_codec`, `video_profile`, `pixel_format` | codec, profile and pixel format of the first video stream as ffprobe names them (`prores` / `HQ` / `yuv422p10le`; `hevc` / `Main 10`; `h264` / `High` / `yuv420p`); short form in the search field: `codec: prores` (see [below](#video-codec-and-playability)) |
 | `lyrics`, `title` | lyrics and title tag of a music file (the lyrics are part of the full-text search) |
+| `lyrics_synced`, `song_sections` | lyrics with timings (start and end in milliseconds per line) and the section marks derived from them (`[Chorus]`, `[Verse]` …), from a subtitle track, ID3 `SYLT` or LRC in the lyrics tag; see [Audio](audio.md#what-fml-reads-from-music) |
+| `artist`, `album_artist`, `album`, `track`, `disc`, `year`, `genre` | music collection from the tags: artist, album artist, album, track and disc number, year, genre; see [Audio](audio.md#music-collection-artist-album-genre) |
 | `song_id`, `parent_id`, `relation` | song ID at the service (Suno), parent song and relationship (`extend`, `cover`, `remaster`, `edit` …), as far as the file names them |
 | `bpm`, `key` | tempo and musical key |
 | `audio_codec`, `sample_rate`, `channels`, `bit_depth` | technical data of the first audio track as ffprobe names it (`flac` / `48000` / `2` / `24`) |

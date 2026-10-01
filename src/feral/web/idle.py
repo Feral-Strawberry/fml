@@ -25,7 +25,12 @@ MIN_IDLE_SECONDS = 120.0
 
 
 def is_busy(status: dict[str, Any]) -> bool:
-    """Läuft eine Aufgabe oder wartet eine? (wie ``isBusy`` in status.js)"""
+    """Läuft eine Aufgabe oder wartet eine? (wie ``isBusy`` in status.js)
+    Eine pausierte Schlange zählt als Leerlauf (ADR 0093) — sonst beendete
+    sich das Windows-Paket nie; sie ist gesichert und läuft beim nächsten
+    Start (weiter pausiert) wieder an."""
+    if status.get("paused") and not status.get("running"):
+        return False
     return bool(status.get("running")) or int(status.get("queue_pending") or 0) > 0
 
 

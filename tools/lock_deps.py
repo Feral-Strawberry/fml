@@ -196,7 +196,9 @@ def resolve(direct: dict[str, Entry], index: Index, *, exclude: set[str] = froze
             specs[child] = specs.get(child, SpecifierSet()) & req.specifier
             if child not in entries:
                 version = installed(req.name) or index.newest(req.name, specs[child])
-                entries[child] = Entry(req.name, version)
+                # normalized spelling: dependents write typing_extensions and
+                # typing-extensions; the lock must not depend on who is read first
+                entries[child] = Entry(child, version)
                 envs_of[child], markers_of[child] = set(), set()
             entries[child].via.add(entry.name)
             new = hit - envs_of[child]

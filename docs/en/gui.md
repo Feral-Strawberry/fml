@@ -39,7 +39,8 @@ the left (two views, one search, see [Audio](audio.md#audio-view)).
 Search box (center), right next to it the **sort button** and
 the **density S/M/L** (the bar below the search belongs to the chips), activity
 indicator (pulses while a scan/maintenance runs - a link to the admin
-page), **dark/light switch** (moon/sun; the same choice applies in the
+page), the **power** (bolt = normal, leaf = quiet) and **pause** ("Zz") buttons
+for background tasks (see [Admin](admin.md#background-power-and-pause)), **dark/light switch** (moon/sun; the same choice applies in the
 admin), admin button (a real link to `/admin`: click opens the admin,
 middle-click the admin in a second tab). If an
 **instance name** is set in the configuration, it appears here as a
@@ -61,7 +62,9 @@ languages (ADR 0054). The search grammar additionally
 understands **English aliases** for its German remnants: `file:` =
 `datei:`, `location:` = `fundort:`, `portrait`/`square`/`landscape` =
 `hochformat`/`quadratisch`/`querformat`, `-asc`/`-desc` = `-auf`/`-ab`,
-`external` = `extern` and `unknown` = `unbekannt`. Both spellings are
+`external` = `extern`, `unknown` = `unbekannt`, `type:` = `typ:` (with
+`image` = `bild`), `duration:` = `dauer:`, `generator:` = `tool:`,
+`codec:` = `video_codec:` and `albumartist:` = `interpret:`. Both spellings are
 always understood, whatever language is set; **canonical** (in chips,
 saved searches and serialized expressions) remains the existing spelling
 — saved smart folders stay valid untouched. All
@@ -87,11 +90,11 @@ model list below count in context), **By model** - including **"(unknown
 model)"** for media without an interpreted model field (Midjourney,
 Gemini, ChatGPT, …); WAN 2.2 two-stage checkpoints (high/low noise)
 appear as ONE entry, the tooltip names both raw names and clicking
-filters on both -, **By year** (creation date; the caret before the year
-unfolds the months - legacy collections get their date via "Re-scan all
-locations"), **By LoRA** (the LoRAs used during generation, most used first;
+filters on both -, **By LoRA** (the LoRAs used during generation, most used first;
 in the long lists Generator, Model and LoRA, rows with hits sit on top while
-rows empty in context are dimmed below a divider "no hits with this filter · 106 models" - without an active chip that divider does not appear).
+rows empty in context are dimmed below a divider "no hits with this filter · 106 models" - without an active chip that divider does not appear),
+**By year** (creation date; the caret before the year unfolds the months -
+legacy collections get their date via "Re-scan all locations").
 Below sits the **"More criteria"** block (collapsed by default, a click on
 its heading unfolds it; fml remembers the state per browser) with
 **By file type** (PNG, WEBP, video containers, …), **By format**
@@ -122,9 +125,9 @@ hold the key now - or type it into the search bar (`tool: google |
 openai`). The "+ criterion" popover and the typing help still add. The
 hint also sits as a tooltip on every group heading and every row - with
 the key of your system (⌘ on the Mac, Ctrl otherwise). And the first time
-a click replaces an existing selection, a short line appears below the
-group: "Selection replaced · ⌘-click adds (OR)" - at most three times,
-then the rule is learned.
+a click replaces an existing selection, a line appears for a few seconds
+right below the clicked row: "Selection replaced · ⌘-click adds (OR)" -
+at most three times, then the rule is learned.
 
 The counters **filter along**: as soon as chips are active, every group
 shows how many hits a click would bring **in the current context** -
@@ -151,7 +154,8 @@ leads straight back to the last clicked image. The one exception is a
 click on **"All media"** in the sidebar: that is the reset key, afterwards
 the gallery sits at the top with nothing selected.
 The **sort button** (Added / Created / Filename / File size / Container /
-Rating - unrated and undated items last) and the **density S/M/L** sit up
+Rating / Duration - unrated and undated items last; in the audio view
+additionally Album and Manual) and the **density S/M/L** sit up
 in the top bar next to the search box. The sort button opens a small
 menu; a **second click on the active entry flips the direction** (arrow
 ↑/↓ on the button and the chip). The sort order is part of the search
@@ -169,7 +173,7 @@ right), **Space** opens the loupe (fast browsing), **double-click or
 Enter** the single view (zoom + metadata); **arrow keys** move the
 selection in the overview as well (←/→ one medium, ↑/↓ one row).
 
-**Right - detail panel:** always visible. Top to bottom: preview (click →
+**Right - detail panel:** top to bottom: preview (click →
 loupe) · filename, type, format, size, **rating dots** · **CURATED**
 (your tags and notes) · **GENERATION** (the interpreted fields: model,
 sampler/steps/CFG, seed with click-to-copy, prompt/negative - with a
@@ -185,12 +189,13 @@ chips loosens the search) · **WORKFLOW** (for ComfyUI media: "View node
 graph" and "load as .json"; for A1111 images with the badge "ComfyUI ·
 generated" - see workflow view - plus **"Copy A1111 infotext"**: the
 unmodified infotext for PNG Info / txt2img in A1111 and Forge) ·
-collapsible **raw metadata** (layer 1, byte-true with source label) and
-**locations** · **FILE** (format, size, **Created** - the creation date
+**FILE** (format, size, **Created** - the creation date
 with time of day (UTC) that "By year" groups by and that the "Created"
 sort orders to the second; "no date" means: no plausible date found,
 date without a time means: the time could no longer be determined
-reliably for legacy entries -, Added, hash). Media without recognized generation data show a note - the
+reliably for legacy entries -, Added, hash) · at the very bottom,
+collapsible **raw metadata** (layer 1, byte-true with source label) and
+**locations**. Media without recognized generation data show a note - the
 raw layer always stays inspectable.
 
 **Panel widths:** the dividers left and right of the gallery can be
@@ -198,12 +203,29 @@ raw layer always stays inspectable.
 for landscape images); double-clicking a divider restores the default.
 The choice is remembered.
 
+**Collapsing sections:** clicking the heading of a section (CURATED,
+GENERATION, WORKFLOW, time comments, FILE) collapses or expands it (▾/▸).
+Collapsed, only the heading remains, for GENERATION with the model as a
+short summary. The choice applies to all media and survives restarts,
+just like the sidebar on the left.
+
+**Hiding the panel:** at the far right edge of the window there is a
+narrow strip with an arrow at half height - a plain toggle that always
+stays in the same place. Clicking it (or the **`P`** key) hides the whole
+panel (arrow **›**) or brings it back (arrow **‹**). The gallery
+uses the freed width right away for more columns and the selection stays
+as it is - handy on small monitors, e.g. when marking media to reject or
+for bulk actions. This state is remembered too. The loupe and the single
+view show their metadata as always.
+
 ## Single view (zoom + metadata)
 
 **Double-click or Enter** opens the selected medium in the single view -
 the working view with real zoom: steps **fit / max 100 % / 50 / 100 / 200 %**, the
 **mouse wheel** zooms continuously, **double-click in the image** jumps
-between fit and 100 %, dragging pans. The percentages mean **real
+between fit and 100 %, dragging pans. A small **navigator** shows the
+whole image with the visible section as a frame; clicking or dragging in
+it moves the section. The percentages mean **real
 pixels**: at 100 % one image pixel equals one screen pixel - regardless
 of OS scaling (Windows 150 %, Retina Macs) and browser zoom. That makes
 100 % pixel-sharp everywhere and the reliable step for judging details
@@ -268,8 +290,9 @@ and reveals B with a **wipe edge**, like in ComfyUI edit workflows.
 
 **Open:** select exactly two media (Ctrl/Cmd-click or Shift-click), then
 **key `C`** or the button **⇆ Compare** in the gallery header (it only
-appears with exactly two selected media). The first selected image is
-**A** (left), the second is **B** (right).
+appears with exactly two selected media). With Ctrl/Cmd-click the first
+selected image is **A** (left), the second is **B** (right); after a
+Shift-click it is the other way round. **Tab** swaps the sides.
 
 - **Wipe edge:** drag anywhere in the image with the mouse or a finger;
   **`←`/`→`** move it in small steps (coarse with Shift), **`Home`/`End`**
@@ -288,7 +311,8 @@ appears with exactly two selected media). The first selected image is
   Tab to bring the other image to A. After rejecting, the compare view
   closes.
 - **Different dimensions:** both images are matched to the width of A,
-  and the hint "Dimensions differ" appears at the top right.
+  and the hint "Dimensions differ · matched by width" appears at the top
+  next to the title.
 - **Esc, Enter or ✕** lead back to the gallery; the two-item selection
   stays.
 
@@ -367,7 +391,24 @@ extracted from the files.
 - **Tags:** type into the panel under CURATED and hit Enter - existing
   tags are suggested while typing (your vocabulary). ✕ on a tag detaches
   it from the medium; it stays in the vocabulary.
+- **Finder tags (macOS):** the colored labels from the Finder become
+  regular tags on import and scan, plain colors like "Red" too. A tag
+  with a color shows its dot on the tile, in the list row and in the
+  panel; the "Finder" mark on the tag shows where it came from. fml only
+  reads and never writes back to the Finder. Tags added in the Finder
+  later are picked up by **Admin → Maintenance → Re-scan all locations**;
+  tags removed in the Finder stay in fml (✕ removes them).
 - **Notes:** free text in the panel; saves when leaving the field.
+- **Date by hand:** field under CURATED, for all media types. Meant for
+  files whose own date is wrong (freshly ripped old CDs, scanned photos):
+  `1997`, `1997-05` or `1997-05-12`, also `12.05.1997`. The date holds
+  **exactly as precise as it was entered** — `1997` shows as "1997",
+  counts toward the year 1997 in the sidebar and matches `year: 1997`. It
+  **always wins** over metadata and file stamps and survives every
+  re-scan. The file block then shows "✎ by hand" next to "Created".
+  Clearing the field brings back the derived date. Applies to the whole
+  selection; the file itself stays unchanged, including its place in the
+  library.
 - **Rejecting (replaces deleting):** key **Del** on the selection (also
   multi-select). A dialog names the count and explains the consequences;
   after confirmation the medium disappears from the library (including
@@ -388,8 +429,9 @@ extracted from the files.
 For "narrow down this search, then tag/rate ALL hits" there is the
 **⚡ Bulk action** button on the right of the header above the gallery
 (next to "Reset filters"). It opens a dialog that shows what will be hit
-(the chips + hit count) and offers five actions - whether 50 or 20,000
-hits:
+(the chips + hit count) and offers six actions - whether 50 or 20,000
+hits (in the audio view "Time comments → Export" is added, see
+[Audio](audio.md#exchanging-comments-with-another-fml)):
 
 - **Base rating** (1-5 ★): fills **only unrated items** - existing
   ratings stay untouched. Nothing is destroyed.
@@ -397,15 +439,20 @@ hits:
   skipped - the summary honestly says how many).
 - **Set model:** like the model assignment in the panel, just for all
   hits (overwrites an existing manual model).
+- **Date:** like the date by hand in the panel, for all hits — a
+  whole CD at once (overwrites an existing manual date; resetting works
+  per medium in the panel).
 - **Append note:** the text is **appended** to existing notes (new
   line), never overwritten.
 - **Reject:** remove all hits from the catalog + block the hashes (like
   Del, see above - the files stay untouched). Deliberately also affects
   rated items and runs **alone**, not combined with other actions.
 
-If a multi-select selection exists, the dialog asks whether the action
-should apply to the **selection (N)** or to **all hits (M)**. Without
-chips it honestly applies to the whole library - the number is displayed
+**Mind the selection:** if something is selected when the dialog opens,
+even just a single clicked tile, the dialog offers **selection (N)** and
+**all hits (M)** at the top, and **selection is preselected**. If you mean
+the whole search result, switch it there. Without chips the second option
+is called "the whole library" - the number is displayed
 large in the dialog. The apply button asks once more on the first click
 ("Really apply to …?"); the second click executes. Afterwards the dialog
 shows a summary, and grid + sidebar refresh themselves.
@@ -545,7 +592,7 @@ year: 2022 | unbekannt sort: created
 (`rating>=`, `width>=` …) form ranges via `>=`/`<=` pairs. The directive
 **`sort: <key>`** (once per expression) sets the sort order and is stored
 with the search: `added`, `created` (creation date), `size`, `name`,
-`container`, `rating`, `duration` (audio and video). A suffix flips the direction: `sort: created-auf`
+`container`, `rating`, `duration` (audio and video), in the audio view only `album` and `manual` (your own order of a saved search, see [Audio](audio.md#your-own-order-of-a-saved-search)). A suffix flips the direction: `sort: created-auf`
 (oldest first), `sort: name-ab` (Z–A) - in English `-asc`/`-desc`
 (`sort: created-asc`). Without a suffix the sensible default direction
 applies (newest/largest/best first, names A–Z); unrated and undated items
@@ -626,7 +673,7 @@ out", Elo scores): [rankings.md](rankings.md).
 The button top right leads straight into the **admin** (a real link to
 `/admin`: bookmarks, middle-click and right-click → new tab). The former
 quick menu with maintenance actions is gone; re-scan, re-interpret and
-clear thumbnail cache live under Admin → Maintenance, dark/light sits as a
+deleting the caches ("Cache" card) live under Admin → Maintenance, dark/light sits as a
 moon/sun button next to the language switch.
 
 Since ADR 0074 the **admin** is a **page of its own** under `/admin` with a
@@ -653,18 +700,23 @@ changed are refilled.
 | `Space` | open/close the loupe |
 | `Enter` / double-click | open/close the single view |
 | `C` | open the A/B compare view for two selected images |
+| `P` | hide/show the right panel |
 | `+` / `-` | zoom (single view, compare) |
 | `1`–`5` / `0` | rate / clear rating (toggle) |
-| `←` / `→` | page - in overview and loupe; wipe edge in compare |
+| `←` / `→` | page - in overview, loupe and single view; wipe edge in compare (coarse with Shift) |
 | `↑` / `↓` | one row up/down (overview) |
-| `Del` | reject the selection (item out + block, file stays) |
-| `Home` / `End` | first/last medium (loupe); wipe edge fully left/right (compare) |
+| `Del` | reject the selection (item out + block, file stays); in compare: reject side A. On Mac keyboards without a Del key: fn+⌫ |
+| `Home` / `End` | first/last medium (loupe, single view); wipe edge fully left/right (compare) |
 | `Tab` / `Space` | compare: swap A and B / wipe → A only → B only |
-| `Esc` | close the topmost dialog, else the open overlay (loupe, single view) - otherwise: **Reset filters** |
+| `Esc` | close the topmost dialog, else the open overlay (loupe, single view, compare) or menu - otherwise: **Reset filters**. In the search box: clears the input first |
+
+The keys of the audio view (Space plays, `K`, `C`, `Alt+↑/↓`) are listed
+under [Audio](audio.md#audio-view), those of the rankings under
+[Rankings](rankings.md).
 
 ### Dialogs and hanging requests
 
-Dialogs (ranking, save, bulk action, reject - in the admin only folder
+Dialogs (ranking, save, bulk action, reject, choose cover, help - in the admin only folder
 picker and confirmation) may stack: the folder picker opens on top of the
 page or a confirmation, and cancelling keeps what you had typed. `Esc` always
 closes only the topmost dialog. Switching the view (loupe, single view,
@@ -715,7 +767,7 @@ affected files ([interpretation.md](interpretation.md#video-codec-and-playabilit
   H.264 export helps. Which codecs are in your own catalog is shown by
   `codec: prores` in the search field or the
   [diagnostic command](scanning.md#diagnostics-video-codecs-in-the-catalog);
-  on ingest the issue appears under Admin → Issues (kind `playback`).
+  on ingest the issue appears under Admin → Issues ("playback" card).
 - **TIFF, PSD and Kodak Photo CD** are not displayed natively by any browser — gallery,
   loupe and single view render a JPEG server-side for them (the original
   stays untouched), Photo CD in its largest size (3072×2048). PSD uses the embedded composite. PSDs saved

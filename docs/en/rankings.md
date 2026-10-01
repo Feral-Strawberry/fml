@@ -122,7 +122,7 @@ are the most informative).
 Every **duel** is stored (who won against whom, when) — that is the raw
 truth and is never modified. The **Elo score** (start 1000, K-factor 32)
 is merely derived from it and reproducible at any time: **Admin →
-Maintenance → "Recompute ranking scores"** replays the entire duel log
+Rankings → "Recompute ranking scores"** replays the entire duel log
 deterministically (re-scan principle); whether an item is out is derived
 from the log as well ("Both out" sets it, "Back in" lifts it, the last
 line counts). If an item disappears from the

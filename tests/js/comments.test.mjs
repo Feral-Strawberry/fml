@@ -37,7 +37,7 @@ const { emit } = await import("./bus.mjs");
 const song = (n, dur, name, comments) => item(n, { media_kind: "audio", container: "mp3", width: null,
   height: null, duration: dur, name, tool: "suno", ...(comments ? { comments } : {}) });
 const songs = [
-  song(1, 200, "Regenzeit A.mp3", [{ id: 1, at_ms: 10_000, text: "Intro" }, { id: 2, at_ms: 100_000, text: "Chorus" }]),
+  song(1, 200, "Regenzeit A.mp3", [{ id: 1, at_ms: 10_000, text: "Intro", source: "Sänger" }, { id: 2, at_ms: 100_000, text: "Chorus" }]),
   song(2, 100, "Regenzeit B.mp3"),
 ];
 const grid = () => document.getElementById("grid");
@@ -103,6 +103,8 @@ test("Hover über einem Pin zeigt Stelle und Text", () => {
   const tip = document.getElementById("pintip");
   assert.equal(tip.hidden, false);
   assert.equal(tip.textContent, "1:40Chorus");
+  pins(1)[0].dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+  assert.equal(tip.textContent, "0:10SängerIntro");
   row(1).querySelector(".rname").dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
   assert.equal(tip.hidden, true);
 });
@@ -118,7 +120,7 @@ test("Klick auf einen Pin spielt genau ab der Kommentarstelle", async () => {
   player.repaint();
   await flush();
   assert.deepEqual(shown(), ["1:40Chorus"]);
-  for (const [t, want] of [[98.9, []], [99, ["1:40Chorus"]], [104.9, ["1:40Chorus"]], [105, []], [9.5, ["0:10Intro"]]]) {
+  for (const [t, want] of [[98.9, []], [99, ["1:40Chorus"]], [104.9, ["1:40Chorus"]], [105, []], [9.5, ["0:10SängerIntro"]]]) {
     audio.currentTime = t;
     player.repaint();
     await flush();
@@ -170,6 +172,9 @@ test("Detailpanel: Abschnitt listet, Klick springt, ✕ löscht", async () => {
   assert.ok(sec, "Abschnitt Zeitkommentare");
   const rows = sec.querySelectorAll(".com");
   assert.deepEqual(rows.map((r) => r.querySelector(".t").textContent), ["0:10", "1:40"]);
+  // Herkunft importierter Kommentare (#228) als Etikett, nur wo es eine gibt.
+  assert.equal(rows[0].querySelector(".csrc").textContent, "Sänger");
+  assert.equal(rows[1].querySelector(".csrc"), null);
   click(rows[0].querySelector(".ctext"));
   await flush();
   assert.equal(player.positionOf(hashOf(1)), 10);

@@ -97,7 +97,12 @@ function markup(c) {
   ].join(""));
   const perf = card(STRINGS.cfgPerf, "", [
     line(STRINGS.cfgThumbSize, false, `${number("thumbnail_size", c.thumbnail_size, 16, 2048)} px`, STRINGS.cfgThumbHint),
-    line(STRINGS.cfgWorkers, false, number("thumbnail_workers", c.thumbnail_workers ?? 0, 0, 128), STRINGS.cfgWorkersHint),
+    // Prozesszahl wirkt seit ADR 0093 ohne Neustart (Pools werden umgebaut).
+    line(STRINGS.cfgWorkers, true, number("thumbnail_workers", c.thumbnail_workers ?? 0, 0, 128), STRINGS.cfgWorkersHint),
+    // Startwert des Galerie-Schalters (ADR 0093) — keine zweite Bedienung.
+    line(STRINGS.cfgBackground, true, select("background", c.background || "normal", [
+      ["normal", STRINGS.bg_normal], ["quiet", STRINGS.bg_quiet],
+    ]), STRINGS.cfgBackgroundHint),
     line(STRINGS.cfgVollgas, true, check("vollgas", c.thumbnail_low_priority === false, STRINGS.cfgVollgasOn), STRINGS.cfgVollgasHint),
     line(STRINGS.cfgSlow, true,
       `<select id="cfgSlowProfile">${SLOW_PROFILES.map(([ms, key]) =>
@@ -201,6 +206,7 @@ function payload(v) {
     import_formate_ausschliessen: v.import_formate.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
     thumbnail_workers: parseInt(v.thumbnail_workers, 10) || 0,
     thumbnail_low_priority: !v.vollgas,
+    background: v.background,
     show_dupes: v.show_dupes,
     model_sort_order: v.model_sort_order,
     // Instanz (I5): 0/leer = Eintrag raus, zurück zum Standard.

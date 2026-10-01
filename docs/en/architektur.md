@@ -29,6 +29,14 @@ videos never block a gallery request. The watcher checks every watch
 folder and only queues a file once it has stayed unchanged for a quiet
 time.
 
+The queue is also kept in the database and survives a restart: on
+shutdown the running task stops at the next file, on start it picks up
+there. Two buttons in the gallery act on the worker immediately:
+**Power** (Normal or Quiet: one process, lowest priority) and **Pause**.
+New files from a watch folder queue up ahead of waiting long-running
+tasks; a running task with a file list hands over at the next file for
+that and continues afterwards.
+
 ## How a file gets into the catalog
 
 ![Intake chain: source, detect, import rules, SHA-256, optional copy and verify, catalog, optional empty source. Cataloging stores layer 1 byte-exact in raw_metadata, layer 2 interprets fields from it, both end up in the full-text index. Re-interpreting runs over raw_metadata without file access.](../img/architektur-aufnahme.en.svg)

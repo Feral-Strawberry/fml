@@ -33,11 +33,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from .db.manual import add_finder_tags
 from .db.store import media_kind_for, now_iso, store_extraction, store_interpretations
 from .extract import container
 from .extract.container import ExtractorNotImplementedError, UnknownContainerError
 from .extract.types import ContainerExtraction, RawMetadataItem
+from .finder import copy_xattrs, read_finder_tags
 from .hashing import hash_file
+from .interpret import audio as audio_tags
 from .interpret import interpret_items, suno
 from .scan import note_playability
 
@@ -56,6 +59,16 @@ STATE_DIRS = {
 # Import-Regel (ausgefiltert), siehe ADR 0075.
 UNKNOWN_DATE_DIR = "_unbekanntes-datum"
 DEFAULT_MIN_DATE = datetime(2015, 1, 1, tzinfo=timezone.utc)
+# Datumsquelle „Jahr aus den Musik-Tags" (#220, ADR 0096): nur Audio, nach
+# eingebetteten Daten und vor dem Dateistempel; gespeichert mit Genauigkeit
+# Jahr (``media_date = '1987'``).
+TAG_YEAR = "tagjahr"
+# Quellen, die ein gespeichertes Datum überschreiben (der Dateistempel füllt
+# nur Lücken).
+_OVERWRITING = ("metadaten", TAG_YEAR)
+# Items mit manuellem Datum (ADR 0096) — keine Kaskade fasst sie an.
+_NOT_MANUAL = ("file_hash NOT IN (SELECT file_hash FROM annotations"
+               " WHERE media_date IS NOT NULL)")
 
 # Systemdateien, die einen Ordner nicht „belegt“ machen (ADR 0033): macOS/
 # Windows streuen sie überall hin — ein Ordner, der nur noch solche Dateien
@@ -192,7 +205,8 @@ def determine_date(
     min_date: datetime = DEFAULT_MIN_DATE,
     now: datetime | None = None,
 ) -> tuple[datetime | None, str]:
-    """Erstelldatum nach ADR-0019-Kaskade: Metadaten → Dateisystem → unplausibel.
+    """Erstelldatum nach ADR-0019-Kaskade: Metadaten → (nur Audio: Tag-Jahr,
+    ADR 0096) → Dateisystem → unplausibel.
 
     Liefert ``(datum, quelle)``; ``(None, "unplausibel")``, wenn kein Datum im
     Plausibilitätsfenster liegt. Beim Import/Scan ist das seit Issue #113
@@ -207,6 +221,12 @@ def determine_date(
     embedded = _parse_embedded_date(extraction)
     if embedded is not None and plausible(embedded):
         return embedded, "metadaten"
+
+    # Musik (#220): das Jahr aus den Tags, meist das Erscheinungsjahr.
+    if (extraction.media_kind or media_kind_for(extraction.container)) == "audio":
+        year = audio_tags.tag_year(extraction.items)
+        if year is not None and plausible(tag := datetime(year, 1, 1, tzinfo=timezone.utc)):
+            return tag, TAG_YEAR
 
     fs_dt = _fs_stamp(stat)
     if plausible(fs_dt):
@@ -223,18 +243,23 @@ def set_media_date(
 
     Metadaten-Daten überschreiben, Dateisystem-Daten füllen nur NULL auf —
     Kopien/Backups verfälschen mtimes, eingebettete Daten nicht. ``None``
-    (unplausibel) lässt die Spalte unangetastet.
+    (unplausibel) lässt die Spalte unangetastet. Das Tag-Jahr (``TAG_YEAR``)
+    überschreibt wie Metadaten, gespeichert als ``YYYY`` (ADR 0096). Ein
+    manuell gesetztes Datum gewinnt immer: solche Items fasst keine
+    Kaskade an.
     """
     if when is None:
         return
-    value = f"{when:%Y-%m-%d %H:%M:%S}"
-    if source == "metadaten":
+    value = f"{when:%Y}" if source == TAG_YEAR else f"{when:%Y-%m-%d %H:%M:%S}"
+    if source in _OVERWRITING:
         conn.execute(
-            "UPDATE items SET media_date = ? WHERE file_hash = ?", (value, file_hash)
+            f"UPDATE items SET media_date = ? WHERE file_hash = ? AND {_NOT_MANUAL}",
+            (value, file_hash),
         )
     else:
         conn.execute(
-            "UPDATE items SET media_date = ? WHERE file_hash = ? AND media_date IS NULL",
+            f"""UPDATE items SET media_date = ?
+                 WHERE file_hash = ? AND media_date IS NULL AND {_NOT_MANUAL}""",
             (value, file_hash),
         )
 
@@ -276,6 +301,18 @@ def _date_candidate(
         parsed = _parse_date_text(hit["value_text"])
         if parsed is not None and min_date <= parsed <= upper:
             return parsed, "metadaten"
+    # Tag-Jahr eines Songs (#220) aus Schicht 2 — der Audio-Parser hat es
+    # schon aus den gespeicherten Roh-Tags gelesen.
+    hit = conn.execute(
+        """SELECT m.value_text FROM interpreted_metadata m
+             JOIN items i ON i.file_hash = m.file_hash
+            WHERE m.file_hash = ? AND m.field = 'year' AND i.media_kind = 'audio'
+            ORDER BY m.ordinal LIMIT 1""", (file_hash,),
+    ).fetchone()
+    if hit is not None and hit[0].isdigit():
+        tag = datetime(int(hit[0]), 1, 1, tzinfo=timezone.utc)
+        if min_date <= tag <= upper:
+            return tag, TAG_YEAR
     for (path,) in conn.execute(
         "SELECT path FROM file_locations WHERE file_hash = ? ORDER BY id",
         (file_hash,),
@@ -311,6 +348,19 @@ def backfill_pending(
     return False
 
 
+def derived_media_date(
+    conn: sqlite3.Connection, file_hash: str, *, min_date: datetime = DEFAULT_MIN_DATE,
+) -> str | None:
+    """Das abgeleitete Datum eines Items, wie die Kaskade es heute bestimmt
+    (``items.media_date``-Format) — Rückweg beim Leeren eines manuellen
+    Datums (ADR 0096). ``None`` = kein plausibles Datum."""
+    upper = datetime.now(timezone.utc) + timedelta(days=1)
+    when, source = _date_candidate(conn, file_hash, min_date=min_date, upper=upper)
+    if when is None:
+        return None
+    return f"{when:%Y}" if source == TAG_YEAR else f"{when:%Y-%m-%d %H:%M:%S}"
+
+
 def backfill_media_dates(
     conn: sqlite3.Connection,
     *,
@@ -340,8 +390,8 @@ def backfill_media_dates(
     """
     upper = datetime.now(timezone.utc) + timedelta(days=1)
     rows = conn.execute(
-        """SELECT file_hash, media_date FROM items
-            WHERE media_date IS NULL OR length(media_date) = 10"""
+        f"""SELECT file_hash, media_date FROM items
+             WHERE (media_date IS NULL OR length(media_date) = 10) AND {_NOT_MANUAL}"""
     ).fetchall()
     total, dated, undatable = len(rows), 0, 0
     for index, row in enumerate(rows, start=1):
@@ -350,7 +400,7 @@ def backfill_media_dates(
         if when is None:
             if row["media_date"] is None:
                 undatable += 1
-        elif row["media_date"] is None or source == "metadaten":
+        elif row["media_date"] is None or source in _OVERWRITING:
             set_media_date(conn, file_hash, when, source)
             dated += 1
         else:
@@ -469,6 +519,9 @@ class _Prepared:
     known_in_bestand: bool = False
     when: datetime | None = None         # Datums-Kaskade (ADR 0019), in Stage 1
     date_source: str = "unplausibel"
+    # Finder-Tags der QUELLE (ADR 0097) — in Stage 1 gelesen, also bevor der
+    # Verschiebe-Modus die Quelle löscht; ohne macOS immer leer.
+    finder_tags: list[tuple[str, int]] = field(default_factory=list)
 
 
 def _prepare(
@@ -522,7 +575,8 @@ def _prepare(
     existing, known = _bestand_locations(conn, file_hash, target_root)
     return _Prepared(source, extraction=extraction, file_hash=file_hash,
                      stat=stat, healthy_bestand=existing, known_in_bestand=known,
-                     when=when, date_source=date_source)
+                     when=when, date_source=date_source,
+                     finder_tags=read_finder_tags(source))
 
 
 def _finish(
@@ -594,6 +648,9 @@ def _finish(
         Path(pending[file_hash]) if file_hash in pending else None
     )
     if existing is not None:
+        # Die Tags hängen am Hash (ADR 0097): auch eine Dublette bringt ihre
+        # Finder-Tags mit, sonst wären sie nach „verschieben" verloren.
+        add_finder_tags(conn, file_hash, prep.finder_tags, ts)
         sort_out(source, "dublette")
         _log(conn, ts=ts, source=source, action="dublette",
              detail=f"Bestand: {existing}", file_hash=file_hash)
@@ -610,6 +667,7 @@ def _finish(
     destination = _free_name(target_dir, source.name, matches_hash=file_hash)
     if destination is None:
         # Hash-gleiche Datei liegt (unkatalogisiert) schon im Zielordner.
+        add_finder_tags(conn, file_hash, prep.finder_tags, ts)
         sort_out(source, "dublette")
         _log(conn, ts=ts, source=source, action="dublette",
              detail="lag bereits (unkatalogisiert) im Bestand", file_hash=file_hash)
@@ -619,6 +677,10 @@ def _finish(
         shutil.copy2(source, temp)   # copy2: Zeitstempel bleiben erhalten
         if hash_file(temp) != file_hash:
             raise OSError("Hash der Kopie stimmt nicht mit der Quelle überein")
+        # copy2 überträgt unter macOS keine erweiterten Attribute (#221):
+        # Finder-Tags & Co. separat nachziehen. Ein Fehlschlag bricht den
+        # Import nicht ab (Inhalt ist verifiziert), er steht im Import-Log.
+        xattr_error = copy_xattrs(source, temp)
         temp.replace(destination)
     except OSError as exc:
         temp.unlink(missing_ok=True)
@@ -647,11 +709,15 @@ def _finish(
     # Nicht abspielbare Codecs (ProRes & Co.) beim Import sichtbar machen —
     # Problem am Ziel-Fundort, derselbe Weg wie beim Scan (Issue #71).
     note_playability(conn, destination, interpretations)
+    add_finder_tags(conn, file_hash, prep.finder_tags, ts)   # ADR 0097
     pending[file_hash] = str(destination)
 
     action = "repariert" if prep.known_in_bestand else "importiert"
-    _log(conn, ts=ts, source=source, action=action,
-         detail=None if action == "importiert" else "Bestandskopie war kaputt/verschwunden",
+    detail = None if action == "importiert" else "Bestandskopie war kaputt/verschwunden"
+    if xattr_error:
+        detail = "; ".join(filter(None, (
+            detail, f"Dateiattribute nicht übertragen: {xattr_error}")))
+    _log(conn, ts=ts, source=source, action=action, detail=detail,
          target=destination, file_hash=file_hash, date_source=date_source)
     # „belassen": kein aufgeschobener Quell-Move — Original bleibt liegen.
     if not keep_source:
@@ -824,7 +890,15 @@ def import_folder(
 
     def handle(index: int, path: Path, prep: _Prepared) -> None:
         if progress is not None:
-            progress(path, index, total, report)
+            try:
+                progress(path, index, total, report)
+            except Exception:
+                # Halt an der Dateigrenze (Pause, Beenden; ADR 0093): den
+                # angefangenen Schub abschließen wie am Laufende. Sonst wären
+                # seine Dateien kopiert und katalogisiert, ihre Quellen aber
+                # nicht bewegt, und der nächste Lauf hielte sie für Dubletten.
+                flush()
+                raise
         try:
             action, detail, deferred = _finish(
                 conn, prep, source_root=source_root, target_root=target_root,

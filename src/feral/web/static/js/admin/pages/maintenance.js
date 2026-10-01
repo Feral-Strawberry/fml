@@ -18,17 +18,21 @@
 // der Aufräum-Karte —, „Cache zählen") oder nach passenden Aufgaben im
 // Hintergrund (dann „wird geprüft …" und Nachfragen bis der Stand da ist);
 // die DB-Aufteilung (dbstat) ebenfalls nur auf Knopfdruck.
+// Die Karte „Cache" (#227) schlüsselt denselben gemerkten Stand nach Art auf
+// (Thumbnails, Audio-Analysen, Wiedergabekopien, Anzeigebilder) und löscht
+// je Art nach Rückfrage als Aufgabe.
 
 import { STRINGS } from "../../strings.js";
 import {
   getStats, getAdminInfo, getMaintenanceStats, getDbBreakdown,
-  getOrphans, pruneOrphans, clearThumbCache, getThumbCache, getImportRulesPreview, applyImportRules,
-  getMoveout, startMoveout, startReparse, startRescan, startIntegrityCheck,
+  getOrphans, pruneOrphans, clearCache, getThumbCache, getImportRulesPreview, applyImportRules,
+  getMoveout, startMoveout, startReparse, startRescan, startRecheckFiltered, startIntegrityCheck,
   startVacuum, startThumbWarm, startAudioWarm, startBackfillDates, startReindex,
+  previewCommentImport, importComments,
 } from "../../api.js";
 import { serverMsg } from "../../servermsg.js";
 import { lastKnownStatus } from "../../status.js";
-import { pickFolder } from "../dialogs.js";
+import { confirmDialog, pickFolder } from "../dialogs.js";
 import { progressPercent } from "../nav.js";
 import { esc, fmtBytes, fmtElapsed, fmtNum, fmtTime, pct, tpl, timing, isChecking, standNote } from "../util.js";
 
@@ -43,10 +47,10 @@ const A = (aid, t, ex, task, run, btn, accent = true) => ({ id: aid, t, ex, task
 const CARDS = () => [
   { key: "raw", title: STRINGS.mtHeaderRaw, actions: [
     A("rescan", STRINGS.maintRescan, STRINGS.maintRescanSub, "taskRescan", startRescan, STRINGS.mtEnqueue),
+    A("recheck", STRINGS.maintRecheck, STRINGS.maintRecheckSub, "taskRecheckFiltered", startRecheckFiltered, STRINGS.mtEnqueue),
   ] },
   { key: "thumbs", title: STRINGS.mtHeaderThumbs, actions: [
     A("thumbwarm", STRINGS.maintThumbWarm, STRINGS.maintThumbWarmSub, "taskThumbWarm", startThumbWarm, STRINGS.mtEnqueue),
-    A("thumbs", STRINGS.maintThumbs, STRINGS.maintThumbsSub, null, "thumbs", STRINGS.mtClear, false),
     // Audio-Modul (A4 #161): nur sichtbar, wenn das Modul an ist (load()).
     A("audiowarm", STRINGS.maintAudioWarm, STRINGS.maintAudioWarmSub, "taskAudioWarm", startAudioWarm, STRINGS.mtEnqueue),
   ] },
@@ -68,6 +72,8 @@ let info = null;             // /api/admin/info (teuer, zweite Stufe)
 let moveout = null;          // /api/admin/moveout
 let rulesPreview = null;     // /api/admin/import-rules
 let orphanPreview = null;    // /api/admin/orphans (nur auf Knopfdruck)
+let ciData = null;           // geladene Kommentar-Datei (#228), geht zweimal zum Server
+let ciPreview = null;        // letzte Vorschau dazu
 let recheck = null;          // Nachfrage-Timer, solange eine Hintergrund-Zählung läuft (#118)
 const el = (sel) => root.querySelector("#" + sel);
 
@@ -93,6 +99,11 @@ export function render(target) {
         <div class="actions">${c.actions.map(actionRow).join("")}</div>
       </div>`).join("")}
     </div>
+    <div class="row"><div class="card" id="cacheCard">
+      <div class="chead"><span class="mlabel">${STRINGS.cacheTitle}</span><span class="right" id="cacheTotal">…</span></div>
+      <div class="vdim dashhint">${STRINGS.cacheHint}</div>
+      <div id="cacheRows"><span class="vdim">…</span></div>
+    </div></div>
     <div class="row"><div class="card" id="moCard">
       <div class="chead"><span class="mlabel">${STRINGS.moTitle}</span><span class="right">${STRINGS.moTouchesFiles}</span></div>
       <div class="vdim dashhint">${STRINGS.moHint}</div>
@@ -150,6 +161,30 @@ export function render(target) {
         </div>
       </div>
     </div></div>
+    <div class="row" id="ciRow" hidden><div class="card" id="ciCard">
+      <div class="chead"><span class="mlabel">${STRINGS.ciTitle}</span><span class="right">${STRINGS.ciTwoStep}</span></div>
+      <div class="vdim dashhint">${STRINGS.ciHint}</div>
+      <div class="steps">
+        <div class="step">
+          <div class="mlabel">${STRINGS.ciStepFile}</div>
+          <input type="file" id="ciFile" accept=".json,application/json">
+          <div class="pathrow" style="margin-top:8px"><input type="text" id="ciSource" maxlength="60" placeholder="${STRINGS.ciSourcePlaceholder}"></div>
+          <div class="stephint">${STRINGS.ciSourceHint}</div>
+        </div>
+        <div class="step">
+          <div class="mlabel">${STRINGS.ciStepPreview}</div>
+          <div class="prev" id="ciPrev"><span class="vdim">${STRINGS.ciNoFile}</span></div>
+        </div>
+        <div class="step">
+          <div class="mlabel">${STRINGS.ciStepRun}</div>
+          <div class="armrow">
+            <label id="ciSongLbl" hidden><input type="checkbox" id="ciSong"> ${STRINGS.ciSongId}</label>
+            <button type="button" class="accent" id="ciGo" disabled>${STRINGS.ciGo}</button>
+          </div>
+          <div class="st" id="ciMsg"></div>
+        </div>
+      </div>
+    </div></div>
     <div class="row"><div class="card" id="prCard">
       <div class="chead"><span class="mlabel">${STRINGS.maintPrune}</span><span class="right">${STRINGS.prTouches}</span></div>
       <div class="vdim dashhint">${STRINGS.maintPruneSub}. ${STRINGS.pruneOfflineHint}</div>
@@ -189,6 +224,10 @@ export function render(target) {
   for (const r of root.querySelectorAll('input[name="prScope"]')) r.addEventListener("change", onPruneScope);
   el("prPath").addEventListener("input", resetPrunePreview);
   el("prArm").addEventListener("change", () => { el("prGo").disabled = !el("prArm").checked; });
+  ciData = null; ciPreview = null;
+  el("ciFile").addEventListener("change", loadCommentFile);
+  el("ciSource").addEventListener("input", updateCommentGo);
+  el("ciSong").addEventListener("change", updateCommentGo);
 }
 
 export async function load() {
@@ -197,6 +236,7 @@ export async function load() {
     const [st, mt] = await Promise.all([getStats(), getMaintenanceStats()]);
     stats = st;
     root.querySelector('[data-action="audiowarm"]').hidden = !st.audio;
+    el("ciRow").hidden = !st.audio;   // Zeitkommentare gibt es nur mit Audio-Modul
     renderCheap(st, mt);
   } catch (err) {
     el("mtMeter-raw").innerHTML = `<span class="warn">${esc(err.message)}</span>`;
@@ -210,7 +250,7 @@ export async function load() {
 }
 
 export function onStatus(s) { if (root && root.isConnected) applyStatus(s); }
-export function onTaskFinished() { loadInfo(); loadMoveout(); }
+export function onTaskFinished() { queuedClears.clear(); loadInfo(); loadMoveout(); }
 
 // -- Stufe 1: Kennzahlen ---------------------------------------------------------
 
@@ -265,12 +305,68 @@ async function loadInfo() {
     : `<div class="mh"><b class="pending">${checkingC ? "…" : "?"}</b><span>${checkingC ? STRINGS.standChecking : STRINGS.standNotCounted}</span></div>`) + `
     <div class="stephint">${c ? `${standNote(info, "cache", "")} · ` : ""}${STRINGS.mtThumbsHint} ${STRINGS.mtCountCacheHint}</div>
     <div style="margin-top:8px"><button type="button" id="mtCacheCount"${checkingC ? " disabled" : ""}>${STRINGS.mtCountCache}</button></div>`;
+  renderCaches();
   el("mtHead-db").textContent = tpl(STRINGS.mtSchema, { n: info.schema_version });
   el("mtDbSize").textContent = fmtBytes(info.db_bytes);
   el("mtDbWal").textContent = tpl(STRINGS.mtDbWal, { size: fmtBytes(info.wal_bytes) });
   // Hintergrund-Zählung nach einer Aufgabe: nachfragen, bis der Stand da ist.
   clearTimeout(recheck);
   if ((info.checking || []).length) recheck = setTimeout(() => { if (root && root.isConnected) loadInfo(); }, timing.recheckMs);
+}
+
+// Eingereiht bei angehaltener Warteschlange (#236): ehrlich sagen, dass die
+// Aufgabe wartet, bis Zz wieder aus ist — sie wird nicht verworfen.
+const queuedNote = () => (lastKnownStatus()?.paused ? STRINGS.mtStQueuedPaused : STRINGS.mtStQueuedNow);
+
+// -- Karte „Cache" (#227) -----------------------------------------------------------
+
+const queuedClears = new Set();   // eingereiht, bis die Aufgabe durch ist
+
+function renderCaches() {
+  const cs = info.caches, checking = isChecking(info, "cache");
+  const audioOff = stats && !stats.audio;
+  el("cacheTotal").textContent = cs ? tpl(STRINGS.cacheTotal, { size: fmtBytes(cs.parts.reduce((a, p) => a + p.bytes, 0)) }) : "?";
+  if (!cs) {
+    // Im selben Kennzahl-Kasten wie die anderen Karten (.meter): ohne ihn
+    // klebte „?" am Text („?noch nicht gezählt", Befund beim Test).
+    el("cacheRows").innerHTML = `<div class="meter"><div class="mh"><b class="pending">${checking ? "…" : "?"}</b><span>${checking ? STRINGS.standChecking : STRINGS.standNotCounted}</span></div></div>
+      <div style="margin-top:8px"><button type="button" id="cacheCount"${checking ? " disabled" : ""}>${STRINGS.mtCountCache}</button></div>`;
+    return;
+  }
+  el("cacheRows").innerHTML = `
+    <table class="atable cachetable">
+      <thead><tr><th>${STRINGS.cacheColKind}</th><th class="num">${STRINGS.cacheColFiles}</th><th class="num">${STRINGS.cacheColSize}</th><th>${STRINGS.cacheColPath}</th><th></th></tr></thead>
+      <tbody>${cs.parts.map((p) => {
+        const off = audioOff && p.kind.startsWith("audio_") && p.count;
+        const queued = queuedClears.has(p.kind);
+        return `<tr data-cache="${esc(p.kind)}">
+          <td>${esc(STRINGS.cacheKinds[p.kind] || p.kind)}${off ? ` <span class="warnc">${STRINGS.cacheAudioOff}</span>` : ""}</td>
+          <td class="num">${fmtNum(p.count)}</td><td class="num">${fmtBytes(p.bytes)}</td>
+          <td class="mono vdim" title="${esc(p.path || "")}">${esc(p.path || "–")}</td>
+          <td>${queued ? `<span class="st queued">${STRINGS.cacheQueued}</span>`
+            : `<button type="button" class="danger" data-cache-clear="${esc(p.kind)}"${p.count ? "" : " disabled"}>${STRINGS.cacheClear}</button>`}</td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table>
+    <div class="stephint">${standNote(info, "caches", "")} · ${STRINGS.mtCountCacheHint}</div>
+    <div style="margin-top:8px"><button type="button" id="cacheCount"${checking ? " disabled" : ""}>${STRINGS.mtCountCache}</button></div>`;
+}
+
+async function clearOne(kind) {
+  const p = info.caches.parts.find((x) => x.kind === kind);
+  const ok = await confirmDialog(tpl(STRINGS.cacheClearConfirm, {
+    kind: STRINGS.cacheKinds[kind] || kind, size: fmtBytes(p.bytes), n: fmtNum(p.count),
+    after: STRINGS.cacheAfter[kind] || "",
+  }), { ok: STRINGS.cacheClear, danger: true });
+  if (!ok) return;
+  try {
+    await clearCache(kind);
+    queuedClears.add(kind);
+  } catch (err) {
+    el("cacheRows").insertAdjacentHTML("afterbegin", `<div class="warn">${esc(err.message)}</div>`);
+    return;
+  }
+  renderCaches();
 }
 
 // Zählen auf Klick (#118): der Server merkt sich das Ergebnis, danach den
@@ -396,6 +492,9 @@ async function onClick(e) {
   if (e.target.closest("#mtDbCalc")) return void loadDbBreakdown(e.target.closest("#mtDbCalc"));
   if (e.target.closest("#mtOrphCheck")) return void countNow(e.target.closest("#mtOrphCheck"), "mtMeter-raw", () => getOrphans(null));
   if (e.target.closest("#mtCacheCount")) return void countNow(e.target.closest("#mtCacheCount"), "mtMeter-thumbs", getThumbCache);
+  if (e.target.closest("#cacheCount")) return void countNow(e.target.closest("#cacheCount"), "cacheRows", getThumbCache);
+  const cc = e.target.closest("[data-cache-clear]");
+  if (cc) return void clearOne(cc.dataset.cacheClear);
   if (e.target.closest("#moPick")) {
     const chosen = await pickFolder(el("moTarget").value.trim() || null);
     if (chosen) { el("moTarget").value = chosen; updateMoveoutArm(); }
@@ -410,6 +509,7 @@ async function onClick(e) {
     if (chosen) { el("prPath").value = chosen; resetPrunePreview(); }
     return;
   }
+  if (e.target.closest("#ciGo")) return void runCommentImport();
   if (e.target.closest("#prCheck")) return void checkOrphans();
   if (e.target.closest("#prGo")) return void runPrune();
 }
@@ -418,20 +518,10 @@ async function runAction(aid, btn) {
   const a = actions.get(aid);
   const st = root.querySelector(`[data-st="${aid}"]`);
   try {
-    if (a.run === "thumbs") {
-      btn.disabled = true;
-      const r = await clearThumbCache();
-      st.dataset.keep = "1";
-      st.className = "st done";
-      st.textContent = `✓ ${fmtNum(r.deleted)} ${STRINGS.maintThumbsCleared} · ${fmtTime(new Date(), false)}`;
-      btn.disabled = false;
-      loadInfo();
-    } else {
-      btn.disabled = true;
-      await a.run();
-      st.className = "st queued";
-      st.textContent = STRINGS.mtStQueuedNow;
-    }
+    btn.disabled = true;
+    await a.run();
+    st.className = "st queued";
+    st.textContent = queuedNote();
   } catch (err) {
     btn.disabled = false;
     st.className = "st failed";
@@ -483,7 +573,7 @@ async function runMoveout() {
     await startMoveout(target);
     el("moArm").checked = false;
     msg.className = "st queued";
-    msg.textContent = STRINGS.mtStQueuedNow;
+    msg.textContent = queuedNote();
     el("moRun").hidden = false;
   } catch (err) {
     msg.className = "st failed";
@@ -536,7 +626,7 @@ async function runImportRules() {
     await applyImportRules();
     el("irArm").checked = false; el("irArm").disabled = true;
     msg.className = "st queued";
-    msg.textContent = STRINGS.mtStQueuedNow;
+    msg.textContent = queuedNote();
   } catch (err) { msg.className = "st failed"; msg.textContent = err.message; }
 }
 
@@ -600,4 +690,67 @@ async function runPrune() {
     resetPrunePreview();
     loadInfo();
   } catch (err) { msg.className = "st failed"; msg.textContent = err.message; }
+}
+
+// -- Karte: Zeitkommentare importieren (#228, ADR 0098) -----------------------------
+
+const MAX_COMMENT_FILE = 20 * 1024 * 1024;   // = exchange.MAX_BYTES
+
+function nameList(names, total) {
+  const shown = names.slice(0, 8).map((n) => `<div class="vdim">${esc(n)}</div>`).join("");
+  return shown + (total > 8 ? `<div class="vdim">${tpl(STRINGS.ciMore, { n: fmtNum(total - 8) })}</div>` : "");
+}
+
+function renderCommentPreview(p) {
+  const n = (b) => ({ items: fmtNum(b.items), new: fmtNum(b.new), known: fmtNum(b.known) });
+  el("ciPrev").innerHTML = `
+    <div>${tpl(STRINGS.ciInFile, { items: fmtNum(p.items), comments: fmtNum(p.comments) })}</div>
+    <div>${tpl(STRINGS.ciByHash, n(p.by_hash))}</div>
+    ${p.by_song_id.items ? `<div style="margin-top:6px">${tpl(STRINGS.ciBySongId, n(p.by_song_id))}</div>
+      ${nameList(p.song_id_items.map((s) => `${s.name} → ${s.here.join(", ")}`), p.by_song_id.items)}` : ""}
+    ${p.missing ? `<div style="margin-top:6px">${tpl(STRINGS.ciMissing, { n: fmtNum(p.missing) })}</div>
+      ${nameList(p.missing_names, p.missing)}` : ""}`;
+  el("ciSongLbl").hidden = !p.by_song_id.items;
+}
+
+function updateCommentGo() {
+  const p = ciPreview;
+  const fresh = p ? p.by_hash.new + (el("ciSong").checked ? p.by_song_id.new : 0) : 0;
+  el("ciGo").disabled = !fresh || !el("ciSource").value.trim();
+}
+
+async function loadCommentFile() {
+  const file = el("ciFile").files[0];
+  const msg = el("ciMsg");
+  ciData = null; ciPreview = null;
+  msg.className = "st"; msg.textContent = "";
+  el("ciSongLbl").hidden = true; el("ciSong").checked = false;
+  updateCommentGo();
+  if (!file) { el("ciPrev").innerHTML = `<span class="vdim">${STRINGS.ciNoFile}</span>`; return; }
+  const fail = (text) => { el("ciPrev").innerHTML = `<span class="warn">${esc(text)}</span>`; };
+  if (file.size > MAX_COMMENT_FILE) return void fail(STRINGS.ciTooLarge);
+  try {
+    ciData = JSON.parse(await file.text());
+  } catch { return void fail(STRINGS.ciNotJson); }
+  el("ciPrev").innerHTML = '<span class="vdim">…</span>';
+  try {
+    ciPreview = await previewCommentImport(ciData);
+    renderCommentPreview(ciPreview);
+  } catch (err) { ciData = null; fail(err.message); }
+  updateCommentGo();
+}
+
+async function runCommentImport() {
+  const msg = el("ciMsg");
+  const source = el("ciSource").value.trim();
+  if (!source) { msg.className = "st failed"; msg.textContent = STRINGS.ciNeedSource; return; }
+  el("ciGo").disabled = true;
+  try {
+    const r = await importComments(ciData, source, el("ciSong").checked);
+    msg.className = "st done";
+    msg.textContent = tpl(STRINGS.ciDone, { added: fmtNum(r.added), known: fmtNum(r.known) });
+    ciPreview = await previewCommentImport(ciData);   // zeigt jetzt „schon da"
+    renderCommentPreview(ciPreview);
+  } catch (err) { msg.className = "st failed"; msg.textContent = err.message; }
+  updateCommentGo();
 }

@@ -1,7 +1,7 @@
 # The test suite — what it checks and how to tell everything is fine
 
-> What is this? The project ships an automated test suite: around **480
-> small test programs** that run in a few seconds and check every central
+> What is this? The project ships an automated test suite: a good **1200
+> small test programs** that run in about a minute and check every central
 > promise of the software. The complete suite runs before every code change
 > that gets checked in. This page explains **how to start it**, **what a
 > correct result looks like** and **what the individual test groups
@@ -30,11 +30,14 @@ pytest -q
 At the end there is a line like:
 
 ```
-907 passed in 40s
+1050 passed in 57s
 ```
 
 - **passed** = passed. The exact number grows with the project; what
-  matters is: **0 failed, 0 errors**.
+  matters is: **0 failed, 0 errors**. The line counts a good 1000 Python
+  tests and each of the 42 test files of the interface (group 9) as
+  **one** test; together those files hold around 270 individual checks.
+  Hence "a good 1200" in the introduction and a smaller number here.
 - **skipped** is fine: some tests need the tools `ffmpeg`/`ffprobe` and
   skip themselves if those are not installed on the machine. The app still
   works, just without video metadata, video thumbnails and audio
@@ -78,6 +81,10 @@ all hang off it. If it were wrong, everything above it would be wrong.
 | `test_png_extractor.py` | The self-built PNG reader finds all text chunks (that is where A1111 parameters and ComfyUI workflows live), decompresses compressed parts and preserves the order. |
 | `test_image_pillow.py` | JPEG/WEBP/GIF & co.: embedded EXIF/XMP data and comments come out unchanged; C2PA manifests (JPEG APP11 across several segments, WebP RIFF chunk) are reassembled byte-exact. |
 | `test_video_ffprobe.py` | Video containers (WEBM, MP4, …): the metadata delivered by `ffprobe` is taken over correctly; if `ffprobe` is missing, there is a warning instead of a crash. |
+| `test_psd_extractor.py` | Photoshop files (PSD/PSB): XMP, EXIF, IPTC and ICC profile come out unchanged, broken resource blocks become a warning. |
+| `test_pcd.py` | Kodak Photo CD: detection, header data (scan time, scanner, film), decoding up to the largest level, rotation of portrait images; crafted files run into the caps instead of an endless loop. |
+| `test_audio_extractor.py` | fml's own audio readers: ID3v2/ID3v1/APEv2, FLAC, Ogg, WAV, AIFF, CAF, every frame and chunk raw with a source label; truncated and oversized blocks are detected. |
+| `test_finder.py` | Finder tags and extended file attributes on macOS: tags are read with their color, the import brings them along (from duplicates too), a re-scan picks up ones assigned later, an assignment made by hand is never overwritten. On other systems the tests with real attributes skip themselves. |
 
 **The actual point of this group:** more than half of these tests
 deliberately feed the readers **broken files** — truncated, checksum
@@ -95,6 +102,11 @@ must never abort a whole scan.
 | `test_interpret_xmp.py` | XMP data: Midjourney descriptions, Google AI labeling, Lightroom star ratings. |
 | `test_interpret_provenance.py` | Generator from Content Credentials: Gemini, ChatGPT, OpenAI API, Azure, Firefly, Photoshop, Sora, Bing are recognized by their documented markers, priorities hold (Azure before OpenAI, ChatGPT before Sora), raw strings come out exact, unknown manifests are honestly called `c2pa`. |
 | `test_reparse.py` | The retroactive re-interpretation of the whole collection: finds previously ununderstood data, changes nothing twice on repetition, and replaces outdated results when a parser was improved. |
+| `test_interpret_topaz.py` | Topaz post-processing (Photo AI, Gigapixel, Video AI) is recognized by its documented markers and counts like a model. |
+| `test_interpret_video.py` | Codec, profile and pixel format of the first video stream become fields; from them follows the assessment whether the browser can play the video. |
+| `test_interpret_audio.py` | Music: ComfyUI music nodes, Suno (model, song ID, relationship to the parent song, date), general fields (title, lyrics, tempo, musical key), Content Credentials in audio containers, plus artist, album, track number, year and genre from the tags. |
+| `test_lyrics_sync.py` | Lyrics with timings: subtitle track, ID3 `SYLT` and LRC in the lyrics tag become lines with start and end and section marks; broken timestamps are skipped instead of getting in the way. |
+| `test_a1111_graph.py` | A1111 parameters are turned into a ComfyUI graph for the workflow preview (only where no original is embedded). |
 
 **Why so many tests?** Almost every single test here is a **preserved
 real-world case**: a workflow shape that at some point showed up in real
@@ -127,6 +139,9 @@ its state was.
 |---|---|
 | `test_scan.py` | The complete flow detect → hash → read → interpret → store produces the right counts; an unreadable file is recorded as a "scan issue" instead of aborting the run. |
 | `test_importer.py` (27 tests) | The import workflow with all its safety guarantees (see [import.md](import.md)). |
+| `test_moveout.py` | Moving out of the library: only copies in the media library, never foreign locations; at the target in date structure, name collisions get a suffix; missing or meanwhile changed files are reported and not touched. |
+| `test_boot_backfill.py` | The date backfill at startup only runs when there are media it could date. |
+| `test_diagnose.py` | The diagnostic command `python -m feral.diagnose video-codecs` counts the codecs in the collection without changing the database. |
 
 The import tests are arguably the most important of the whole suite,
 because they are about **"never lose data"**. Every test is a guarantee in
@@ -147,7 +162,7 @@ prose:
 - What was deliberately deleted sits on a **blocklist** and is not
   silently imported again.
 
-### 6. Manual layer: ratings, tags, notes
+### 6. Manual layer: ratings, tags, notes, date, comments
 
 `test_manual.py` checks star ratings, tags and notes (set, change,
 remove; setting twice is harmless). The most important single test makes
@@ -155,6 +170,14 @@ sure the manual layer **never writes into the extracted data**: what came
 from the file and what you set yourself stay strictly separate. Only that
 way can a re-scan never overwrite your ratings — and only that way does
 it stay visible which information has which origin.
+
+| Test file | Checks |
+|---|---|
+| `test_manual_date.py` | A date set by hand (`1997`, `1997-05`, `12.05.1997`) always wins, clearing it brings back the derived date; the year from the music tags comes before the file timestamp in the date cascade. |
+| `test_time_comments.py` | Time comments on songs: create, change, delete, in the search, in the list row and in the detail panel. |
+| `test_exchange.py` | Exchanging time comments between two fml: export and import as a round trip, the same import twice changes nothing, matching by song ID only with confirmation, broken and oversized files are rejected. |
+| `test_cover.py` | Cover of a song: a reference to a cataloged image, no upload; songs with a cover appear in the gallery, rejecting the image takes them out again. |
+| `test_folder_order.py` | Your own order of a saved search: moving, new songs at the end, deleting the search clears the order along with it. |
 
 ### 7. Web interface: search, filters, engine
 
@@ -166,6 +189,16 @@ it stay visible which information has which origin.
 | `test_web_engine.py` | The queue and the real worker process (ADR 0067): tasks run one after another in the child process, a crashing task does not take it down, a dying process is reported and restarted, double clicks are rejected, short writes do not wait behind long tasks, every task is written to the server log; watched folders (watch sources) only notice new files once they have "come to rest" (finished copying). |
 | `test_web_app_static.py` | The interface is served correctly, and the browser does not get a stale version from its cache after an update. |
 | `test_admin.py` | The admin reports correct key figures (incl. overview numbers: kind, years, growth, disk space); scan issues can be recorded and resolved; orphaned database entries (file no longer exists) are found and cleaned up. |
+| `test_bulk.py` | Bulk actions on the selection or the search result: rating (fills only unrated items), tagging, appending a note, setting the model and rejecting hit exactly the hits, never more; rejecting blocks the medium, deletes the thumbnail and leaves the file where it is. |
+| `test_rankings.py` | Ranking by pairwise comparison: pairing, scoring, dropping out and bringing back in, leaderboard, recomputing yields the same scores. |
+| `test_web_cache.py` | The cache for hit lists and counters: no hit without a current `data_version`, a write by any connection leads to recomputation, the cached result is the uncached one. |
+| `test_audio_library.py`, `test_audio_view.py`, `test_music_library.py` | Audio in the library: media type from the tracks, duration in search and sorting, gallery without audio and audio view with audio only, artist/album/genre in search, sidebar and album sorting. |
+| `test_audio_analysis.py` | Loudness, waveform and playable copy: correct values on self-generated test tones, true peak or sample peak depending on the setting; a failure leaves a fail marker instead of half a file; ffmpeg only gets local files, even with a file name that starts with a hyphen. |
+| `test_background.py`, `test_processes.py` | Power and pause: Quiet means one process with low priority, pausing takes effect at the next file and resumes there, the queue survives a restart, watch folders take precedence; child processes end with their parent process. |
+| `test_host_guard.py` | The host guard rejects requests with a foreign `Host` header (protection against DNS rebinding), every response carries `nosniff`; changing requests from a foreign origin (`Origin`) are refused, fml's own interface and scripts without a browser are not. |
+| `test_reveal.py` | "Show in file manager": only known locations, content verified by hash first, the right command per operating system. |
+| `test_slow_request_log.py`, `test_logsetup.py` | Slow and aborted requests are written to the server log; the logs page reads only the fixed log files, with a filter by level. |
+| `test_web_main.py`, `test_idle_exit.py`, `test_help_dir.py`, `test_no_window.py` | Start and operation: the browser only opens once the port really listens; `--exit-when-idle` ends the server only with no open page and no tasks; `--help-dir` shows your own manual; on Windows no ffmpeg call opens a console window. |
 
 ### 8. Thumbnails
 
@@ -209,6 +242,15 @@ the suite runs as usual.
 | `tests/js/context.test.mjs` | Edit mode for rankings (ADR 0081/#133): "Editing: 🏆 Name" up front, header `editing`, save only on deviation without `sort:`, rename stores only the name, ✕ back into the ranking; a saved search opens no mode. |
 | `tests/js/savedialog.test.mjs` | Save dialog (#133): without origin only Save; from a loaded search the origin is in the dialog, name prefilled, "Overwrite »Name«" (PUT) and "Save as new search" (POST), origin ends on clearing. |
 | `tests/js/admin_dialogs.test.mjs` | Dialog stack of the admin document: picker above the confirmation, Esc top-down, folder picker of the move-out card (cancel keeps the field, choosing applies), closing from outside resolves the picker promise, confirmation dialog (yes/cancel/Esc). |
+| `tests/js/admin_config.test.mjs`, `tests/js/admin_sources.test.mjs` | Configuration and Sources & import pages: save bar only with unsaved changes, saving sends all fields; watch folders as cards with state and counters, read-only mode locks the file-writing modes. |
+| `tests/js/search.test.mjs`, `tests/js/advanced.test.mjs`, `tests/js/sidebar_kriterien.test.mjs`, `tests/js/folders.test.mjs` | Searching: a click in the sidebar replaces the group's selection, Ctrl/Cmd-click extends it; "+ Criterion" popover and typing help; the "Media type" group and "More criteria"; saved searches appear immediately, the counters follow. |
+| `tests/js/detail.test.mjs`, `tests/js/panelfold.test.mjs` | Detail panel: locations in the order that "Show in file manager" uses; collapsing sections; folding the panel away with the strip at the right edge or the P key, the state is remembered. |
+| `tests/js/compare.test.mjs` | A/B compare of two images: open with C, wipe edge, swap, rating and rejecting, no second full-screen layer underneath. |
+| `tests/js/rankings.test.mjs`, `tests/js/rankings_deeplink.test.mjs` | Ranking arena: "Both out", exhausted pool with a way to the leaderboard, "Back in"; jump from the admin straight into edit mode. |
+| `tests/js/theme.test.mjs`, `tests/js/help.test.mjs`, `tests/js/background.test.mjs` | Header: light/dark is remembered; "?" only appears with a help folder; power and pause are two independent buttons with their state from the server. |
+| `tests/js/media.test.mjs`, `tests/js/audioview.test.mjs`, `tests/js/artwork.test.mjs`, `tests/js/cover.test.mjs` | Audio in the interface: one switch decides image, video or sound; the toggle to the audio view keeps the chips, Space plays instead of opening the loupe; embedded picture as a miniature; setting and removing a cover. |
+| `tests/js/player.test.mjs`, `tests/js/listcompare.test.mjs` | fml's own player: playhead per row, loudness matching, loop, tempo, "Play all", media keys; Compare narrows the list to 2 to 6 songs and brings it back unchanged with Esc. |
+| `tests/js/comments.test.mjs`, `tests/js/lyrics.test.mjs`, `tests/js/manualorder.test.mjs` | Time comments (K key, pins on the waveform, origin label), lyrics with timings (current line in the bar, section marks, panel that follows along) and the "Manual" sorting of a saved search. |
 
 **"Expected red":** some of these tests describe behaviour that is still to
 be built (they carry the number of the related issue in their name). They run
@@ -229,6 +271,7 @@ node --import ./tests/js/setup.mjs tests/js/overlays.test.mjs
 | `test_dependencies.py` | **No unnamed dependency:** every third-party import in the code is a directly named dependency; every lock entry has an exact version and checksums; every locked package is in `DEPENDENCIES.md`; the installed environment matches the lock exactly; the start scripts install in hash mode only. |
 | `test_lock_deps.py` | The tool that generates the lock: complete closure across Linux, macOS and Windows, platform markers (e.g. Windows only), version bounds, file format. |
 | `test_check_advisories.py` | The vulnerability database query: pins are read, hits are reported, and "offline" is an error, not a silent green. |
+| `test_strings_i18n.py`, `test_messages.py` | Multilingual support: every language file has the same keys as the German one, and every message the server sends exists there as text. |
 | `test_schema_doc.py` | The schema reference in the docs matches the real database schema. |
 
 **Why this matters:** these tests make sure nothing unnamed creeps in,

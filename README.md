@@ -17,6 +17,24 @@ server is only reachable at `127.0.0.1`.
 > the six-digit range and is designed for 250,000+ media. It is a hobby
 > project under active development - make backups (see "Good to know").
 
+## New in 2026.10
+
+- **Work quietly, pause, carry on:** two buttons in the header switch
+  background tasks to **Quiet** (one process, lowest priority) or pause
+  them. Whatever is waiting survives a restart.
+- **Music collection:** artist, album and genre from the tags, as groups
+  in the sidebar, in the search and as the sort order "Album".
+- **Lyrics with timings:** during playback the current line sits below
+  the waveform, the sections (`[Chorus]`, `[Verse]`) are marked on the
+  waveform, and the text follows along in the panel.
+- **Exchanging time comments:** export comments as a file and import them
+  into another fml, with an origin label.
+- **More room, more order:** collapse sections of the right panel or fold
+  it away entirely (**P** key), a **date set by hand** for files with a
+  wrong date, **Finder tags** on macOS as colored tags.
+
+Everything in detail: [`CHANGELOG.md`](CHANGELOG.md).
+
 ## Three goals, three modes
 
 Every intake in fml is a folder plus a **mode**. The mode alone decides
@@ -129,17 +147,21 @@ apart, including separate size figures.
   (WEBM/MP4/MOV - videos carry ComfyUI workflows too). Layer 2 interprets
   it into searchable fields: prompt, negative, model, LoRAs, seed,
   sampler, steps, input image and more, with parsers for ComfyUI,
-  A1111/Forge and XMP (Midjourney, Lightroom ratings). Because the raw
+  A1111/Forge, XMP (Midjourney, Lightroom ratings), Content Credentials
+  (Gemini, ChatGPT, Firefly), Topaz, video codecs and music (tags, Suno).
+  Because the raw
   data is kept, parser improvements apply **retroactively** to the whole
   collection - without reading the files again.
 - **Workflow view:** the embedded ComfyUI workflow can be viewed as a node
   graph and downloaded as an unmodified `.json` - drag & drop it straight
   back into ComfyUI.
-- **Search as one state made of chips:** sidebar clicks (model, LoRA,
-  tag, year, file type, format, resolution, rating, input image,
-  location), typed terms and grammar expressions all land as chips in
-  **one** combinable search state; the same facet twice means OR, and the
-  counters on the left recalculate live within the active filter.
+- **Search as one state made of chips:** sidebar clicks (media type,
+  generator, model, LoRA, year, file type, format, resolution, rating,
+  input image, location), typed terms and grammar expressions all land as
+  chips in **one** combinable search state; Cmd/Ctrl-click on a second
+  value of the same group means OR, and the counters on the left
+  recalculate live within the active filter. Tags and everything else are
+  available via "+ Criterion" and the typing help in the search box.
   Full-text search across prompts, tags, notes and filenames answers in
   milliseconds even with 250,000 media. For precise cases there is the
   grammar (`model: flux | krea -tag: wip rating>=4 sort: created-ab`),
@@ -155,15 +177,22 @@ apart, including separate size figures.
 - **A gallery for large collections:** virtualized grid (three
   densities), full-screen **loupe** for fast browsing (←/→ with
   preloading, keys 1-5 to rate), **single view** with real zoom
-  (fit/50/100/200 %, mouse wheel, navigator) and a wide metadata column.
-  Videos and animated WEBPs play.
-- **Curation, also in big strokes:** rating, tags, notes and manual model
-  assignment - individually, via multi-select (Shift/Ctrl) or with
-  **"⚡ Bulk action" applied to the entire search result**. The bulk
-  actions are deliberately non-destructive: the base rating only fills
-  unrated items, tags are appended, notes are attached. Manual data is
+  (fit/max 100 %/50/100/200 %, mouse wheel, navigator) and a wide metadata
+  column. Videos and animated WEBPs play. The metadata panel on the right
+  can be collapsed section by section or folded away entirely with **P**
+  when the gallery needs the width.
+- **Curation, also in big strokes:** rating, tags, notes, manual model
+  assignment and a **date set by hand** (for scanned photos or freshly
+  ripped old CDs) - individually, via multi-select (Shift/Ctrl) or with
+  **"⚡ Bulk action" applied to the entire search result** (if something
+  is selected, "selection" is preselected in the dialog). The bulk
+  actions tread carefully: the base rating only fills unrated items, tags
+  are appended, notes are attached; only model and date replace an
+  existing manual value. Manual data is
   its **own data layer**, strictly separated from what was extracted from
-  the files - nothing overwrites anything.
+  the files - nothing overwrites anything. On macOS the colored **Finder
+  tags** come along as tags; fml only reads them and never writes back to
+  the Finder.
 - **Reject instead of delete:** Del (or the bulk action) removes items
   from the catalog and blocks their hash - **the file is never touched**,
   in any mode. To undo: remove the entry from the blocklist (Admin) and
@@ -172,12 +201,18 @@ apart, including separate size figures.
 - **Audio module (optional, off by default):** music from Suno, from
   ComfyUI (YuE, ACE-Step, MiniMax) or your own recordings: MP3, FLAC, Ogg,
   WAV, AIFF, CAF, M4A, with all embedded tags, lyrics in the full-text
-  search and the Suno version from the Content Credentials. A dedicated
+  search and the Suno version from the Content Credentials. The ordinary
+  **music collection** is at home here too: artist, album and genre from
+  the tags, as groups in the sidebar and as a sort order that plays an
+  album in its sequence. A dedicated
   **audio view** shows the songs as a list with a three-colour waveform
   (bass, mids, highs) on a shared time axis, every row with its own
   playhead. The player matches loudness so the louder version does not win
-  the comparison; plus **time comments** at points in a song ("Chorus" at
-  1:40), **comparing** up to six versions, and **covers** from your own
+  the comparison; plus **lyrics with timings** (the current line below
+  the waveform, sections on the waveform), **time comments** at points in
+  a song ("Chorus" at 1:40) that can be **exchanged** with another fml as
+  a file, **comparing** up to six versions, **your own order** per saved
+  search for auditioning a playlist, and **covers** from your own
   library that bring finished songs into the gallery. fml never changes
   the audio files themselves. All details:
   [`docs/en/audio.md`](docs/en/audio.md).
@@ -188,7 +223,8 @@ apart, including separate size figures.
   Explained in detail in [`docs/en/instanzen.md`](docs/en/instanzen.md).
 - **Maintenance without fear:** thumbnails, search index, interpretation,
   creation dates - everything is reproducible from the files and raw data
-  and can be regenerated at the press of a button (Admin → Maintenance).
+  and can be regenerated at the press of a button (Admin → Maintenance);
+  the **Cache** card shows per kind what sits on disk and frees the space.
   Scan issues (broken files, missing locations) are reported collectively
   and stay acknowledged once acknowledged - across restarts too.
 
@@ -204,7 +240,8 @@ apart, including separate size figures.
   remote access. The database belongs on a local disk, not on a network
   share.
 - **No sync between instances or machines:** ratings and tags live in the
-  database of their instance.
+  database of their instance. The only exception: time comments on songs
+  can be taken over as a file from one fml into another.
 - **No AI analysis of image content** (yet): fml reads what is in the
   files - it does not guess tags from pixels. Local VLM enrichment as a
   clearly separated layer is planned.
@@ -250,11 +287,12 @@ interface points it out if it is missing.
 
 ### Getting started if you want to collect or consolidate (goals 2 and 3)
 
-1. Admin → **Configuration** → tick **Library management**, below it set
-   "Media library (import target)" to a folder with enough space.
+1. Admin → **Configuration** → set "Media library (import target)" to a
+   folder with enough space, tick **Library management** below it, save.
 2. Admin → **Sources & import** → pick the first source folder, mode
-   **"copy"**, "once now" → **Add**. The per-file result appears under
-   Activity; the source stays untouched until you trust the result.
+   **"copy"**, "once now" → **Add**. The result appears as a summary line
+   under Activity (Admin → Overview); the source stays untouched until you
+   trust the result.
 3. Repeat for every backup/legacy folder - the import recognizes
    duplicates by content and does not store them again.
 4. If you want the source folders empty (goal 3), use mode "move" (with
@@ -268,12 +306,16 @@ interface points it out if it is missing.
   instance) contains your ratings, tags, notes, saved searches and all
   extracted metadata - back it up. The thumbnail cache (`cache/`) does
   not matter, it rebuilds itself.
-- **Large imports:** hundreds of GB are fine - the machine stays quiet by
-  default (thumbnails run at low priority). In a hurry? Admin →
-  Configuration → "Full power (loud)".
+- **Large imports:** hundreds of GB are fine - thumbnails run at low
+  priority by default. If the machine should stay calm meanwhile, the
+  power button in the header switches to **Quiet** (leaf); **Pause**
+  ("Zz") interrupts entirely, and at the next start it continues there.
+  In a hurry? Admin → Configuration → "Full power" (faster, but loud).
 - **The config is a text file:** `config.toml` next to `start.bat`.
-  Everything in it can also be edited in the GUI (Admin → Configuration);
-  the commented reference is
+  The most important parts of it can also be edited in the GUI (Admin →
+  Configuration); only there you find the path of the database, the cache
+  folders and fine points such as `[audio] true_peak`. The commented
+  reference is
   [`config.example.toml`](config.example.toml).
 - **Changed (September 2026) - sidebar click rule as in Lightroom:** a
   click selects a value (replacing the previous one of the same group),

@@ -36,15 +36,17 @@ Browser — unterscheidbar per Instanzname, Akzentfarbe und Port.
 | Watchordner-Liste, Library-Verwaltung an/aus | ✔ | |
 | Programmordner (Code, `.venv`) | | ✔ |
 | Mediendateien auf der Platte | | ✔ (werden nur gelesen, außer beim Import der verwaltenden Instanz) |
-| Thumbnail-Cache | | ✔ wenn die DBs im selben Ordner liegen (siehe unten) |
+| Caches (Thumbnails, Audio, Anzeigebilder) und Logdateien | | ✔ wenn die DBs im selben Ordner liegen (siehe unten) |
 
-Der Thumbnail-Cache liegt im Ordner `cache/` **neben der jeweiligen
-DB-Datei**. Liegen mehrere Instanz-DBs im selben Ordner (der einfachste
-Aufbau), teilen sie sich den Cache — das ist unbedenklich und sogar
-sparsam, weil Thumbnails über den Datei-Hash adressiert sind: dieselbe
-Datei bekommt in jeder Instanz dasselbe Vorschaubild und wird nur einmal
-gerechnet. Zu wissen: „Cache leeren" (Admin → Wartung) trifft dann alle
-Instanzen; die Vorschaubilder bauen sich beim Ansehen von selbst neu.
+Die Caches liegen im Ordner `cache/` **neben der jeweiligen DB-Datei**
+(`cache/thumbnails`, `cache/audio`, `cache/preview`). Liegen mehrere
+Instanz-DBs im selben Ordner (der einfachste Aufbau), teilen sie sich die
+Caches — das ist unbedenklich und sogar sparsam, weil alles darin über den
+Datei-Hash adressiert ist: dieselbe Datei bekommt in jeder Instanz dasselbe
+Vorschaubild und wird nur einmal gerechnet. Zu wissen: **Löschen** in der
+Karte „Cache" (Admin → Wartung) trifft dann alle Instanzen; alles darin
+entsteht bei Bedarf von selbst neu. Auch die Logdateien (`logs/fml-web.log`,
+`logs/fml-worker.log` neben der DB) schreiben solche Instanzen gemeinsam.
 
 ## Eine zweite Instanz anlegen (Schritt für Schritt)
 

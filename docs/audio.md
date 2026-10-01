@@ -14,8 +14,12 @@ die Metadaten von Suno, ComfyUI-Musik und eigenen Aufnahmen, misst
 Lautheit und Wellenform und sucht auch im Songtext.
 
 **Braucht ffmpeg** (wie Videos, Installation siehe README): ffprobe liefert
-die Dauer, ffmpeg misst Lautheit und Wellenform und legt abspielbare Kopien
-an. Ohne ffmpeg werden Songs trotzdem mit allen Tags aufgenommen.
+die Dauer, ffmpeg misst Lautheit und Wellenform, legt abspielbare Kopien
+an und liest den Songtext mit Zeiten aus der Untertitel-Spur. Ohne ffmpeg
+werden MP3, FLAC, Ogg, WAV, AIFF und CAF trotzdem mit allen Tags
+aufgenommen. **M4A und Matroska nur mit Ton** liest fml ganz über ffprobe:
+Ohne ffprobe fehlen dort die Tags, und die Datei gilt als Video, bis ein
+Re-Scan mit installiertem ffmpeg sie nachholt.
 
 ## Einschalten
 
@@ -29,8 +33,11 @@ enabled = true
 
 Die Einstellung wirkt sofort für den nächsten Scan und Import.
 Watchordner prüfen beim Einschalten Audiodateien, die sie vorher als
-„unbekanntes Format" übersprungen haben, gleich neu. Für bereits
-eingerichtete Scan-Orte einmal **Admin → Wartung → Re-Scan aller Fundorte** ausführen.
+„unbekanntes Format" übersprungen haben, gleich neu. Ordner, die nur
+**einmal** katalogisiert wurden, nimmst du noch einmal auf (**Admin →
+Quellen & Import**, „nur katalogisieren", „einmal jetzt"): Bekanntes wird
+übersprungen, die Musik kommt dazu. „Re-Scan aller Fundorte" reicht dafür
+nicht, er prüft nur Dateien, die schon im Katalog stehen.
 
 **Aus** heißt: Audiodateien gelten als unbekanntes Format und werden nicht
 aufgenommen, genau wie ohne das Modul. Das gilt auch für M4A-Dateien und
@@ -64,7 +71,8 @@ Audioansicht** an: Enter wechselt die Ansicht, die Suche bleibt, wie sie
 war. Die Wahl der Ansicht merkt sich der Browser.
 
 **Eine Zeile** zeigt ▶, den **Dateinamen** (in Suno landen Kommentare im
-Songtitel und damit im Dateinamen), den Erzeuger (Modell, sonst Werkzeug),
+Songtitel und damit im Dateinamen), **Interpret · Album** aus den Tags,
+bei KI-Musik ohne diese Tags den Erzeuger (Modell, sonst Werkzeug),
 die Dauer, die Lautheit (LUFS), die Bewertung und unter 💬 die Zahl der
 Zeitkommentare. Hat ein Song ein Cover, steht es klein vor dem Namen.
 Beginnt ein Name wie der darüber, ist der gemeinsame Anfang abgedunkelt: bei „Regenzeit v3 refrain lauter" und
@@ -101,6 +109,7 @@ die Wellenform spielt die Zeile ab dieser Stelle.
 | Taste / Maus | Wirkung |
 |---|---|
 | ↑ / ↓ | Zeile wechseln |
+| Alt+↑ / Alt+↓ | Zeile eine Stelle verschieben (nur Sortierung „Manuell", siehe [Eigene Reihenfolge](#eigene-reihenfolge-einer-gespeicherten-suche)) |
 | Leertaste, ▶, Doppelklick | Abspielen / Pause (die Leertaste auch direkt nach einem Klick auf einen Knopf wie ⏮ oder ≈ Lautheit) |
 | ← / → | Abspielkopf der Zeile 5 Sekunden zurück / vor (mit Shift 1 Sekunde) |
 | Klick in die Wellenform | ab dieser Stelle abspielen |
@@ -164,7 +173,7 @@ Ein eingebettetes Cover zählt nicht als Bildspur.
 
 Jeder Tag-Frame und jeder Chunk landet **unverändert** als eigener
 Rohmetadaten-Eintrag (Schicht 1), in der Reihenfolge der Datei, auch
-doppelte Schlüssel. Das Detailpanel zeigt sie unter „Rohdaten" mit ihrer
+doppelte Schlüssel. Das Detailpanel zeigt sie unter „Roh-Metadaten" mit ihrer
 Herkunft, z. B.:
 
 | Quelle · Schlüssel | Bedeutung |
@@ -186,7 +195,7 @@ SHA-256. Die Bilder bleiben in der Datei.
 Dazu kommen die **technischen Fakten** aus ffprobe: Dauer, Codec,
 Samplerate, Kanäle, Bittiefe und Bitrate (Quelle z. B. `mp3:format`,
 `mp3:stream0`). Fehlt ffprobe, werden die Tags trotzdem gelesen; nur die
-Dauer fehlt dann.
+Dauer fehlt dann (Ausnahme M4A und Matroska, siehe oben).
 
 ## Was fml aus Musik liest
 
@@ -200,6 +209,35 @@ WAV-INFO, M4A), dazu die Technik der Tonspur: `audio_codec`,
 `sample_rate`, `channels`, `bit_depth`. Der **Songtext ist in der
 Volltextsuche**: eine Zeile daraus ins Suchfeld tippen findet alle
 Fassungen eines Songs, die denselben Text tragen.
+
+**Songtext mit Zeiten:** Songs aus Suno V6 tragen ihren Songtext Zeile für
+Zeile mit Zeiten in einer Untertitel-Spur, samt Abschnitten wie `[Verse]`
+oder `[Chorus]`. fml liest diese Spur (M4A, Matroska mit nur Ton), dazu
+ID3 `SYLT` (in Millisekunden) und LRC-Text (`[01:23.45]Zeile`) im
+Songtext-Tag; aus LRC im Tag wird der normale Songtext ohne Zeitstempel.
+Zu sehen ist das an drei Stellen:
+
+- **Mittig unter der Welle der Abspielleiste** steht klein die Zeile, die
+  gerade läuft, davor der Abschnitt („Chorus · Sing it loud“). In Pausen ohne
+  Gesang (Solo, Bridge) bleibt sie leer: Eine Zeile steht höchstens so
+  lange da, wie man sie ungefähr singt, und verschwindet, sobald ein neuer
+  Abschnitt beginnt. Bei sehr schnellem, mehrstimmigem Gesang ist schon
+  die Spur selbst durcheinander; das zeigt fml dann so, wie es kommt.
+- **Auf der Welle jeder Listenzeile** markieren schmale Beschriftungen die
+  Abschnitte; liegen zwei dicht beieinander, wird die erste gekürzt (voller
+  Name im Tooltip). Der Abschnitt, in dem der Abspielkopf steht, erscheint
+  ganz und in Akzentfarbe. Instrumentale Abschnitte (Solo, Lead-Gitarre,
+  Intro) haben bei Suno keine eigene Zeit, sie tragen die des nächsten
+  gesungenen Worts; fml schätzt ihren Anfang an das Ende der letzten
+  gesungenen Zeile davor (nach **Neu interpretieren**).
+- **Im Detailpanel** (GENERATION → Songtext) laufen die Zeilen beim
+  Abspielen mit; ein Klick auf eine Zeile springt dorthin. Wer das nicht
+  braucht, klappt den Abschnitt zu.
+
+Songs, die schon vor fml 2026.10 im Katalog waren, holt fml einmal von
+selbst nach (Aufgabe „Songtexte mit Zeiten nachholen“ beim ersten Start mit
+eingeschaltetem Audio-Modul, nur Songs mit Untertitel-Spur; braucht
+ffmpeg). Für `SYLT` und LRC reicht **Neu interpretieren**.
 
 **ComfyUI-Musik** (YuE2, MiniMax Music 3, ACE-Step 1.0/1.5): Der
 Stil-Text (bei YuE2 `style`, bei ACE-Step `tags`, bei MiniMax `caption`)
@@ -230,10 +268,156 @@ Sprachmemos vom iPhone `creator_tool: Voice Memos`.
 Suchbeispiele: `tool: suno`, `model: "Suno v5"`, `bpm: 120`,
 `audio_codec: flac`, `has: lyrics`.
 
-**Bestand nachziehen:** Neu interpretieren genügt für alles oben, außer
-für Content Credentials in **M4A/MP4**, die vor fml 2026.09.2 aufgenommen
-wurden: diese Dateien brauchen einmal einen Re-Scan (Admin → Wartung),
-weil der Baustein erst seitdem gesichert wird.
+## Musiksammlung: Interpret, Album, Genre
+
+Für eine gewöhnliche Musiksammlung (etwa gerippte CDs als MP3) liest fml
+aus den Tags:
+
+| Feld | Aus | Beispiel |
+|---|---|---|
+| Interpret (`artist`) | ID3 `TPE1`, Vorbis `ARTIST`, WAV `IART`, M4A | `Nena` |
+| Album-Interpret (`album_artist`) | ID3 `TPE2`, Vorbis `ALBUMARTIST`, M4A | `Various Artists` |
+| Album (`album`) | ID3 `TALB`, Vorbis `ALBUM`, WAV `IPRD`, M4A | `99 Luftballons` |
+| Titel- und CD-Nummer (`track`, `disc`) | `TRCK`/`TPOS`, `TRACKNUMBER`/`DISCNUMBER` | `3` (aus `3/12`) |
+| Jahr (`year`) | ID3 `TDRC`/`TYER`, Vorbis `DATE`, WAV `ICRD`, M4A | `1983` |
+| Genre (`genre`) | ID3 `TCON`, Vorbis `GENRE`, WAV `IGNR`, M4A | `Pop` |
+
+Alte ID3v1-Tags (am Dateiende, höchstens 30 Zeichen) zählen nur, wo ein
+ID3v2-Tag fehlt; ihre Genre-Nummern (und die Schreibweise `(17)` in
+ID3v2) werden zu Namen. Das Jahr wird zum Datum des Songs, siehe
+[Datum eines Songs](#datum-eines-songs).
+
+**Seitenleiste (nur Audioansicht):** drei neue Gruppen, alphabetisch.
+
+- **Interpret**: der Album-Interpret, wo das Tag ihn nennt, sonst der
+  Interpret des Titels. So landet ein Sampler geschlossen unter
+  „Various Artists", statt in hundert Einzelnamen zu zerfallen.
+- **Album**: ein Klick zeigt das Album; zusammen mit einem Interpreten
+  lassen sich gleichnamige Alben („Greatest Hits") auseinanderhalten.
+- **Genre**: ab Werk zugeklappt (Klick auf die Überschrift klappt auf).
+
+Gruppen, für die es in keinem Song Tags gibt, erscheinen gar nicht. Die
+Zähler filtern mit wie überall: Nach einem Klick auf einen Interpreten
+stehen dessen Alben oben.
+
+**Suche:**
+
+- `interpret: "Nena"` (englisch `albumartist:`) — dieselbe Regel wie die
+  Gruppe: Album-Interpret, sonst Interpret.
+- `artist: nena` — nur der Interpret des einzelnen Titels, also auch
+  Nenas Titel auf Samplern.
+- `album: luftballons`, `genre: pop`.
+- Interpret, Album und Genre stehen außerdem in der **Volltextsuche**.
+
+**Sortierung „Album"** (`sort: album`, nur in der Audioansicht):
+Interpret → Album → CD → Titelnummer, bei gleicher oder fehlender
+Titelnummer der Dateiname (gerippte CDs heißen meist `01 Titel.mp3`). Ein
+Album läuft so in seiner Reihenfolge, auch mit **▶ Alle abspielen**. Songs
+ohne diese Tags stehen am Ende.
+
+**Ein Album anklicken** (Gruppe Album oder ein `album:`-Chip) sortiert die
+Liste automatisch nach Album, **solange in der Suchleiste kein
+Sortier-Chip steht**. Ohne Chip gilt sonst die zuletzt im Sortier-Menü
+gewählte Sortierung (siehe [Oberfläche](gui.md)); ein Album-Chip hat
+Vorrang davor. Steht ein Sortier-Chip (im Menü gewählt oder aus einer
+gespeicherten Suche), gewinnt er. Wer beim Album also etwas anderes will,
+wählt es im Sortier-Menü, auch „Hinzugefügt"; es erscheint dann als Chip.
+Die Galerie und Suchen ohne Album-Chip bleiben unverändert.
+
+**Bestand nachziehen:** Für schon aufgenommene Musik einmal **Admin →
+Wartung → Neu interpretieren**; die Tags liegen schon im Katalog, ein
+Neuimport ist nicht nötig. Zwei Ausnahmen brauchen die Datei selbst:
+Content Credentials in **M4A/MP4**, die vor fml 2026.09.2 aufgenommen
+wurden (einmal „Re-Scan aller Fundorte", weil der Baustein erst seitdem
+gesichert wird), und der Songtext mit Zeiten aus der Untertitel-Spur
+(holt fml von selbst nach, siehe oben).
+
+## Eigene Reihenfolge einer gespeicherten Suche
+
+Zum Probehören einer geplanten Playlist lässt sich die Reihenfolge der
+Songs **von Hand** festlegen. Die Reihenfolge gehört zu einer
+[gespeicherten Suche](gui.md), nicht zum Song: derselbe Song kann in zwei
+Playlists an verschiedenen Stellen stehen.
+
+### Zwei Dinge, die getrennt gespeichert werden
+
+| Was | Wie wird es gespeichert? |
+|---|---|
+| **Die Reihenfolge selbst** (welcher Song an welcher Stelle) | **Automatisch, sofort** bei jedem Verschieben. Kein ☆ nötig. |
+| **Dass die Suche beim Öffnen in dieser Reihenfolge startet** | Nur mit **☆ → »Name« überschreiben**. Das speichert den Sortier-Chip „Manuell" in der Suche. |
+
+Wer nur umsortiert und nie ☆ drückt, verliert nichts: Die Reihenfolge ist
+gespeichert, die Suche öffnet aber mit der normalen Sortierung. Dann einmal
+„Manuell" im Sortier-Menü wählen, und die eigene Reihenfolge ist wieder da.
+
+### Einmal einrichten
+
+1. Songs taggen, z. B. `release candidate`.
+2. Suche `tag: "release candidate"` eingeben und mit **☆ speichern** ablegen,
+   z. B. als „CD 2026".
+3. Die gespeicherte Suche links unter „Gespeicherte Suchen" öffnen.
+4. Im Sortier-Menü **„Manuell"** wählen (siehe unten, wann es da ist).
+5. Songs in die gewünschte Reihenfolge bringen (nächster Abschnitt).
+6. **☆ → »CD 2026« überschreiben.** Der Dialog zeigt „Die Sortierung wird
+   mitgespeichert: Manuell". Ab jetzt öffnet „CD 2026" immer in der
+   eigenen Reihenfolge.
+
+### Umsortieren
+
+- Den **Dateinamen** einer Zeile auf eine andere Zeile ziehen: auf die obere
+  Hälfte = davor, auf die untere = dahinter.
+- Oder eine Zeile auswählen und mit **Alt+↑ / Alt+↓** eine Stelle
+  verschieben.
+- Solange das geht, steht über der Liste „Reihenfolge: Name ziehen oder
+  Alt+↑/↓". Klappt ein Verschieben nicht, steht die Meldung an derselben
+  Stelle.
+- **▶ Alle abspielen** spielt die Liste genau in dieser Reihenfolge.
+
+### Wann es „Manuell" gibt
+
+„Manuell" steht nur im Sortier-Menü, wenn **alles** davon zutrifft:
+
+- die Audioansicht ist offen (nicht die Galerie),
+- eine gespeicherte Suche ist geöffnet,
+- ihre Chips stehen noch genau so, wie sie gespeichert sind.
+
+Wer danach etwas anderes sucht (tippt, in der Seitenleiste klickt, „Alle
+Medien" wählt), hat die gespeicherte Suche verlassen. „Manuell" verschwindet
+dann, und die Liste sortiert wieder wie vorher. Die Reihenfolge bleibt
+gespeichert; ein Klick auf die gespeicherte Suche bringt sie zurück.
+
+### Was mit der Reihenfolge passiert
+
+- **Neu getaggte Songs** hängen sich hinten an, in der Reihenfolge, in der
+  sie aufgenommen wurden.
+- **Verliert ein Song den Tag**, fällt er aus der Liste; bekommt er ihn
+  zurück, steht er wieder an seiner alten Stelle.
+- **☆ → Als neue Suche speichern** legt eine neue Suche mit **eigener,
+  leerer** Reihenfolge an; die alte Suche behält ihre.
+- **Gespeicherte Suche löschen** löscht auch ihre Reihenfolge.
+- Einen Export (etwa `.m3u`) gibt es bewusst nicht; die Reihenfolge dient
+  dem Planen und Probehören.
+
+## Datum eines Songs
+
+Das Datum eines Songs (Sortierung „Erstellt", Seitenleiste „Nach Jahr",
+`year:`) kommt aus dieser Reihenfolge:
+
+1. **von Hand gesetzt** (Feld unter KURATIERT oder Zeile „Datum" der
+   Sammel-Aktion, siehe [Oberfläche](gui.md)) — gewinnt immer;
+2. ein **eingebettetes Datum**, z. B. Sunos Erstellzeit;
+3. das **Jahr aus den Tags** (ID3 `TDRC`/`TYER`, Vorbis `DATE`, M4A
+   `©day`), meist das Erscheinungsjahr. Es gilt nur als Jahr: die Anzeige
+   ist „1987", nicht „1987-01-01";
+4. der **Dateistempel**.
+
+Die [Datumsregel](import.md) gilt auch für das Tag-Jahr: Ein Jahr vor dem
+eingestellten ältesten Datum (ab Werk 2015) gilt als unplausibel, dann
+zählt der Dateistempel. Wer alte Musik einliest, stellt das Datum vorher
+entsprechend zurück („Ältestes plausibles Datum" unter Admin →
+Konfiguration → Media Library)
+und lässt danach **Neu interpretieren** laufen. Beim Import mit Kopieren
+landet ein Song mit Tag-Jahr im Ordner `1987/01/01` der Library.
 
 ## Dauer (auch für Videos)
 
@@ -259,6 +443,9 @@ Diese Filter gelten unabhängig vom Modul:
 - **Sortierung „Dauer"** (`sort: duration`): Längstes zuerst,
   `sort: duration-auf` Kürzestes zuerst; Medien ohne Dauer stehen in
   beiden Richtungen am Ende.
+- **Sortierung „Album"** (`sort: album`) und **„Manuell"** gibt es nur in
+  der Audioansicht, siehe [Musiksammlung](#musiksammlung-interpret-album-genre)
+  und [Eigene Reihenfolge](#eigene-reihenfolge-einer-gespeicherten-suche).
 
 Beispiel: `typ: audio dauer: >120 sort: duration`.
 
@@ -282,8 +469,8 @@ Finder/Explorer zeigt der 📂-Knopf vor dem bevorzugten Fundort im
 Detailpanel (Abschnitt Fundorte). Enter öffnet in der Audioansicht nichts.
 
 **Abspielleiste.** Sobald ein Song läuft, erscheint unten die Leiste: ⏮
-(an den Anfang, nach den ersten drei Sekunden der vorige Song von „Alle
-abspielen"), ▶/❚❚, ⏭ (nächster Song von „Alle abspielen"), Name und
+(in den ersten drei Sekunden: der vorige Song von „Alle abspielen";
+danach: zurück an den Anfang), ▶/❚❚, ⏭ (nächster Song von „Alle abspielen"), Name und
 Position in der Reihe, die Wellenform des Songs mit Klick zum Springen
 und rechts die Optionen:
 
@@ -291,7 +478,7 @@ und rechts die Optionen:
   auf -14 LUFS gebracht, damit beim Vergleichen nicht die lautere Fassung
   gewinnt; die Leiste zeigt, um wie viel dB. Laute Songs werden leiser,
   leise nur so weit lauter, dass der True Peak unter -1 dBTP bleibt (sonst
-  übersteuert es). Die Wellenformen zeigen die angeglichene Höhe: was man
+  übersteuert es; mit Sample Peak gemessen unter -2 dBFS, siehe unten). Die Wellenformen zeigen die angeglichene Höhe: was man
   sieht, hört man. Die Einstellung gilt für alle Songs und bleibt
   gespeichert. Die Datei selbst ändert sich nie.
 - **Tempo** reihum 1,00× → 1,25× → 1,50×, **ohne** die Tonhöhe zu ändern:
@@ -364,6 +551,50 @@ den Text** ändert ihn (Enter speichert, Esc bricht ab), **✕** löscht.
 
 **Suchen:** Kommentare sind Teil der normalen Suche. Wer „Streicher"
 sucht, findet auch den Song, an dem „Streicher setzen ein" hängt.
+
+### Kommentare mit einem anderen fml austauschen
+
+Zwei Leute mit je eigenem fml können sich Kommentare schicken, als Datei
+(Mail, USB-Stick, Cloud-Ablage).
+
+**Exportieren:** In der Audioansicht die Songs auswählen oder eine Suche
+eingrenzen, dann die **Sammel-Aktion** öffnen und bei „Zeitkommentare"
+auf **Exportieren** klicken. Es entsteht eine Datei
+`fml-kommentare-JJJJ-MM-TT.json` mit allen Kommentaren dieser Songs.
+Hier ändert sich dabei nichts.
+
+**Importieren** geht auf der anderen Seite unter **Admin → Wartung →
+Zeitkommentare importieren**, in drei Schritten:
+
+1. **Datei und Herkunft:** die Datei wählen und eintragen, von wem die
+   Kommentare stammen (z. B. einen Namen).
+2. **Vorschau:** Wie viele Songs gefunden wurden, wie viele Kommentare neu
+   und wie viele schon da sind, und welche Songs es hier nicht gibt.
+3. **Übernehmen.** Jeder übernommene Kommentar trägt die Herkunft als
+   kleines Etikett (im Panel, am Pin, beim Einblenden).
+
+**Wie fml die Songs findet:** über die Datei selbst (ihren Hash). Eine
+Datei, die unverändert kopiert, gezippt oder verschickt wurde, wird auf
+jedem Rechner gefunden. Hat jemand die Datei verändert (Tags in einem
+Player oder Tag-Editor bearbeitet, neu heruntergeladen, in ein anderes
+Format umgewandelt), ist es für fml eine andere Datei. Für **Suno-Songs**
+gibt es dann eine zweite Chance über die Suno-Song-ID: Diese Treffer
+zeigt die Vorschau eigens, übernommen werden sie nur mit dem Häkchen
+„Auch Songs übernehmen, die nur über die Suno-ID gefunden wurden".
+
+**Doppeltes gibt es nicht:** Ein Kommentar an derselben Stelle mit
+demselben Text wird übersprungen. Derselbe Import zweimal ändert nichts,
+und Kommentare, die hin- und zurückgeschickt werden, verdoppeln sich
+nicht.
+
+**Das Dateiformat** (für Neugierige): JSON mit `"format":
+"fml-time-comments"` und `"version": 1`; je Song `file_hash`, `name`
+(nur als Hinweis), `duration`, gegebenenfalls `suno_ids` und die Liste
+`comments` mit `at_ms` (Stelle in Millisekunden), `text`, `created_at`,
+`updated_at`; ganz oben stehen außerdem `exported_at` und die Liste
+`items` mit den Songs. fml nimmt höchstens 20 MB, 50.000 Songs und 200.000
+Kommentare je Datei, 2.000 Kommentare je Song und Kommentartexte bis
+2.000 Zeichen.
 
 ## Vergleichen
 
@@ -457,6 +688,15 @@ Hintergrund jede Audiodatei einmal durch:
 - **Lautheit** nach EBU R128: integrierte Lautheit in LUFS, Lautheits-
   umfang (LRA) in LU und True Peak in dBTP. Sie steht im Detailpanel
   unter „Datei", z. B. `-9,0 LUFS · LRA 6,1 LU · True Peak -0,3 dBTP`.
+  **True Peak oder Sample Peak** (`[audio] true_peak` in der
+  `config.toml`, Standard `true`): True Peak schätzt auch die Spitzen
+  zwischen den Abtastwerten (vierfache Überabtastung) und ist das Maß
+  fürs Mastering, kostet aber knapp die Hälfte der ganzen Messzeit. Mit
+  `true_peak = false` misst fml den Sample Peak (in dBFS, Anzeige
+  `Sample Peak -0,3 dBFS`): Die Messung dauert etwa halb so lange, was bei
+  großen Sammlungen auf langsamen Rechnern Tage sparen kann; der
+  Lautheitsangleich hält dafür 1 dB mehr Abstand (-2 dBFS). Die
+  Einstellung gilt für neue Messungen, fertige behalten ihren Wert.
   Zur Einordnung: Streamingdienste spielen um -14 LUFS ab; ein Song mit
   -9 LUFS ist deutlich lauter gemastert. Die Liste zeigt die integrierte
   Lautheit als eigene Spalte; der Player gleicht sie an (siehe

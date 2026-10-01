@@ -99,6 +99,10 @@ test("Angleich: Lautes wird abgesenkt, Leises nur bis True Peak −1 dBTP angeho
   assert.equal(matchGainDb({ integrated: -20, true_peak: -12 }), 6);
   assert.equal(matchGainDb({ integrated: null, true_peak: null }), 0);   // Stille
   assert.equal(matchGainDb(undefined), 0);
+  // Sample Peak (#225): Grenze −2 dB statt −1 dB
+  assert.equal(matchGainDb({ integrated: -20, sample_peak: -3 }), 1);
+  assert.equal(matchGainDb({ integrated: -20, sample_peak: -12 }), 6);
+  assert.equal(matchGainDb({ integrated: -9, sample_peak: -0.5 }), -5);   // Absenken unberührt
   assert.equal(fmtDb(-5, "de"), "−5,0");
   assert.equal(fmtDb(2, "en"), "+2.0");
 });

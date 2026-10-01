@@ -42,10 +42,13 @@ before(async () => {
 
 test("Reihenfolge: Bewertung · Medienart · Generator · Modell · LoRA · Jahr, darunter der Sammelblock", () => {
   const top = nav().querySelector(".sbscroll").children.map((g) => g.dataset.group);
-  // Songtext (ADR 0085) steht an der Stelle der Medienart: je Ansicht ist
-  // nur eine der beiden sichtbar (Geltungsbereich).
-  assert.deepEqual(top, ["library", "folders", "rankings", "rating", "mediakind", "lyrics",
+  // Interpret/Album/Genre (#224) und Songtext (ADR 0085) stehen an der
+  // Stelle der Medienart: je Ansicht ist nur eine Seite sichtbar.
+  assert.deepEqual(top, ["library", "folders", "rankings", "rating", "mediakind",
+                         "interpret", "album", "genre", "lyrics",
                          "generator", "model", "lora", "year", "more"]);
+  assert.ok(group("genre").classList.contains("collapsed"), "Genre ab Werk zugeklappt");
+  assert.ok(!group("album").classList.contains("collapsed"));
   const inner = group("more").querySelectorAll(".sbmorebody .sbgroup").map((g) => g.dataset.group);
   assert.deepEqual(inner, ["container", "format", "megapixels", "inputimage", "fundort"]);
   assert.ok(group("more").classList.contains("collapsed"), "ab Werk zugeklappt");

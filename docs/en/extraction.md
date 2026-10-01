@@ -146,6 +146,14 @@ chunk raw with a source label; ffprobe only supplies duration, codec,
 sample rate, channels, bit depth and bit rate. Details and examples of
 the source labels in [Audio module](audio.md#what-is-stored).
 
+If an audio file in an M4A or Matroska container has a **text subtitle
+track** (this is how Suno stores the lyrics with timings from V6 on), an
+additional ffmpeg run fetches it as SRT text, source label
+`"isobmff:stream1.subtitle"` (the number is the number of the track),
+keyword `srt`, at most 1 MiB. Audio only: for a film, ffmpeg would have
+to read the whole file for this. If ffmpeg is missing, it stays at a
+warning.
+
 ## Robustness
 
 The extraction **does not crash on broken files**. Problems (wrong

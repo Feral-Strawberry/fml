@@ -30,13 +30,17 @@ All tables with columns, keys and indexes plus an ER diagram are in the
 [schema reference](schema.md) (generated from the real schema). In short:
 `items` is the hub (one row per file hash); attached to it are locations,
 raw metadata (layer 1), interpreted fields (layer 2), the manual layer
-(rating, tags, notes, saved searches), the ranking module, the full-text
+(rating, tags, notes, date set by hand, time comments, cover, saved
+searches including their own order), the ranking module, the full-text
 index and the operational tables (block list, import log, watch memory,
-issues, remembered figures).
+issues, remembered figures, queue).
 
 Access to the manual layer goes through `feral/db/manual.py`
-(`set_rating`, `set_notes`, `add_tag`, `remove_tag`, `annotations_for`,
-`list_tags`) — idempotent; `set_rating(0)` clears the rating.
+(`set_rating`, `set_notes`, `set_model`, `add_tag`, `remove_tag`,
+`set_media_date`, `add_comment`, `set_cover`, `annotations_for`,
+`list_tags`) — idempotent; `set_rating(0)` clears the rating. Tags from
+the Finder (macOS) carry their origin; an assignment made by hand is
+never overwritten by them.
 
 ## Key properties
 

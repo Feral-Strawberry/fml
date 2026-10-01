@@ -45,6 +45,17 @@ The most important safeguards (full write-up in
   **ffmpeg/ffprobe may open local files only**
   (`-protocol_whitelist file`, absolute `file:` path): a crafted file cannot
   trigger network access, a file name is never read as an option.
+- **Timed lyrics are parsed with fixed caps** (subtitle track, ID3 `SYLT`,
+  LRC): at most 512 KiB of text, 2,000 lines, 500 characters per line and
+  four subtitle tracks per file; crafted lines end in a fraction of a
+  second. **Finder tags (macOS)** travel with the file and are capped the
+  same way.
+- **A parser error stays with its file**: if an interpretation parser
+  fails on one file's metadata, it is skipped for that file; the scan or
+  re-interpretation of the library carries on.
+- **Comment files from another fml are untrusted input**: at most 20 MB,
+  checked before parsing, a fixed format with length and count limits,
+  accepted as `application/json` only.
 - **Kodak Photo CD files are decoded by a capped reader** (at most 16 MiB
   read, a bounded number of rows per resolution level, the row-marker
   search runs in C): a crafted file ends quickly instead of tying up the
@@ -54,16 +65,28 @@ The most important safeguards (full write-up in
 - **Host-header guard against DNS rebinding** (only
   `localhost`/`127.0.0.1`/`::1` are accepted) plus
   `X-Content-Type-Options: nosniff` on all responses.
+- **Origin check against cross-site requests**: every changing request
+  must come from fml's own interface; a request whose `Origin` does not
+  match the server is refused, so a foreign website in another tab cannot
+  trigger actions.
 - **File-system jumps are whitelisted**: "show in file manager" and the
   location breadcrumbs open only locations stored for that item (content
   verified by hash before revealing); media delivery serves cataloged
   files by hash only and stops reading when the browser aborts.
+- **The task queue is data, not code**: waiting tasks survive a restart
+  as a name from a fixed list plus JSON parameters. In read-only mode no
+  saved task that copies, moves or deletes files is ever restored.
+- **Clearing a cache deletes only what fml put there** (files matching
+  `<2 hex>/<hash>.<suffix>`), never a folder as a whole: a cache path that
+  points at a folder with your own files by mistake leaves them alone.
 - **Log injection is neutralised**: control characters in logged file
   names (line breaks, ANSI, bidi) are made visible instead of written
   raw; the admin log page reads two fixed files only.
 
 Operating recommendation: keep the server on `localhost` — there is
-deliberately no login and no tenant separation.
+deliberately no login and no tenant separation. Start fml only with your
+own database file and your own backups: the database also holds the
+waiting tasks.
 
 ## Reporting a problem
 

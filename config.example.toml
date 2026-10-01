@@ -34,8 +34,10 @@ port = 8765
 #akzentfarbe = "#3b82f6"
 
 [import]
-# Lower bound for a plausible creation date (ADR 0019): files with an older/
-# missing date end up in <library.root>/_unbekanntes-datum/.
+# Lower bound for a plausible creation date (ADR 0019/0075): a file whose
+# date is older or missing is NOT taken in; on import it is sorted into the
+# visible _ausgefiltert outcome of the source, on cataloging it is skipped.
+# Lower this before taking in old material (e.g. ripped CDs from the 80s).
 min_date = "2015-01-01"
 
 # Import rules (ADR 0046) — they filter during import AND during cataloging
@@ -60,12 +62,13 @@ min_date = "2015-01-01"
 # (ADR 0003). Lives outside the repo and is excluded via .gitignore.
 path = "./feral.sqlite"
 
-[testdata]
-# Optional: a place for real sample media (various ComfyUI/A1111 variants)
-# for manual testing. Keep it outside the repo (in .gitignore: /testdata/,
-# /test-media/). Unit tests do NOT need this — they build their fixtures
-# programmatically.
-root = "/path/to/testdata"
+[ui]
+# Show the "Duplicates" row in the sidebar (items found at several paths).
+# Superfluous when the import sorts duplicates out anyway.
+#dubletten = true
+# Order of the model list in the sidebar: "zuletzt" (most recently used
+# first, default), "alphabet" or "anzahl" (by count).
+#modell_sortierung = "zuletzt"
 
 [rankings]
 # Ranking module (ADR 0045): pairwise rating ("arenas" like LMArena) —
@@ -81,6 +84,12 @@ enabled = false
 # unknown format and are not cataloged — exactly as without the module.
 # Can also be toggled via Admin → Configuration → Modules.
 enabled = false
+# Peak measurement of the audio analysis. true = true peak (dBTP, 4x
+# oversampling, the mastering measure). false = sample peak (dBFS): roughly
+# halves the analysis time, which matters for large collections on slow
+# computers; loudness matching then keeps 1 dB more headroom. Applies to
+# new analyses only; existing ones keep their value.
+true_peak = true
 
 [performance]
 # Response time in milliseconds from which a request is logged as slow
@@ -90,6 +99,15 @@ enabled = false
 # ("cold:") are always INFO only. Changing it in the GUI takes effect
 # immediately (Admin -> Configuration -> Thumbnails & performance).
 slow_request_ms = 250
+# Start value of the power button in the gallery header (bolt = normal,
+# leaf = quiet). "normal" uses all configured processes; "quiet" runs
+# background work with ONE process at the lowest priority (CPU, disk,
+# memory; on Windows limited to one core), so the computer stays usable
+# and the fans stay calm. The button overrides this until the start value
+# is changed. Pausing is a separate button. Once the button has been used,
+# fml remembers its position: editing this value by hand has no effect
+# then; change it with the button or under Admin -> Configuration.
+background = "normal"
 
 [cache]
 # Thumbnail cache (regenerated on demand; safe to delete at any time).
@@ -105,14 +123,16 @@ thumbnails = "./cache/thumbnails"
 #preview = "./cache/preview"
 # Longest edge of the thumbnails in pixels.
 thumbnail_size = 320
-# Processes for thumbnail generation. Without a value: cores − 2 (full
-# power; the processes run at low priority and step aside immediately
-# when the machine is needed elsewhere). Set lower if the fans bother
-# you while thumbnails are being regenerated.
+# Processes for background work (thumbnails, audio analysis, scans).
+# Without a value: 1 on machines with up to 4 cores, otherwise cores − 2
+# (the processes run at low priority and step aside immediately when the
+# machine is needed elsewhere). In the "quiet" background mode it is
+# always 1. Takes effect without a restart.
 #thumbnail_workers = 8
-# Low process priority (default: true = quiet operation, thumbnails make
-# room for other programs). Set to false for large imports = full-throttle
-# mode: switch it on and flee to the coffee machine before the fan noise.
+# Low process priority in the "normal" background mode (default: true =
+# background work makes room for other programs). Set to false for large
+# imports = full-throttle mode: switch it on and flee to the coffee machine
+# before the fan noise. Has no effect in the "quiet" mode.
 #thumbnail_low_priority = true
 
 # Watched source folders (ADR 0030). Any number of `[[watch]]` entries —

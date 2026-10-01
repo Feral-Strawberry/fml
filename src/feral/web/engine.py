@@ -40,8 +40,12 @@ from typing import Any, Callable
 
 from ..db import connect
 from ..messages import msg
+from ..processes import (
+    CONTROL_SIZE, CTRL_HALT, CTRL_LOW, CTRL_QUIET, CTRL_WORKERS,
+    HALT_PAUSE, HALT_SHUTDOWN, HALT_YIELD,
+)
 from ..scan import ScanReport, _iter_files
-from .tasks import Progress, report_dict  # noqa: F401 — Progress bleibt exportiert
+from .tasks import RESUMABLE, Progress, report_dict  # noqa: F401 — Progress bleibt exportiert
 from .worker import run_worker
 
 log = logging.getLogger("feral.engine")
@@ -49,6 +53,7 @@ log = logging.getLogger("feral.engine")
 WRITE_BUSY_TIMEOUT_MS = 3000       # kurze Schreibgriffe warten höchstens so lange auf den Worker
 RESTART_WINDOW = 60.0              # Sekunden: mehr als RESTART_LIMIT Tode darin → kein Auto-Neustart
 RESTART_LIMIT = 3
+SHUTDOWN_HALT_WAIT = 8.0           # Sekunden: so lange darf die laufende Aufgabe beim Beenden bis zur Dateigrenze brauchen
 
 
 class AlreadyQueued(Exception):
@@ -68,6 +73,7 @@ class _Queued:
     params: dict[str, Any]
     label: dict[str, Any]
     key: str
+    priority: bool = False     # Watch-Batch: vor allen anderen wartenden (ADR 0093)
 
 
 def _dedupe_key(name: str, params: dict[str, Any]) -> str:
@@ -78,18 +84,40 @@ def _iso(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _date_param(value: Any) -> str:
+    """Datum als Aufgaben-Parameter: ISO-Text, weil die Warteschlange als JSON
+    in der Datenbank steht (ADR 0093). Die Aufgabe liest ihn mit
+    ``rule_min_date`` wieder als datetime."""
+    return value.isoformat() if isinstance(value, datetime) else str(value)
+
+
+# Aufgaben, die Dateien anlegen, verschieben oder löschen (ADR 0041). Im
+# Übersichtsmodus sperrt die Route sie; aus der gesicherten Warteschlange
+# dürfen sie dann ebenso wenig zurückkommen.
+FILE_WRITING_TASKS = frozenset({"import_folder", "import_files", "moveout"})
+
+
 class ScanEngine:
     """Warteschlange + Worker-Aufsicht + kurze Schreibgriffe + Watcher."""
 
     def __init__(self, db_path: str | Path, *, log_dir: str | Path | None = None,
                  pool_workers: int | None = None, thumb_workers: int | None = None,
-                 thumb_low_priority: bool = True) -> None:
+                 thumb_low_priority: bool = True, quiet: bool = False,
+                 paused: bool = False, persist_queue: bool = False) -> None:
         self.db_path = str(db_path)
         self.log_dir = str(log_dir) if log_dir is not None else None
         self.pool_workers = pool_workers
         self.thumb_workers = thumb_workers
         self.thumb_low_priority = thumb_low_priority
         self._ctx = mp.get_context("spawn")
+        # Steuerblock für den Worker (ADR 0093): Halt, Leise, Prozesszahl.
+        self._control = self._ctx.Array("i", CONTROL_SIZE)
+        self._control[CTRL_WORKERS] = int(pool_workers or 0)
+        self._control[CTRL_LOW] = int(bool(thumb_low_priority))
+        # Hintergrund (ADR 0093): Leistung (quiet) und Pause getrennt.
+        self.quiet = bool(quiet)
+        self.paused = bool(paused)
+        self._control[CTRL_QUIET] = int(self.quiet)
         self._lock = threading.RLock()
         self._pending: deque[_Queued] = deque()
         self._running: _Queued | None = None
@@ -101,6 +129,7 @@ class ScanEngine:
         self._worker_died = False
         self._deaths: deque[float] = deque()
         self._closed = False
+        self._stopping = False       # shutdown läuft: nichts mehr zustellen (ADR 0093)
         self._started_at: float | None = None
         self._state: dict[str, Any] = {
             "running": False,
@@ -135,6 +164,15 @@ class ScanEngine:
         # Interpreter-Ende würde multiprocessing auf ihn warten. Deshalb
         # räumt ein atexit-Haken auf, falls niemand shutdown() rief.
         atexit.register(self.shutdown)
+        # Überlebende Warteschlange (ADR 0093): Differenz-Schreiber im
+        # Hintergrund; nur mit persist_queue (die App), Tests bleiben frei.
+        self._persist_enabled = persist_queue
+        self._persisted: dict[int, int] = {}     # id → Position, wie in task_queue
+        self._dirty = threading.Event()
+        self._persist_lock = threading.Lock()
+        if persist_queue:
+            threading.Thread(target=self._persist_loop, name="feral-queue-persist",
+                             daemon=True).start()
         # Dispatcher-Thread: startet den Worker und stellt Aufgaben zu — NIE
         # unter self._lock. Ein Worker-Start dauert unter Windows (spawn +
         # Importe + Defender) 10–30 s; hielte enqueue() derweil die Sperre,
@@ -157,7 +195,8 @@ class ScanEngine:
             target=run_worker, args=(self.db_path, task_q, status_q),
             kwargs={"log_dir": self.log_dir, "pool_workers": self.pool_workers,
                     "thumb_workers": self.thumb_workers,
-                    "thumb_low_priority": self.thumb_low_priority},
+                    "thumb_low_priority": self.thumb_low_priority,
+                    "control": self._control},
             name="feral-worker",
         )
         proc.start()
@@ -192,7 +231,8 @@ class ScanEngine:
             if self._closed:
                 return
             with self._lock:
-                if self._running is not None or not self._pending:
+                if (self._running is not None or not self._pending or self.paused
+                        or self._stopping):
                     continue
                 need_worker = self._proc is None or not self._proc.is_alive()
                 if need_worker and not self._may_restart_locked():
@@ -205,10 +245,13 @@ class ScanEngine:
                     time.sleep(1.0)
                     continue
             with self._lock:
-                if self._running is not None or not self._pending or self._task_q is None:
+                if (self._running is not None or not self._pending or self._task_q is None
+                        or self.paused or self._stopping):
                     continue
                 item = self._pending.popleft()
                 self._running = item
+                self._control[CTRL_HALT] = 0     # alter Halt-Wunsch gilt nicht der neuen Aufgabe
+                self._dirty.set()
                 task_q = self._task_q
                 message = {"op": "run", "id": item.id, "name": item.name,
                            "params": item.params, "label": item.label,
@@ -266,6 +309,8 @@ class ScanEngine:
                 if event.get("report") is not None:
                     self._state["report"] = event["report"]
                 self._state["current_file"] = event.get("current")
+            elif kind == "paused":
+                self._on_paused_locked(running, event)
             elif kind == "finished":
                 result = event.get("result") or {}
                 if event.get("report") is not None:
@@ -273,8 +318,10 @@ class ScanEngine:
                 self._state.update(running=False, current_file=None,
                                    last_finished=running.label, started_at=None,
                                    finished_seq=self._state["finished_seq"] + 1)
-                if isinstance(result, dict) and "summary" in result:
-                    self._state["last_result"] = result["summary"]
+                # Jede Aufgabe hinterlässt IHRE Zusammenfassung (#233) — ohne
+                # eine bleibt das Feld leer, statt die der vorigen zu erben.
+                self._state["last_result"] = (
+                    result.get("summary") if isinstance(result, dict) else None)
                 # Fehlgeschlagen ist NUR eine Aufgabe, die mit sumFailed
                 # endete (Ausnahme im Worker); ein Scan-Report mit
                 # failed-Zähler ist ein erfolgreicher Lauf mit Befunden.
@@ -284,6 +331,9 @@ class ScanEngine:
                 finished = (running.name, ok)
                 self._running = None
                 self._started_at = None
+                if self._control[CTRL_HALT] == HALT_YIELD:
+                    self._control[CTRL_HALT] = 0   # fertig geworden, bevor sie abgab
+                self._dirty.set()
                 self._wake.set()
         if finished is not None:
             for hook in list(self.on_finished):
@@ -291,6 +341,27 @@ class ScanEngine:
                     hook(*finished)
                 except Exception:
                     log.exception("on_finished hook %r failed", hook)
+
+    def _on_paused_locked(self, running: _Queued, event: dict[str, Any]) -> None:
+        """Halt an der Dateigrenze (ADR 0093): Fortsetzung zurück in die
+        Schlange — beim Vorrang HINTER die Watch-Batches, sonst an den Kopf."""
+        params = event.get("params")
+        cont = _Queued(id=self._next_id, name=running.name,
+                       params=running.params if params is None else params,
+                       label=running.label, key=running.key, priority=running.priority)
+        self._next_id += 1
+        if self._control[CTRL_HALT] == HALT_YIELD:
+            index = sum(1 for q in self._pending if q.priority)
+            self._pending.insert(index, cont)
+        else:
+            self._pending.appendleft(cont)
+        if self._control[CTRL_HALT] != HALT_SHUTDOWN:
+            self._control[CTRL_HALT] = 0
+        self._state.update(running=False, current_file=None, started_at=None)
+        self._running = None
+        self._started_at = None
+        self._dirty.set()
+        self._wake.set()
 
     HISTORY_MAX = 12
 
@@ -310,6 +381,7 @@ class ScanEngine:
         code = getattr(proc, "exitcode", None)
         running, self._running = self._running, None
         self._started_at = None
+        self._dirty.set()
         if running is not None:
             log.error("Worker process died (exitcode %s) during %s", code, running.name)
             self._state.update(
@@ -332,16 +404,27 @@ class ScanEngine:
 
     def enqueue(self, name: str, params: dict[str, Any] | None = None,
                 label: dict[str, Any] | None = None, *, key: str | None = None,
-                dedupe: str = "all") -> int:
+                dedupe: str = "all", priority: bool = False) -> int:
         """Eine benannte Aufgabe (``tasks.TASKS``) einreihen; liefert ihre ID.
 
         ``key`` (Standard: Name + Parameter) entscheidet über Dubletten:
         ``dedupe="all"`` weist ab, wenn die Aufgabe läuft ODER wartet
         (Mehrfachklick, ADR 0067); ``"pending"`` nur, wenn sie wartet — für
         Automatik-Nachläufer (Thumbnail-Vorwärmen nach Import), die nach
-        einem laufenden Lauf noch einmal drankommen sollen."""
+        einem laufenden Lauf noch einmal drankommen sollen.
+
+        ``priority`` (Watch-Batches, ADR 0093): vor alle wartenden Aufgaben
+        ohne Vorrang; eine laufende fortsetzbare Aufgabe ohne Vorrang gibt
+        an der nächsten Dateigrenze ab und läuft danach weiter."""
         params = dict(params or {})
         label = label or msg("taskGeneric")
+        try:
+            # Die Warteschlange steht als JSON in der Datenbank (ADR 0093):
+            # was kein JSON ist, käme nach einem Neustart verändert zurück.
+            json.dumps(params)
+            json.dumps(label)
+        except TypeError as exc:
+            raise TypeError(f"task {name!r}: params and label must be JSON ({exc})") from None
         key = key or _dedupe_key(name, params)
         with self._lock:
             if self._closed:
@@ -351,9 +434,19 @@ class ScanEngine:
             for queued in self._pending:
                 if queued.key == key:
                     raise AlreadyQueued(queued.label, running=False)
-            item = _Queued(id=self._next_id, name=name, params=params, label=label, key=key)
+            item = _Queued(id=self._next_id, name=name, params=params, label=label, key=key,
+                           priority=priority)
             self._next_id += 1
-            self._pending.append(item)
+            if priority:
+                index = sum(1 for q in self._pending if q.priority)
+                self._pending.insert(index, item)
+                running = self._running
+                if (running is not None and not running.priority and running.name in RESUMABLE
+                        and not self._control[CTRL_HALT]):
+                    self._control[CTRL_HALT] = HALT_YIELD
+            else:
+                self._pending.append(item)
+            self._dirty.set()
             log.info("Queued: %s [%s] (waiting: %d)", label.get("key", label), name,
                      len(self._pending))
         self._wake.set()
@@ -417,10 +510,12 @@ class ScanEngine:
         return len(files)
 
     def enqueue_files(self, files: list[Path], label: dict[str, Any],
-                      rules: dict[str, Any] | None = None) -> None:
+                      rules: dict[str, Any] | None = None, *, priority: bool = False) -> None:
         """Reiht das Scannen konkreter Dateien ein (katalogisieren-Watchordner,
-        ADR 0031: am Ort aufnehmen — weder kopieren noch bewegen)."""
-        self.enqueue("scan_files", {"files": [str(p) for p in files], "rules": rules}, label)
+        ADR 0031: am Ort aufnehmen — weder kopieren noch bewegen).
+        ``priority`` für Watch-Batches (ADR 0093)."""
+        self.enqueue("scan_files", {"files": [str(p) for p in files], "rules": rules}, label,
+                     priority=priority)
 
     def enqueue_import(
         self, source_root: str | Path, *, target_root: str | Path, min_date,
@@ -436,7 +531,7 @@ class ScanEngine:
         self.enqueue(
             "import_folder",
             {"source_root": str(source_root), "target_root": str(target_root),
-             "min_date": min_date, "source_mode": source_mode,
+             "min_date": _date_param(min_date), "source_mode": source_mode,
              "remove_empty": remove_empty, "rules": rules},
             msg("taskImport", root=str(source_root)), key=f"import_folder:{source_root}",
         )
@@ -445,16 +540,16 @@ class ScanEngine:
     def enqueue_import_files(
         self, files: list[Path], *, source_root: Path, target_root: Path,
         min_date, source_mode: str = "einsortieren", remove_empty: bool = False,
-        rules: dict[str, Any] | None = None,
+        rules: dict[str, Any] | None = None, priority: bool = False,
     ) -> None:
         """Konkrete (zur Ruhe gekommene) Dateien importieren — Hotfolder (ADR 0025)."""
         frozen = [str(p) for p in files]
         self.enqueue(
             "import_files",
             {"files": frozen, "source_root": str(source_root), "target_root": str(target_root),
-             "min_date": min_date, "source_mode": source_mode,
+             "min_date": _date_param(min_date), "source_mode": source_mode,
              "remove_empty": remove_empty, "rules": rules},
-            msg("taskHotfolderImport", n=len(frozen)),
+            msg("taskHotfolderImport", n=len(frozen)), priority=priority,
         )
 
     def enqueue_moveout(
@@ -462,7 +557,7 @@ class ScanEngine:
     ) -> None:
         """Pauschalweg des Rausverschiebe-Dialogs (I3, ADR 0041)."""
         self.enqueue("moveout", {"library_root": str(library_root),
-                                 "target_root": str(target_root), "min_date": min_date},
+                                 "target_root": str(target_root), "min_date": _date_param(min_date)},
                      msg("taskMoveout"))
 
     def enqueue_thumb_warm(
@@ -479,10 +574,12 @@ class ScanEngine:
 
     def enqueue_audio_warm(
         self, cache_dir: str | Path, *, retry_failed: bool = False, auto: bool = False,
+        true_peak: bool = True,
     ) -> None:
         """„Audio analysieren" (A4 #161) — Dedupe wie ``enqueue_thumb_warm``."""
         self.enqueue("audio_warm",
-                     {"cache_dir": str(cache_dir), "retry_failed": bool(retry_failed)},
+                     {"cache_dir": str(cache_dir), "retry_failed": bool(retry_failed),
+                      "true_peak": bool(true_peak)},
                      msg("taskAudioWarm"), dedupe="pending" if auto else "all")
 
     def enqueue_media_date_backfill(self, min_date: datetime | None = None) -> None:
@@ -496,13 +593,28 @@ class ScanEngine:
 
     # -- Wartungsaufgaben (Stufe 2A, ADR 0014) --------------------------------
 
-    def enqueue_reparse(self) -> None:
-        self.enqueue("reparse", {}, msg("taskReparse"))
+    def enqueue_reparse(self, rules: dict[str, Any] | None = None) -> None:
+        """``rules`` — Import-Regeln; ``min_date`` begrenzt das Tag-Jahr der
+        Songs wie beim Import (#220)."""
+        self.enqueue("reparse", {"rules": rules}, msg("taskReparse"))
 
     def enqueue_rescan(self, rules: dict[str, Any] | None = None) -> None:
         """``rules`` — Import-Regeln aus der Config; beim Re-Scan zählt vor
         allem ``min_date`` (Datumsregel, ADR 0075)."""
         self.enqueue("rescan", {"rules": rules}, msg("taskRescan"))
+
+    def enqueue_audio_subtitles(self, rules: dict[str, Any] | None = None) -> None:
+        """Songtext mit Zeiten einmal nachholen (#234)."""
+        self.enqueue("audio_subtitles", {"rules": rules}, msg("taskAudioSubtitles"))
+
+    def enqueue_recheck_filtered(self, rules: dict[str, Any] | None = None) -> None:
+        """Aussortierte neu prüfen (#230): alle Pfade, die das Stat-Gedächtnis
+        als ``ausgefiltert`` kennt, mit den aktuellen Import-Regeln erneut
+        durch den Scan schicken — Watcher überspringen sie sonst, solange
+        die Datei unverändert bleibt (ADR 0042)."""
+        # Schlüssel = Name + Regeln: gleiche Regeln doppelt ⇒ abgewiesen,
+        # erneut geänderte Regeln ⇒ eigener Lauf mit dem neuen Stand.
+        self.enqueue("recheck_filtered", {"rules": rules}, msg("taskRecheckFiltered"))
 
     def enqueue_integrity_check(self) -> None:
         self.enqueue("integrity", {}, msg("taskIntegrity"))
@@ -512,9 +624,149 @@ class ScanEngine:
 
     # -- Öffentliche API ------------------------------------------------------
 
+    # -- Hintergrund-Modus (ADR 0093) -----------------------------------------
+
+    def set_background(self, *, quiet: bool | None = None, paused: bool | None = None) -> None:
+        """Leistung (Normal/Leise) und Pause, unabhängig voneinander — wirkt
+        sofort: der Worker übernimmt Leise an der nächsten Dateigrenze, Pause
+        hält die laufende Aufgabe dort an; Fortsetzen läuft im eingestellten
+        Leistungsmodus weiter."""
+        with self._lock:
+            if quiet is not None:
+                self.quiet = bool(quiet)
+                self._control[CTRL_QUIET] = int(self.quiet)
+            if paused is not None:
+                self.paused = bool(paused)
+                if self.paused and self._running is not None:
+                    self._control[CTRL_HALT] = HALT_PAUSE
+                elif not self.paused and self._control[CTRL_HALT] == HALT_PAUSE:
+                    self._control[CTRL_HALT] = 0   # noch nicht angehalten: einfach weiter
+        log.info("Background: %s%s", "quiet" if self.quiet else "normal",
+                 ", paused" if self.paused else "")
+        self._wake.set()
+
+    def set_pool_config(self, workers: int | None, low_priority: bool) -> None:
+        """Konfigurierte Prozesszahl/Priorität ohne Neustart (#225)."""
+        self.pool_workers = self.thumb_workers = workers
+        self.thumb_low_priority = low_priority
+        self._control[CTRL_WORKERS] = int(workers or 0)
+        self._control[CTRL_LOW] = int(bool(low_priority))
+
+    def queued_paths(self, root: str | Path) -> set[str]:
+        """Dateien unterhalb ``root``, die laufende/wartende Aufgaben schon
+        tragen — ein Watcher nimmt sie als „in Arbeit" (nach einem Neustart
+        sonst doppelt eingereiht, ADR 0093)."""
+        prefix = str(Path(root)) + os.sep
+        with self._lock:
+            items = ([self._running] if self._running else []) + list(self._pending)
+            return {p for q in items for p in (q.params.get("files") or [])
+                    if isinstance(p, str) and p.startswith(prefix)}
+
+    # -- Überlebende Warteschlange (ADR 0093) ---------------------------------
+
+    def _snapshot_locked(self) -> list[_Queued]:
+        return ([self._running] if self._running else []) + list(self._pending)
+
+    def persist_queue(self) -> bool:
+        """Schlange als Differenz nach ``task_queue`` schreiben. False, wenn
+        die DB gerade nicht wollte (nächster Versuch folgt)."""
+        if not self._persist_enabled:
+            return True
+        with self._lock:
+            items = self._snapshot_locked()
+        current = {q.id: pos for pos, q in enumerate(items)}
+        by_id = {q.id: q for q in items}
+        with self._persist_lock:
+            gone = [i for i in self._persisted if i not in current]
+            new = [i for i in current if i not in self._persisted]
+            moved = [i for i in current
+                     if i in self._persisted and self._persisted[i] != current[i]]
+            if not (gone or new or moved):
+                return True
+            try:
+                conn = connect(self.db_path)
+                try:
+                    conn.execute(f"PRAGMA busy_timeout={WRITE_BUSY_TIMEOUT_MS}")
+                    with conn:
+                        conn.executemany("DELETE FROM task_queue WHERE id = ?",
+                                         [(i,) for i in gone])
+                        conn.executemany(
+                            """INSERT OR REPLACE INTO task_queue
+                                   (id, ord, name, params, label, key, priority)
+                               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                            [(i, current[i], by_id[i].name,
+                              json.dumps(by_id[i].params, default=str),
+                              json.dumps(by_id[i].label, default=str),
+                              by_id[i].key, int(by_id[i].priority)) for i in new])
+                        conn.executemany("UPDATE task_queue SET ord = ? WHERE id = ?",
+                                         [(current[i], i) for i in moved])
+                finally:
+                    conn.close()
+            except sqlite3.Error as exc:
+                log.warning("Queue could not be saved (%s) - will retry", exc)
+                return False
+            self._persisted = current
+        return True
+
+    def _persist_loop(self) -> None:
+        while not self._closed:
+            self._dirty.wait(timeout=5.0)
+            if self._closed:
+                return
+            if not self._dirty.is_set():
+                continue
+            time.sleep(0.5)            # Schübe bündeln (Watch-Batches, Dispatch)
+            self._dirty.clear()
+            if not self.persist_queue():
+                self._dirty.set()
+                time.sleep(2.0)
+
+    def restore_queue(self, skip: frozenset[str] = frozenset()) -> int:
+        """Beim Start: gesicherte Aufgaben wieder einreihen (vor den Watchern).
+        Liefert die Anzahl. Aufgaben mit einem Namen aus ``skip`` werden
+        verworfen statt eingereiht (Übersichtsmodus: ``FILE_WRITING_TASKS``)."""
+        if not self._persist_enabled:
+            return 0
+        conn = connect(self.db_path)
+        try:
+            rows = conn.execute(
+                "SELECT id, name, params, label, key, priority FROM task_queue ORDER BY ord"
+            ).fetchall()
+        finally:
+            conn.close()
+        restored = []
+        dropped = 0
+        for r in rows:
+            if r["name"] in skip:
+                dropped += 1
+                log.warning("Saved task %s dropped: library management is off", r["name"])
+                continue
+            try:
+                restored.append(_Queued(id=r["id"], name=r["name"],
+                                        params=json.loads(r["params"]),
+                                        label=json.loads(r["label"]), key=r["key"],
+                                        priority=bool(r["priority"])))
+            except ValueError:
+                log.warning("Saved task %s unreadable - dropped", r["name"])
+        with self._lock:
+            known = {q.key for q in self._snapshot_locked()}
+            self._pending.extend(q for q in restored if q.key not in known)
+            if restored:
+                self._next_id = max(self._next_id, max(q.id for q in restored) + 1)
+            self._persisted = {r["id"]: pos for pos, r in enumerate(rows)}
+        if restored:
+            log.info("Queue restored: %d tasks%s", len(restored),
+                     " (paused)" if self.paused else "")
+            self._wake.set()
+        if restored or dropped:
+            self._dirty.set()   # Verworfenes verschwindet so auch aus der Tabelle
+        return len(restored)
+
     def status(self) -> dict[str, Any]:
         with self._lock:
             st = dict(self._state)
+            st["quiet"] = self.quiet
+            st["paused"] = self.paused
             st["queue_pending"] = len(self._pending)
             st["queue"] = [q.label for q in self._pending]
             if self._worker_died:
@@ -589,6 +841,7 @@ class ScanEngine:
             quiet_seconds=float(source.get("quiet_seconds", 5.0)),
             poll_seconds=float(source.get("poll_seconds", 1.0)),
             known_stats=self._load_stat_memory(source["path"]),
+            inflight=self.queued_paths(source["path"]),
         )
         self._watchers[key] = watcher
         watcher.start()
@@ -613,6 +866,23 @@ class ScanEngine:
     def shutdown(self) -> None:
         """Beendet Watcher, Worker-Prozess und Schreibverbindung (idempotent)."""
         self.stop_all_watches()
+        with self._lock:
+            if self._closed:
+                return
+            self._stopping = True
+            running = self._running is not None and self._proc is not None
+            if running:
+                # Beenden = Pause an der Dateigrenze (ADR 0093): kein Fehler-
+                # Eintrag, die Fortsetzung landet in der gesicherten Schlange.
+                self._control[CTRL_HALT] = HALT_SHUTDOWN
+        if running:
+            deadline = time.monotonic() + SHUTDOWN_HALT_WAIT
+            while time.monotonic() < deadline:
+                with self._lock:
+                    if self._running is None:
+                        break
+                time.sleep(0.05)
+        self.persist_queue()
         with self._lock:
             if self._closed:
                 return
@@ -678,6 +948,7 @@ class HotfolderWatcher(threading.Thread):
         quiet_seconds: float = 5.0, poll_seconds: float = 1.0,
         clock=time.monotonic,
         known_stats: dict[str, tuple[int, int]] | None = None,
+        inflight: set[str] | None = None,
     ) -> None:
         super().__init__(name="feral-hotfolder", daemon=True)
         self.root = Path(root)
@@ -689,7 +960,8 @@ class HotfolderWatcher(threading.Thread):
         self._clock = clock
         self._stop = threading.Event()
         self._seen: dict[str, tuple[tuple[float, int], float]] = {}  # pfad -> (sig, seit)
-        self._inflight: set[str] = set()
+        # Pfade in wiedereingereihten Aufgaben gelten als in Arbeit (ADR 0093).
+        self._inflight: set[str] = set(inflight or ())
         self._enqueued_total = 0
         self._known = known_stats or {}
 

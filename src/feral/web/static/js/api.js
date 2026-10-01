@@ -101,8 +101,8 @@ export const getStats = () => api("/api/stats");
 
 /** Eine Grid-Seite: {total, offset, items}. sort ∈ added|name|size|container|rating;
     optional gefiltert nach model (Schicht 2) und rating (manuelle Schicht, exakt). */
-export const getItems = ({ limit, offset, sort, model, rating, filter, dupes, total } = {}) =>
-  api(withQuery("/api/items", { limit, offset, sort, model, rating, filter, dupes, total, view: _view }));
+export const getItems = ({ limit, offset, sort, model, rating, filter, dupes, total, folder } = {}) =>
+  api(withQuery("/api/items", { limit, offset, sort, model, rating, filter, dupes, total, folder, view: _view }));
 
 /** Kandidaten im Cover-Dialog (#165): wie getItems, aber immer im
  *  Galerie-Grundbereich — auch aus der Audioansicht heraus. */
@@ -111,8 +111,8 @@ export const getCoverCandidates = ({ filter, offset = 0, limit = 120 } = {}) =>
 
 /** Grid-Position eines Items in der aktuellen Treffermenge (ADR 0060) —
  *  Parameter wie getItems; Antwort {index} (0-basiert, null = nicht drin). */
-export const getItemPosition = ({ hash, sort, model, rating, filter, dupes } = {}) =>
-  api(withQuery("/api/items/position", { hash, sort, model, rating, filter, dupes, view: _view }));
+export const getItemPosition = ({ hash, sort, model, rating, filter, dupes, folder } = {}) =>
+  api(withQuery("/api/items/position", { hash, sort, model, rating, filter, dupes, folder, view: _view }));
 
 // -- Smart Folders (Stufe 3.3, ADR 0018) ----------------------------------------
 
@@ -134,6 +134,11 @@ export const updateFolder = (id, name, expression) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, expression }),
   });
+
+/** Manuelle Reihenfolge (#218): `hash` vor `before` bzw. hinter `after`
+ *  setzen; Antwort {index}. */
+export const moveInFolder = (id, { hash, before, after }) =>
+  postJSON(`/api/folders/${id}/order`, { hash, before, after, view: _view });
 
 /** Smart Folder löschen. */
 export const deleteFolder = (id) => api(`/api/folders/${id}`, { method: "DELETE" });
@@ -253,6 +258,15 @@ export const batchAnnotate = (hashes, fields) =>
  *  {matched, rating_set?, tagged?, model_set?, noted?, rejected?}. */
 export const bulkApply = (scope, fields) =>
   postJSON("/api/batch/apply", { ...scope, ...fields, view: _view });
+
+/** Zeitkommentare austauschen (#228, ADR 0098): Export im Scope der
+ *  Sammel-Aktion → Austauschdatei; Import erst als Vorschau, dann echt. */
+export const exportComments = (scope) =>
+  postJSON("/api/comments/export", { ...scope, view: _view });
+export const previewCommentImport = (data) =>
+  postJSON("/api/admin/comments/preview", { data });
+export const importComments = (data, source, includeSongId) =>
+  postJSON("/api/admin/comments/import", { data, source, include_song_id: includeSongId });
 
 /** Ablehnen (ADR 0041, ersetzt Löschen): Items + Metadaten raus, Hashes
  *  gesperrt — die Dateien bleiben unangetastet. */
@@ -405,6 +419,11 @@ export const getIssues = (perKind) =>
 export const resolveIssues = (issueId = null, kind = null) =>
   postJSON(withQuery("/api/admin/issues/resolve", { issue_id: issueId, kind }), {});
 
+/** Ablehnen (#217): ein Problem sofort ({rejected, resolved, skipped}) oder
+ *  alle offenen einer Art als Aufgabe ({queued, expected}). */
+export const rejectIssues = (issueId = null, kind = null) =>
+  postJSON(withQuery("/api/admin/issues/reject", { issue_id: issueId, kind }), {});
+
 /** Fundorte, deren Datei verschwunden ist: {orphans}. */
 /** Verwaiste Fundorte zählen (teuer: stat je Fundort): {total, sample, under}. */
 export const getOrphans = (under = null) =>
@@ -426,6 +445,9 @@ export const startReindex = () => postJSON("/api/admin/reindex", {});
 
 /** Re-Scan aller bekannten Fundorte einreihen. */
 export const startRescan = () => postJSON("/api/admin/rescan", {});
+export const startRecheckFiltered = () => postJSON("/api/admin/recheck-filtered", {});
+/** Hintergrund: { quiet?, paused? } — zwei unabhängige Schalter (ADR 0093). */
+export const setBackground = (change) => postJSON("/api/background", change);
 
 /** Import-Regeln (ADR 0046): Vorschau, wie viele Bestand-Items träfen. */
 export const getImportRulesPreview = () => api("/api/admin/import-rules");
@@ -451,7 +473,8 @@ export const startThumbWarm = () => postJSON("/api/admin/thumbwarm", {});
 export const startAudioWarm = () => postJSON("/api/admin/audiowarm", {});
 
 /** Thumbnail-Platten-Cache leeren: {deleted}. */
-export const clearThumbCache = () => postJSON("/api/admin/thumbcache/clear", {});
+/** Eine Cache-Art löschen (#227) — als Aufgabe: {queued, kind}. */
+export const clearCache = (kind) => postJSON(withQuery("/api/admin/cache/clear", { kind }), {});
 // „Cache zählen" (#118): Verzeichnislauf nur auf Klick, Ergebnis = gemerkter Stand.
 export const getThumbCache = () => api("/api/admin/thumbcache");
 
@@ -642,12 +665,15 @@ export function fmtDuration(sec) {
 
 /** Lautheit (A4 #161) als eine Zeile: „-14,2 LUFS · LRA 5,3 LU · True Peak
  *  -0,1 dBTP" — Einheiten sind international, nur das Dezimalzeichen folgt
- *  der Sprache. Stille (-inf) kommt als null und wird „–". */
+ *  der Sprache. Stille (-inf) kommt als null und wird „–". Mit Sample Peak
+ *  gemessen (#225): „… · Sample Peak -0,3 dBFS". */
 export function fmtLoudness(l) {
   const f = (v) => (v == null ? "–" : v.toLocaleString(STRINGS.locale,
     { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
-  return STRINGS.loudnessValue
-    .replace("{i}", f(l?.integrated)).replace("{lra}", f(l?.lra)).replace("{tp}", f(l?.true_peak));
+  const sample = l?.sample_peak !== undefined;
+  return (sample ? STRINGS.loudnessValueSample : STRINGS.loudnessValue)
+    .replace("{i}", f(l?.integrated)).replace("{lra}", f(l?.lra))
+    .replace("{tp}", f(sample ? l.sample_peak : l?.true_peak));
 }
 
 /** Kann DIESER Browser das Item zeigen/abspielen? Bilder immer; Audio
