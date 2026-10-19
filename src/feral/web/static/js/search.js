@@ -176,6 +176,7 @@ export function initSearch() {
   let dupes = false;        // Spezialansicht außerhalb des Chip-Zustands
   let liveTerms = [];       // getippte, noch nicht festgemachte Begriffe
   let galleryTotal = 0;
+  let galleryLocations = null;   // Fundort-Zeilen der Audioliste (ADR 0108): Zahl der Fundorte
   let stateSeq = 0;         // entwertet überholte Server-Antworten
   let editorIndex = null;   // offener Chip-Editor (Index in predicates)
   let rankingsEnabled = false;   // Modul-Schalter (Sidebar meldet ihn, ADR 0045)
@@ -267,7 +268,9 @@ export function initSearch() {
           <button type="button" class="chipx" title="${STRINGS.chipRemove}">✕</button>
         </span>`).join(""));
     }
-    parts.push(`<span class="crumbcount">· ${galleryTotal.toLocaleString(STRINGS.locale)}</span>`);
+    const locs = galleryLocations == null ? ""
+      : ` (${STRINGS.crumbLocations.replace("{n}", galleryLocations.toLocaleString(STRINGS.locale))})`;
+    parts.push(`<span class="crumbcount">· ${galleryTotal.toLocaleString(STRINGS.locale)}${locs}</span>`);
     if (!dupes) {
       // „+ Kriterium" (Block S5): advanced.js öffnet das Popover (Bus).
       parts.push(`<button type="button" class="crumbadd" title="${STRINGS.addCriterionTitle}">+ ${STRINGS.addCriterion}</button>`);
@@ -632,12 +635,14 @@ export function initSearch() {
 
   on("items-reloaded", (d) => {
     galleryTotal = d.total;
+    galleryLocations = d.locations ?? null;
     renderChips();
   });
   // Schonender Refresh (ADR 0057): nur die Trefferzahl nachziehen — die
   // Zustands-Resets der items-reloaded-Konsumenten sollen hier NICHT feuern.
   on("items-refreshed", (d) => {
     galleryTotal = d.total;
+    galleryLocations = d.locations ?? null;
     renderChips();
   });
   // Modul-Schalter des Ranking-Moduls (Sidebar liest ihn aus /api/stats).

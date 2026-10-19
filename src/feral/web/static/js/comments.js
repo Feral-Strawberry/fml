@@ -35,7 +35,7 @@ const loading = new Set();
 const slim = (list) => (list || []).map(({ id, at_ms, text, source }) => ({ id, at_ms, text, source }));
 
 // Herkunft importierter Kommentare (#228, ADR 0098) als kleines Etikett.
-const srcTag = (c) => (c.source ? `<span class="csrc">${esc(c.source)}</span>` : "");
+const srcTag = (c) => (c.source ? `<span class="csrc" title="${esc(c.source)}">${esc(c.source)}</span>` : "");
 
 /** Stand vom Server übernehmen (Detail, API-Antwort) — maßgeblich. */
 export function setComments(hash, list) {

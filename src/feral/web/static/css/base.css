@@ -123,9 +123,6 @@ input[type="radio"]:checked::after {
 .addir:hover { background: var(--panel2); }
 .adactions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 
-.linkbtn { background: none; border: none; color: var(--accent); cursor: pointer;
-  padding: 0 4px; font: inherit; text-decoration: underline; }
-
 /* Eingabe-Platzhalter */
 ::placeholder { color: var(--faint); }
 

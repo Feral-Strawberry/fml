@@ -205,7 +205,8 @@ def test_backfill_task_fetches_missing_subtitles_and_endpoint_serves_lines(tmp_p
     conn.commit()
     try:
         result = audio_subtitles_task(conn, {"rules": {"audio": True}}, lambda **_k: None, None)
-        assert "summary" in result
+        # Eigene Zeile statt der Scan-Zeile (#251).
+        assert result["summary"] == {"key": "sumAudioSubtitles", "params": {"n": 1, "files": 1}}
         h = hash_file(song)
         assert conn.execute("SELECT COUNT(*) FROM raw_metadata WHERE file_hash = ? AND source LIKE '%.subtitle'",
                             (h,)).fetchone()[0] == 1
@@ -252,3 +253,21 @@ def test_hostile_lyrics_end_quickly_and_stay_small():
     out = ls.parse_sylt(sylt)
     assert len(out) == ls.MAX_LINES and len(out[0][2]) == ls.MAX_ROW
     assert time.monotonic() - started < 5
+
+
+def test_read_bounded_caps_output_and_times_out():
+    """#251: die Untertitel-Spur wird begrenzt gelesen, nicht erst ganz
+    gepuffert und dann gekappt."""
+    import subprocess
+    import sys
+
+    from feral.extract.video_ffprobe import read_bounded
+
+    rc, out = read_bounded([sys.executable, "-c", "print('ok')"], limit=100, timeout=10)
+    assert (rc, out.strip()) == (0, b"ok")
+    # Zu viel: Prozess wird beendet, keine Ausgabe statt einer gekappten.
+    rc, out = read_bounded([sys.executable, "-c", "import sys\nwhile True: sys.stdout.write('x' * 65536)"],
+                           limit=1024, timeout=10)
+    assert out is None
+    with pytest.raises(subprocess.TimeoutExpired):
+        read_bounded([sys.executable, "-c", "import time; time.sleep(30)"], limit=100, timeout=0.5)

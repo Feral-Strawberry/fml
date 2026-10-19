@@ -113,7 +113,7 @@ def test_unicode_text_in_itxt_roundtrips():
 def test_non_png_signature_warns_without_items():
     result = _extract_bytes(b"not a png at all, just text")
     assert result.items == []
-    assert any("Signatur" in w for w in result.warnings)
+    assert any("signature" in w for w in result.warnings)
 
 
 def test_skips_large_idat_and_still_finds_trailing_text():
@@ -131,7 +131,7 @@ def test_truncated_chunk_warns():
     good = build_png(include_iend=False)
     truncated_header = struct.pack(">I", 9999) + b"tEXt" + b"parameters"  # zu kurz
     result = _extract_bytes(good + truncated_header)
-    assert any("abgeschnitten" in w.lower() for w in result.warnings)
+    assert any("truncated" in w.lower() for w in result.warnings)
 
 
 def test_missing_iend_warns():
@@ -208,7 +208,7 @@ def test_ztxt_decompression_bomb_is_refused_not_expanded():
     (item,) = result.items
     assert item.text is None            # nicht entpackt
     assert item.encoding == "binary"    # als Roh-Bytes behalten
-    assert any("bombe" in w.lower() for w in result.warnings)
+    assert any("bomb" in w.lower() for w in result.warnings)
 
 
 def test_itxt_decompression_bomb_is_refused_not_expanded():
@@ -216,7 +216,7 @@ def test_itxt_decompression_bomb_is_refused_not_expanded():
     (item,) = result.items
     assert item.text is None
     assert item.encoding == "binary"
-    assert any("bombe" in w.lower() for w in result.warnings)
+    assert any("bomb" in w.lower() for w in result.warnings)
 
 
 def test_bomb_does_not_stop_later_chunks():

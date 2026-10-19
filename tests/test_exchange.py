@@ -1,5 +1,6 @@
-"""Austausch: Zeitkommentare (#228, ADR 0098) und Musik-Angaben von Hand
-(#256, ADR 0101). Export, Prüfung, Vorschau, Import."""
+"""Austausch: Zeitkommentare (#228, ADR 0098), Musik-Angaben von Hand
+(#256, ADR 0101) und Songtext von Hand (#287, ADR 0106). Export, Prüfung,
+Vorschau, Import."""
 
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ import json
 import pytest
 from fastapi import HTTPException, Request
 
-from feral.db import connect, manual, manual_fields, store_extraction, store_interpretations
+from feral.db import connect, manual, manual_fields, manual_lyrics, store_extraction, store_interpretations
 from feral.extract.types import ContainerExtraction, RawMetadataItem
 from feral.interpret import interpret_items
 from feral.interpret.reparse import raw_items_for, reinterpret
@@ -332,4 +333,84 @@ def test_fields_only_land_on_songs(tmp_path):
     items = exchange.parse_exchange(_new_file(fields={"artist": ["Anna"]}))
     assert exchange.preview_import(there, items)["by_hash"]["fields_new"] == 0
     assert exchange.apply_import(there, items, source="X")["fields_set"] == 0
+    there.close()
+
+
+# -- Songtext von Hand (#287, ADR 0106) ------------------------------------------------
+
+
+def _lyrics(conn, h, lines):
+    with conn:
+        manual_lyrics.set_lyrics(conn, h, manual_lyrics.check_lines(lines))
+        reinterpret(conn, [h])
+
+
+TEXT = [[2000, None, "[Verse]"], [2000, 5500, "Grauer Himmel"], [6000, None, "Regen"]]
+
+
+def test_export_carries_lyrics_by_hand_only_with_its_box(tmp_path):
+    here = _music(tmp_path, "hier.sqlite")
+    _lyrics(here, BARE, TEXT)
+    (item,) = exchange.export_exchange(here)["items"]
+    assert (item["file_hash"], item["lyrics"]) == (BARE, TEXT)
+    assert exchange.export_exchange(here, lyrics=False)["items"] == []
+    only = exchange.export_exchange(here, comments=False, fields=False)["items"]
+    assert [i["file_hash"] for i in only] == [BARE]
+    here.close()
+
+
+def test_lyrics_roundtrip_new_same_differing(tmp_path):
+    here, there = _music(tmp_path, "hier.sqlite"), _music(tmp_path, "dort.sqlite")
+    _lyrics(here, TAGGED, TEXT)
+    _lyrics(here, BARE, TEXT)
+    _lyrics(there, BARE, [[2000, None, "[Verse]"], [2000, None, "Blauer Himmel"]])
+    items = exchange.parse_exchange(json.loads(json.dumps(exchange.export_exchange(here))))
+
+    preview = exchange.preview_import(there, items)
+    assert preview["lyrics"] == 2
+    b = preview["by_hash"]
+    assert (b["lyrics_new"], b["lyrics_same"], b["lyrics_differing"]) == (1, 0, 1)
+    assert preview["differing"] == [{"name": "demo.mp3", "field": "lyrics",
+                                     "here": "0:02.0 Blauer Himmel", "file": "0:02.0 Grauer Himmel",
+                                     "song_id": False}]
+
+    done = exchange.apply_import(there, items, source="Sänger", now=T0)
+    assert (done["lyrics_set"], done["lyrics_same"], done["lyrics_kept"]) == (1, 0, 1)
+    assert manual_lyrics.lines_of(there, TAGGED) == (TEXT, "Sänger")
+    assert _value(there, TAGGED, "lyrics") == [("manual", "[Verse]\nGrauer Himmel\nRegen")]
+    assert manual_lyrics.lines_of(there, BARE)[0][1][2] == "Blauer Himmel"   # eigener bleibt
+
+    again = exchange.apply_import(there, items, source="X")
+    assert (again["lyrics_set"], again["lyrics_same"], again["lyrics_kept"]) == (0, 1, 1)
+    forced = exchange.apply_import(there, items, source="X", overwrite_fields=True)
+    assert (forced["lyrics_set"], forced["lyrics_kept"]) == (1, 0)
+    assert manual_lyrics.lines_of(there, BARE) == (TEXT, "X")
+    here.close()
+    there.close()
+
+
+def test_lyrics_difference_names_a_missing_line():
+    assert exchange._first_difference([[0, None, "a"]], [[0, None, "a"], [900, None, "b"]]) == (
+        "–", "0:00.9 b")
+    assert exchange._first_difference([[None, None, "a"]], [[None, None, "b"]]) == ("a", "b")
+
+
+def test_lyrics_parse_and_land_only_on_songs(tmp_path):
+    (item,) = exchange.parse_exchange(_new_file(lyrics=[[None, None, "  eins  "], [None, None, ""]]))
+    assert item.lyrics == [[None, None, "eins"]]
+    assert exchange.parse_exchange(_new_file(lyrics=[]))[0].lyrics is None
+    assert exchange.parse_exchange(_new_file())[0].lyrics is None
+    (old,) = exchange.parse_exchange(_file(lyrics=[[None, None, "x"]]))
+    assert old.lyrics is None                # das alte Format kennt nur Kommentare
+    for bad in ("Text", [[5000, None, "a"], [1000, None, "b"]], [[None, None, "a\x07"]],
+                [[None, None, "x"]] * 2001):
+        with pytest.raises(UserError) as exc:
+            exchange.parse_exchange(_new_file(lyrics=bad))
+        assert exc.value.message["key"] == "exchangeInvalid"
+    there = connect(tmp_path / "bild.sqlite")
+    store_extraction(there, file_hash=SONG, file_size=1, path="/lib/bild.png",
+                     extraction=ContainerExtraction(container="png", media_kind="image"))
+    items = exchange.parse_exchange(_new_file(lyrics=[[None, None, "x"]]))
+    assert exchange.preview_import(there, items)["by_hash"]["lyrics_new"] == 0
+    assert exchange.apply_import(there, items, source="X")["lyrics_set"] == 0
     there.close()

@@ -6,6 +6,140 @@ Was sich zwischen den Snapshot-Releases geändert hat, aus Sicht der
 Nutzer. Versionen sind Datums-Versionen (`JJJJ.MM` oder `JJJJ.MM.N`);
 die laufende Instanz zeigt ihre Version in Admin → Übersicht.
 
+## 2026.10.2 (2026-10-20)
+
+Bisher war fml eine Einbahnstraße: Medien kamen hinein und blieben dort.
+Jetzt geht es auch **hinaus**. Ein Stapel Bilder für den Videoschnitt,
+die Songs für eine CD, zehn Sekunden aus einem Song als Vorlage für den
+nächsten Workflow: fml legt **Kopien** und **Ausschnitte** in einen
+Export-Ordner, und Songs nehmen dabei mit, was in fml an **Angaben,
+Songtext und Cover** gepflegt ist. Dazu kommen ein **Songtext-Editor zum
+Mitklopfen** der Zeiten und eine Audioliste, die eine Musiksammlung
+**nach Ordnern** zeigt.
+
+### Nach dem Update
+
+1. **Wie gewohnt mit `start.sh` bzw. `start.bat` starten.** Die
+   Abhängigkeiten sind unverändert.
+2. **Datenbank:** wird beim ersten Start automatisch auf Schema 35
+   migriert (eine neue Migration). Vorher ein Backup der `feral.sqlite`
+   anlegen, wie bei jedem Update.
+3. **Für Kopien und Ausschnitte einmal einen Export-Ordner eintragen:**
+   Admin → Konfiguration → Media Library → **Export-Ordner**. Das Modul
+   **Ausschnitt** ist ab Werk aus (Admin → Konfiguration → Module).
+4. **Audioliste:** Die Darstellung „Angaben" ordnet die Songs jetzt nach
+   Ordnern. Wer die gewohnte Liste mit einer Zeile je Song will: ☰▾ →
+   **Je Song**; der Browser merkt sich die Wahl.
+5. **Austausch mit einem anderen fml:** Eine ältere Version liest
+   Austauschdateien mit Songtext, lässt den Songtext aber weg. Ein Cover,
+   das in einer exportierten Kopie steckt, zeigt erst 2026.10.2 als
+   Anzeigebild. Für beides brauchen beide Seiten diesen Stand.
+6. Ein Re-Scan oder „Neu interpretieren" ist nicht nötig.
+
+### Neu: Kopien exportieren
+
+- **⚡ Sammel-Aktion → Export → Kopien exportieren …** legt die Auswahl
+  oder alle Treffer als Kopie in einen Ordner wie
+  `2026-10-20 Musikvideo/`: flach oder nach Jahr/Monat/Tag, mit
+  optionalem Paketnamen.
+- **Immer das Original, Bit für Bit**, mit seinem Änderungsdatum, und
+  nach dem Schreiben gegen das Original geprüft. Liegt dieselbe Datei
+  schon dort, wird sie übersprungen; eine andere Datei gleichen Namens
+  bekommt `name (1).ext`, wie im Dateimanager.
+- Der Dialog zeigt vorher Zahl, Größe und freien Platz; reicht der Platz
+  nicht, startet nichts. Das Ergebnis nennt kopiert, schon da und nicht
+  erreichbar, samt Grund.
+- Geht auch im **Übersichtsmodus**: Der Export liest die Originale nur
+  und schreibt ausschließlich in den Export-Ordner. Der darf weder in der
+  Library, einem Watchordner oder dem Cache liegen noch katalogisierte
+  Medien enthalten; das prüft fml schon beim Speichern.
+- Kodak Photo CD geht als PNG hinaus, auf Wunsch als Rohdatei.
+
+### Neu: Angaben von Hand reisen in der Kopie mit
+
+- Mit dem Häkchen **„Angaben von Hand: in die Kopie schreiben"** bekommen
+  MP3 und M4A in der **Kopie** die Musik-Angaben von Hand, den Songtext
+  von Hand (mit Zeiten je Zeile) und das gewählte Cover. Das Original
+  bleibt unangetastet.
+- **MP3:** Alle übrigen Einträge im Tag bleiben erhalten, auch die
+  Suno-Kennung und Herkunftsdaten. **M4A:** fml packt die Datei mit ffmpeg
+  neu, ohne den Ton anzufassen. In beiden Fällen prüft fml danach, dass
+  der Ton unverändert ist.
+- **Das Cover kommt an:** Ein anderes fml erkennt das mitgegebene Cover
+  und zeigt es als Anzeigebild, auch bei Songs von Suno.
+
+### Neu: Modul Ausschnitt
+
+- **✂ Ausschnitt** im Panel bei Songs und Videos öffnet eine Zeitleiste
+  über die ganze Länge, bei Songs mit Wellenform. Bereich ziehen,
+  verschieben oder Anfang, Ende und Länge eintippen; **I** und **O**
+  setzen die Ränder an die Abspielstelle. Der Bereich läuft beim Anhören
+  in Schleife.
+- **Exportieren** schreibt den Ton als WAV, bei Videos auf Wunsch auch
+  MP4 (H.264) mit oder ohne Ton, genau an der markierten Stelle
+  geschnitten. In der Regel in Sekunden, danach zeigt 📂 die Datei im
+  Dateimanager.
+- Die Ansicht bleibt offen, damit gleich das nächste Stück aus derselben
+  Datei folgen kann.
+
+### Neu: Songtext von Hand
+
+- Unter **KURATIERT → Songtext** lässt sich ein falscher Songtext
+  korrigieren oder ein fehlender eintragen: Zeilen tippen, teilen,
+  verbinden, löschen, einen ganzen Text einfügen, Abschnitte wie
+  `[Chorus]` markieren.
+- **Zeiten mitklopfen:** Leertaste startet den Song, bei jeder Zeile
+  **Strg+Enter** (Mac: **⌘+Enter**). Danach einzelne Zeilen nachbessern,
+  Zeiten eintippen, mit ▶ ab einer Sekunde vor der Zeile prüfen.
+- Der Songtext von Hand gilt überall wie einer aus der Datei: in der
+  Abspielleiste, als Abschnitte auf der Welle, in der Volltextsuche. Die
+  Datei bleibt unverändert; **Stand der Datei wiederherstellen** holt den
+  alten Text zurück.
+- Er reist in der **Austauschdatei** mit (Häkchen „Songtext"), mit
+  Vorschau neu, gleich und abweichend wie bei den Musik-Angaben.
+
+### Audioliste und Wiedergabe
+
+- **Fundorte und Ordner:** In „Angaben" wird aus ☰ das Menü **☰▾**:
+  **Nach Ordnern** (Standard, mit einem Kopf je Ordner), **Je Fundort**
+  (jede Dublette mit allen ihren Ordnern untereinander) oder **Je Song**.
+  Ein Klick auf einen Ordnernamen öffnet ihn im Dateimanager, **⌕** zeigt
+  nur noch diesen Ordner.
+- **Neues Suchwort `ordner:`** (englisch `folder:`): `ordner: Kiss_Tribute`
+  findet jeden Ordner dieses Namens, in Anführungszeichen einen genauen
+  Pfad. Die Tipphilfe schlägt es vor.
+- **Zeitachse höchstens 7 Minuten:** Ein Konzert-Mitschnitt macht die
+  anderen Wellen nicht mehr winzig; er füllt seine Zeile gestaucht und
+  trägt **»**.
+- **Leertaste und ←/→** meinen den Song in der Abspielleiste, wie die
+  Medientasten der Tastatur, egal welche Zeile ausgewählt ist. **Enter**
+  spielt die ausgewählte Zeile.
+- **Cover für mehrere Songs:** Ein ganzes Album bekommt sein Cover in
+  einem Zug, und ebenso lässt es sich für die Auswahl wieder entfernen.
+
+### Kleinere Verbesserungen
+
+- Die Sammel-Aktion hat zwei Abschnitte: **Treffer ändern** und
+  **Export**, der nichts an der Library ändert.
+- Automatische Nachläufer ohne Arbeit (Thumbnails, Audio analysieren,
+  Läufe beim Start) verdecken im Hintergrund-Widget nicht mehr das
+  Ergebnis der letzten Aufgabe.
+- Ein gesperrter Knopf „Austausch importieren" sagt, warum.
+- Lange Kommentar-Etiketten im Panel werden gekürzt, der ganze Name steht
+  im Tooltip.
+- Extraktor-Warnungen unter Admin → Probleme sind technisch und
+  englisch; ein Re-Scan quittiert, was er nicht mehr findet.
+
+### Robuster
+
+- Eine **kopierte Datenbank** startet ohne die gesicherten Aufgaben des
+  anderen Rechners; deren Pfade gehören nicht dorthin.
+- Eine übergroße Untertitel-Spur in einer Musikdatei hält den Scan nicht
+  mehr auf, ebenso eine präparierte Datei mit zehntausenden Warnungen:
+  Unter Probleme landen davon höchstens 50 und eine Sammelzeile.
+- „Cache löschen" aus einer gesicherten Aufgabe nimmt die Cache-Ordner
+  der aktuellen Konfiguration.
+
 ## 2026.10.1 (2026-10-02)
 
 Das Audio-Modul ist damit vollständig: **Musik-Angaben von Hand**

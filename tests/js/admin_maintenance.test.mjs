@@ -306,9 +306,11 @@ test("Austausch importieren (ADR 0101): Vorschau zeigt Musik-Angaben; abweichend
   el("ciSource").value = "Anna";
   el("ciSource").dispatchEvent(new DomEvent("input", { bubbles: true }));
   assert.equal(el("ciGo").disabled, true, "nichts Neues: ohne Häkchen gibt es nichts zu übernehmen");
+  assert.ok(el("ciWhy").textContent.includes("abweichende"), "gesperrt mit Grund (#266): Verweis aufs Häkchen");
   el("ciOver").checked = true;
   el("ciOver").dispatchEvent(new DomEvent("change", { bubbles: true }));
   assert.equal(el("ciGo").disabled, false, "mit Häkchen gewinnt die Datei");
+  assert.equal(el("ciWhy").textContent, "", "freier Knopf: kein Grund");
   preview = { ...preview, differing: [], by_hash: { ...preview.by_hash, fields_same: 3, fields_differing: 0 } };
   click(el("ciGo"));
   await flush(10);
@@ -316,4 +318,79 @@ test("Austausch importieren (ADR 0101): Vorschau zeigt Musik-Angaben; abweichend
   assert.deepEqual([sent[0].source, sent[0].overwrite_fields, sent[0].include_song_id], ["Anna", true, false]);
   assert.ok(el("ciMsg").textContent.includes("1"), "Zusammenfassung nennt die übernommenen Angaben");
   assert.equal(el("ciOverLbl").hidden, true, "nach dem Import ist nichts mehr abweichend");
+});
+
+test("Austausch importieren (#266): gesperrter Knopf nennt den Grund", async () => {
+  const { DomEvent } = await import("./dom.mjs");
+  const none = { items: 0, new: 0, known: 0, fields_new: 0, fields_same: 0, fields_differing: 0 };
+  const base = { items: 1, comments: 1, fields: 0, by_hash: none, by_song_id: none,
+                 song_id_items: [], missing: 0, missing_names: [], differing: [] };
+  let preview;
+  mockApi.post("/api/admin/exchange/preview", () => preview);
+  const el = (id) => document.getElementById(id);
+  const fire = (id, type) => el(id).dispatchEvent(new DomEvent(type, { bubbles: true }));
+  const load = async (p) => {
+    preview = p;
+    el("ciFile").files = [{ size: 10, text: async () => JSON.stringify({ format: "fml-exchange" }) }];
+    fire("ciFile", "change");
+    await flush(10);
+  };
+  el("ciSource").value = "";
+  el("ciFile").files = []; fire("ciFile", "change");   // Stand des Tests davor verwerfen
+  await flush(10);
+  assert.equal(el("ciGo").disabled, true);
+  assert.equal(el("ciWhy").textContent, "", "ohne Datei spricht die Vorschau, nicht der Grund");
+
+  await load({ ...base, by_hash: { ...none, items: 1, new: 1 } });
+  assert.equal(el("ciGo").disabled, true);
+  assert.ok(el("ciWhy").textContent.includes("von wem"), "Neues da, Herkunft fehlt");
+  el("ciSource").value = "Anna"; fire("ciSource", "input");
+  assert.equal(el("ciGo").disabled, false);
+  assert.equal(el("ciWhy").textContent, "");
+
+  await load({ ...base, missing: 1, missing_names: ["weg.mp3"] });
+  assert.equal(el("ciGo").disabled, true);
+  assert.ok(el("ciWhy").textContent.includes("Keiner der Songs"), "nichts gefunden");
+
+  await load({ ...base, by_hash: { ...none, items: 1, known: 1 } });
+  assert.ok(el("ciWhy").textContent.includes("schon vorhanden"), "alles schon da");
+
+  await load({ ...base, by_song_id: { ...none, items: 1, new: 1 },
+               song_id_items: [{ name: "a.mp3", here: ["b.mp3"] }] });
+  assert.equal(el("ciGo").disabled, true);
+  assert.ok(el("ciWhy").textContent.includes("Suno-ID"), "Neues nur hinter dem Suno-Häkchen");
+  el("ciSong").checked = true; fire("ciSong", "change");
+  assert.equal(el("ciGo").disabled, false);
+  assert.equal(el("ciWhy").textContent, "");
+});
+
+test("Austausch importieren (ADR 0106): Songtexte in Vorschau, Sperre und Zusammenfassung", async () => {
+  const { DomEvent } = await import("./dom.mjs");
+  const none = { items: 0, new: 0, known: 0, fields_new: 0, fields_same: 0, fields_differing: 0,
+                 lyrics_new: 0, lyrics_same: 0, lyrics_differing: 0 };
+  const preview = { items: 2, comments: 0, fields: 0, lyrics: 2,
+    by_hash: { ...none, items: 2, lyrics_new: 1, lyrics_differing: 1 }, by_song_id: none,
+    song_id_items: [], missing: 0, missing_names: [],
+    differing: [{ name: "eigen.mp3", field: "lyrics", here: "0:02.0 Blauer Himmel",
+                  file: "0:02.0 Grauer Himmel", song_id: false }] };
+  mockApi.post("/api/admin/exchange/preview", () => preview);
+  mockApi.post("/api/admin/exchange/import", () => (
+    { added: 0, known: 0, fields_set: 0, fields_same: 0, fields_kept: 0,
+      lyrics_set: 1, lyrics_same: 0, lyrics_kept: 1 }));
+  const el = (id) => document.getElementById(id);
+  el("ciFile").files = [{ size: 10, text: async () => JSON.stringify({ format: "fml-exchange" }) }];
+  el("ciFile").dispatchEvent(new DomEvent("change", { bubbles: true }));
+  await flush(10);
+  const text = el("ciPrev").textContent;
+  assert.ok(text.includes("2 Songtexte"), "Datei-Zeile nennt die Songtexte");
+  assert.ok(text.includes("Songtexte: 1 neu · 0 gleich · 1 abweichend"), "Zähler je Fundweg");
+  assert.ok(text.includes("eigen.mp3 · Songtext") && text.includes("Grauer Himmel"), "erste abweichende Zeile");
+  assert.equal(el("ciOverLbl").hidden, false, "Abweichender Songtext zeigt das Häkchen");
+  el("ciSource").value = "Sänger";
+  el("ciSource").dispatchEvent(new DomEvent("input", { bubbles: true }));
+  assert.equal(el("ciGo").disabled, false, "ein neuer Songtext reicht zum Übernehmen");
+  click(el("ciGo"));
+  await flush(10);
+  assert.ok(el("ciMsg").textContent.includes("1 Songtexte übernommen"));
+  assert.ok(el("ciMsg").textContent.includes("1 abweichende eigene Songtexte behalten"));
 });

@@ -139,7 +139,9 @@ test("Mehrere Kommentare zugleich stapeln sich nach oben", async () => {
 
 test("K: Kommentar an der Abspielstelle der ausgewählten Zeile, Enter speichert", async () => {
   emit("selection-changed", { hash: hashOf(2), index: 1 });
-  keydown("ArrowRight");                        // Song 2: eigener Abspielkopf auf 0:05
+  // Song 2: eigener Abspielkopf auf 0:05, ohne zu spielen (←/→ gälten dem
+  // Song 1 in der Leiste, #260).
+  player.nudge({ file_hash: hashOf(2) }, 5);
   await flush();
   keydown("k");
   const box = document.getElementById("comprompt");
@@ -174,6 +176,8 @@ test("Detailpanel: Abschnitt listet, Klick springt, ✕ löscht", async () => {
   assert.deepEqual(rows.map((r) => r.querySelector(".t").textContent), ["0:10", "1:40"]);
   // Herkunft importierter Kommentare (#228) als Etikett, nur wo es eine gibt.
   assert.equal(rows[0].querySelector(".csrc").textContent, "Sänger");
+  // Im Panel gekürzt (#251): der ganze Name steht im Tooltip.
+  assert.equal(rows[0].querySelector(".csrc").getAttribute("title"), "Sänger");
   assert.equal(rows[1].querySelector(".csrc"), null);
   click(rows[0].querySelector(".ctext"));
   await flush();

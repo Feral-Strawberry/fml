@@ -10,17 +10,19 @@ import asyncio
 import contextlib
 import json
 import logging
+import math
 import os
 import platform
 import re
+import shutil
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
@@ -37,31 +39,37 @@ from ..config import (
     thumbnail_workers as cfg_thumb_workers,
     ui_show_dupes as cfg_show_dupes,
     library_root as cfg_library_root,
+    export_root as cfg_export_root,
     library_verwaltung as cfg_library_verwaltung,
     instance_accent as cfg_instance_accent,
     instance_name as cfg_instance_name,
     rankings_enabled as cfg_rankings_enabled,
     audio_enabled as cfg_audio_enabled,
+    clip_enabled as cfg_clip_enabled,
     audio_true_peak as cfg_audio_true_peak,
+    jxr_tone as cfg_jxr_tone,
     web_port as cfg_web_port,
     load_config,
     thumbnail_size,
     update_config_file,
 )
-from ..db import connect, folders as folders_db, manual, manual_fields, optimize
+from ..db import connect, folders as folders_db, manual, manual_fields, manual_lyrics, optimize
 from ..processes import effective_workers
 from ..db import rankings as rankings_db
 from ..interpret import a1111_graph
 from ..interpret.reparse import reinterpret
 from .. import reveal
+from ..extract.jxr import Tone
 from ..thumbs import (
-    DEFAULT_SIZE, PREVIEW_CACHED_MIMES, ThumbPool, fail_reason, preview_cache_file,
-    render_preview, thumb_path, write_preview,
+    DEFAULT_SIZE, PREVIEW_CACHED_MIMES, ThumbPool, fail_reason,
+    preview_cache_file, preview_variant, render_preview, thumb_path, write_preview,
 )
 from .. import audio_analysis
 from . import admin as admin_lib
 from . import bulk as bulk_lib
 from . import exchange
+from . import clip as clip_lib
+from . import export as export_lib
 from . import filters, library
 from .cache import COLD_KEY, EpochCache
 from .media import ABORTED_KEY, MediaFileResponse
@@ -73,12 +81,14 @@ from .. import __version__ as feral_version
 
 _STATIC = Path(__file__).parent / "static"
 
+# Womit der Export-Ordner kollidiert (ADR 0103 Punkt 3) → Meldungsschlüssel.
+_EXPORT_CONFLICT = {"library": "errExportRootLibrary", "watch": "errExportRootWatch",
+                    "cache": "errExportRootCache", "originals": "errExportRootOriginals"}
+
 # Item-IDs sind SHA-256-Hexstrings — alles andere ist keine gültige Anfrage.
 _HASH = re.compile(r"^[0-9a-f]{64}$")
-
-
-class ScanRequest(BaseModel):
-    path: str
+# Kennung, die die Ausschnitt-Ansicht ihrem Lauf mitgibt (ADR 0105).
+_CLIP_TOKEN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class ImportRequest(BaseModel):
@@ -136,15 +146,7 @@ class WatchSaveRequest(BaseModel):
     sources: list[WatchSourceModel]
 
 
-class LocationModel(BaseModel):
-    name: str
-    path: str
-
-
 class ConfigUpdate(BaseModel):
-    # locations (Browser-Lesezeichen) sind seit dem Watchordner-Block (Feral Strawberry,
-    # 2026-07-09) kein GUI-Konzept mehr; None = [[scan.locations]] unangetastet.
-    locations: list[LocationModel] | None = None
     thumbnail_size: int
     library_root: str | None = None
     verwaltung: bool | None = None              # Library-Verwaltung (ADR 0041, I4)
@@ -166,10 +168,13 @@ class ConfigUpdate(BaseModel):
     rankings_enabled: bool | None = None
     # Audio-Modul (ADR 0083): None = Eintrag unangetastet lassen.
     audio_enabled: bool | None = None
+    clip_enabled: bool | None = None
     # Langsam-Schwelle in ms (#110): 0 = nie warnen; None = unangetastet.
     slow_request_ms: int | None = None
     # Startwert des Hintergrund-Modus (ADR 0093): normal | quiet.
     background: str | None = None
+    # Export-Ordner (ADR 0103): leer = Eintrag entfernen; None = unangetastet.
+    export_root: str | None = None
 
 
 class BackgroundRequest(BaseModel):
@@ -196,8 +201,11 @@ class NotesUpdate(BaseModel):
     notes: str | None = None
 
 
-class CoverRequest(BaseModel):
-    cover: str
+class CoverBatchRequest(BaseModel):
+    """Cover für eine Auswahl (#281): ``cover`` nur beim Setzen."""
+
+    hashes: list[str]
+    cover: str | None = None
 
 
 class CommentCreate(BaseModel):
@@ -268,6 +276,14 @@ class MusicFieldsState(BaseModel):
     hashes: list[str]
 
 
+class LyricsUpdate(BaseModel):
+    """Songtext von Hand eines Songs setzen (ADR 0106): die ganze Fassung
+    als Zeilen ``[start_ms|null, end_ms|null, "Zeile"]``; eine leere Liste
+    entfernt sie (der Songtext aus der Datei gilt wieder)."""
+
+    lines: list[Any]
+
+
 class MusicFieldsUpdate(BaseModel):
     """Musik-Angaben von Hand für eine Auswahl setzen (ADR 0101): nur
     gesendete Felder ändern sich, ``""`` entfernt die Angabe von Hand
@@ -284,14 +300,45 @@ MUSIC_FIELDS_INLINE = 200
 
 class ExchangeExportRequest(BaseModel):
     """Austauschdatei exportieren (#228, ADR 0101): Scope wie bei den
-    Sammel-Aktionen; ``comments``/``fields`` sind die beiden Häkchen
-    (Zeitkommentare, Musik-Angaben von Hand)."""
+    Sammel-Aktionen; ``comments``/``fields``/``lyrics`` sind die Häkchen
+    (Zeitkommentare, Musik-Angaben und Songtext von Hand, ADR 0106)."""
 
     filter: str = ""
     hashes: list[str] | None = None
     view: str | None = None
     comments: bool = True
     fields: bool = True
+    lyrics: bool = True
+
+
+class ExportRequest(BaseModel):
+    """Kopie-Export (ADR 0103): Scope wie bei den Sammel-Aktionen; ``name``
+    = Paketname (optional), ``layout`` = ``flat`` | ``date`` (Jahr/Monat/
+    Tag), ``converted`` = ``png`` | ``original`` für umgerechnete Formate,
+    ``tags`` = Angaben von Hand in die Kopien der Songs schreiben (ADR 0107)."""
+
+    filter: str = ""
+    hashes: list[str] | None = None
+    view: str | None = None
+    name: str = ""
+    layout: str = "flat"
+    converted: str = "png"
+    tags: bool = False
+
+
+class ClipRequest(BaseModel):
+    """Ausschnitt (ADR 0105): Bereich in Sekunden, ``outputs`` aus ``av`` |
+    ``video`` | ``audio``; ``token`` wählt die Ansicht selbst und findet
+    damit ihren Lauf im Verlauf wieder."""
+
+    start: float
+    end: float
+    outputs: list[str]
+    token: str = ""
+
+
+class RevealPathRequest(BaseModel):
+    path: str
 
 
 class BulkApplyRequest(BaseModel):
@@ -612,6 +659,14 @@ def create_app(
         # Peak-Art der Analyse (#225) je Aufruf frisch, wie der Modul-Schalter.
         return config_path is None or cfg_audio_true_peak(load_config(config_path))
 
+    def jxr_tone() -> Tone:
+        # Einstellungen der JXR-Umrechnung (ADR 0104) je Aufruf frisch.
+        return Tone.of(cfg_jxr_tone(load_config(config_path) if config_path else {}))
+
+    def warm_thumbs(**kwargs: bool) -> None:
+        engine.enqueue_thumb_warm(thumb_cache, thumb_size, jxr=jxr_tone().params(),
+                                  preview_cache=preview_cache, **kwargs)
+
     def warm_audio_auto() -> None:
         # Nachläufer nach Import/Watch/Einschalten (A4 #161): nur mit Modul;
         # ohne neue Audio-Items ist der Lauf ein schneller Leerlauf.
@@ -641,7 +696,21 @@ def create_app(
     # Gesicherte Warteschlange wieder einreihen (ADR 0093), vor den Watchern.
     # Im Übersichtsmodus kommt kein dateischreibender Auftrag zurück: die
     # Hände-weg-Garantie (ADR 0041) gilt auch für Aufgaben von vor dem Neustart.
-    engine.restore_queue(skip=frozenset() if verwaltung_enabled() else FILE_WRITING_TASKS)
+    # Ordner aus der laufenden Config gehen vor die gesicherten (#251).
+    # Export und Ausschnitt schreiben nur in den Export-Ordner, der JETZT
+    # gilt: wurde er geändert, ist die gesicherte Aufgabe hinfällig.
+    export_root_now = (cfg_export_root(load_config(config_path))
+                       if config_path is not None else None)
+
+    def _target_applies(name: str, params: dict) -> bool:
+        return name not in ("export", "clip") or (
+            isinstance(params, dict) and params.get("root") == export_root_now)
+
+    engine.restore_queue(skip=frozenset() if verwaltung_enabled() else FILE_WRITING_TASKS,
+                         refresh={"cache_clear": {"dirs": cache_dirs},
+                                  "import_rules": {"thumb_cache": str(thumb_cache)},
+                                  "issues_reject": {"thumb_cache": str(thumb_cache)}},
+                         keep=_target_applies)
 
     # fundort:-Prädikat + Library/Extern-Zahlen (ADR 0041, I2): filters darf
     # config nicht importieren — die Root kommt über diesen Provider, je
@@ -882,6 +951,8 @@ def create_app(
         # Modul-Schalter Audio (ADR 0083): die UI blendet Audio-Oberfläche
         # (Zähler, typ:-Wert) nur mit Modul ein.
         payload["audio"] = cfg_audio_enabled(cfg)
+        # Modul-Schalter Ausschnitt (ADR 0105): der Knopf im Panel.
+        payload["clip"] = cfg_clip_enabled(cfg)
         # Hilfe (--help-dir, ADR 0091): „?“ in der Kopfzeile nur, wenn ein
         # Hilfe-Ordner ausgeliefert wird.
         payload["hilfe"] = help_mounted
@@ -900,25 +971,6 @@ def create_app(
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=_err(exc))
 
-    @app.get("/api/facets")
-    def facets(request: Request, filter: str | None = Query(None)) -> dict:
-        # Sidebar-Gruppen Dateityp/Format/Auflösung/Jahr + LoRA/Eingangsbild —
-        # je Gruppe zählt der Kontext der ANDEREN Chips (Block S4, ADR 0037).
-        # Ungefiltert kommt das Ergebnis aus dem Epochen-Cache (ADR 0071);
-        # gefiltert rechnet es je Ausdruck über der gecachten Basis. Die
-        # Sidebar selbst holt alle Gruppen über /api/sidebar (#99).
-        with read_conn() as conn:
-            try:
-                base = facets_base(conn, request.scope)
-                payload = (library.facets_payload(conn, filter_expr=filter, base=base)
-                           if filter else dict(base))
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=_err(exc))
-            # UI-Schalter: Dubletten-Zeile ausblendbar (Konfiguration).
-            payload["show_dupes"] = (cfg_show_dupes(load_config(config_path))
-                                     if config_path is not None else True)
-            return payload
-
     @app.get("/api/items")
     def items(
         request: Request,
@@ -932,6 +984,7 @@ def create_app(
         total: bool = Query(True),
         view: str | None = Query(None),
         folder: int | None = Query(None),
+        rows: str | None = Query(None),
     ) -> dict:
         with read_conn() as conn:
             vp = view_preds(conn, view, request.scope)
@@ -945,6 +998,8 @@ def create_app(
                     # der ersten Seite, nur in der Audioansicht.
                     with_max_duration=total and view == "audio",
                     folder=folder,   # Sortierung „manuell" (#218)
+                    # Fundort-Zeilen/Ordnergruppen (ADR 0108): nur Audioansicht.
+                    rows=rows if view == "audio" else None,
                 )
             except ValueError as exc:   # ungültiger Filterausdruck (ADR 0018)
                 raise HTTPException(status_code=400, detail=_err(exc))
@@ -960,6 +1015,7 @@ def create_app(
         dupes: bool = Query(False),
         view: str | None = Query(None),
         folder: int | None = Query(None),
+        rows: str | None = Query(None),
     ) -> dict:
         # Galerie-Rücksprung (ADR 0060): Position eines Items in der
         # aktuellen Treffermenge — Parameter spiegeln /api/items, gefilterte
@@ -972,22 +1028,11 @@ def create_app(
                     conn, hash, sort=sort, model=model, rating=rating,
                     filter_expr=filter, dupes=dupes, cache=hits_cache,
                     view_preds=vp, folder=folder,
+                    rows=rows if view == "audio" else None,
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=_err(exc))
         return {"index": index}
-
-    @app.get("/api/ratings")
-    def ratings(request: Request, filter: str | None = Query(None)) -> dict:
-        # Ungefiltert aus dem Epochen-Cache wie /api/facets (ADR 0071).
-        with read_conn() as conn:
-            try:
-                base = ratings_base(conn, request.scope)
-                ratings = (library.ratings_facet(conn, filter_expr=filter, base=base)
-                           if filter else base)
-                return {"ratings": ratings}
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=_err(exc))
 
     @app.get("/api/sidebar")
     def sidebar(request: Request, filter: str | None = Query(None),
@@ -1458,35 +1503,63 @@ def create_app(
         return _manual_state(file_hash)
 
     # -- Cover (Audio A8, #165, ADR 0090) ------------------------------------------------
+    #
+    # Setzen und Entfernen wirken auf alle Songs einer Auswahl in EINEM
+    # Schreibgriff (#281); ein einzelner Song ist eine Auswahl von eins.
+    # Nicht-Songs in der Auswahl werden übergangen.
 
-    @app.post("/api/item/{file_hash}/cover")
-    def set_cover_endpoint(file_hash: str, req: CoverRequest) -> dict:
+    def _cover_batch_hashes(req: CoverBatchRequest) -> None:
+        if not req.hashes or len(req.hashes) > 2000:
+            raise HTTPException(status_code=400, detail=msg("errBatchSize"))
+        for file_hash in req.hashes:
+            _require_hash(file_hash)
+
+    def _cover_batch_result(result: dict) -> dict:
+        if "songs" not in result:
+            raise HTTPException(status_code=500,
+                                detail=result.get("summary") or msg("errBulkFailed"))
+        return result
+
+    @app.post("/api/batch/cover/state")
+    def cover_batch_state(req: CoverBatchRequest) -> dict:
+        _cover_batch_hashes(req)
+        with read_conn() as conn:
+            return manual.cover_state(conn, req.hashes)
+
+    @app.post("/api/batch/cover")
+    def cover_batch_set(req: CoverBatchRequest) -> dict:
         # Prüfen VOR dem Schreibgriff (run_write meldet Fehler nur als
-        # Zusammenfassung): Song = Audio, Cover = Bild der Bibliothek.
-        _require_item(file_hash)
+        # Zusammenfassung): Cover = Bild der Bibliothek, mindestens ein Song.
+        _cover_batch_hashes(req)
+        if not req.cover:
+            raise HTTPException(status_code=400, detail=msg("errNoAction"))
         _require_item(req.cover)
         with read_conn() as conn:
-            kinds = dict(conn.execute(
-                "SELECT file_hash, media_kind FROM items WHERE file_hash IN (?, ?)",
-                (file_hash, req.cover)).fetchall())
-        if kinds[file_hash] != "audio":
-            raise HTTPException(status_code=400, detail=msg("coverNotSong"))
-        if kinds[req.cover] != "image":
-            raise HTTPException(status_code=400, detail=msg("coverNotImage"))
-        engine.run_write(
-            msg("taskCoverSet"),
-            lambda conn, _p: (manual.set_cover(conn, file_hash, req.cover), {})[1],
-        )
-        return _manual_state(file_hash)
+            kind = conn.execute("SELECT media_kind FROM items WHERE file_hash = ?",
+                                (req.cover,)).fetchone()[0]
+            if kind != "image":
+                raise HTTPException(status_code=400, detail=msg("coverNotImage"))
+            if not manual.cover_state(conn, req.hashes)["songs"]:
+                raise HTTPException(status_code=400, detail=msg("coverNotSong"))
 
-    @app.delete("/api/item/{file_hash}/cover")
-    def remove_cover_endpoint(file_hash: str) -> dict:
-        _require_item(file_hash)
-        engine.run_write(
-            msg("taskCoverRemove"),
-            lambda conn, _p: {"removed": manual.remove_cover(conn, file_hash)},
-        )
-        return _manual_state(file_hash)
+        def fn(conn, _p):
+            songs = manual.set_covers(conn, req.hashes, req.cover)
+            return {"songs": songs, "manual": manual.annotations_for(conn, songs[0])}
+
+        return _cover_batch_result(engine.run_write(
+            msg("taskCoverSetBatch", n=len(req.hashes)), fn, timeout=60.0))
+
+    @app.post("/api/batch/cover/remove")
+    def cover_batch_remove(req: CoverBatchRequest) -> dict:
+        _cover_batch_hashes(req)
+
+        def fn(conn, _p):
+            songs = manual.remove_covers(conn, req.hashes)
+            return {"songs": songs,
+                    "manual": manual.annotations_for(conn, songs[0]) if songs else None}
+
+        return _cover_batch_result(engine.run_write(
+            msg("taskCoverRemoveBatch", n=len(req.hashes)), fn, timeout=60.0))
 
     # -- Zeitkommentare (Audio A6, #163, ADR 0088) -------------------------------------
 
@@ -1638,6 +1711,45 @@ def create_app(
                                 detail=result.get("summary") or msg("errBulkFailed"))
         return result
 
+    @app.get("/api/lyrics/{file_hash}")
+    def lyrics_state(file_hash: str) -> dict:
+        # Stand für die Ansicht „Songtext bearbeiten" (ADR 0106): die Fassung
+        # von Hand, sonst der Songtext aus der Datei als Vorlage.
+        _require_hash(file_hash)
+        with read_conn() as conn:
+            if not manual_lyrics.is_song(conn, file_hash):
+                raise HTTPException(status_code=404, detail=msg("errUnknownItem"))
+            return manual_lyrics.editable(conn, file_hash)
+
+    @app.post("/api/lyrics/{file_hash}")
+    def lyrics_update(file_hash: str, req: LyricsUpdate) -> dict:
+        # Songtext von Hand (ADR 0106): manual_lyrics schreiben und den Song
+        # aus seinen Roh-Blobs neu interpretieren, in EINEM Schreibgriff.
+        _require_hash(file_hash)
+        with read_conn() as conn:
+            if not manual_lyrics.is_song(conn, file_hash):
+                raise HTTPException(status_code=404, detail=msg("errUnknownItem"))
+            duration = manual_lyrics.duration_of(conn, file_hash)
+        try:
+            lines = manual_lyrics.check_lines(req.lines, duration)   # vor dem Writer prüfen
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=_err(err))
+
+        def fn(conn, _p):
+            with conn:
+                manual_lyrics.set_lyrics(conn, file_hash, lines)
+                reinterpret(conn, [file_hash])
+            # Frische Listenzeile (Abschnitte auf der Welle): die Liste
+            # ersetzt sie an Ort und Stelle wie bei den Musik-Angaben.
+            return {"state": manual_lyrics.editable(conn, file_hash),
+                    "items": library.items_by_hash(conn, [file_hash])}
+
+        result = engine.run_write(msg("taskLyrics"), fn, timeout=60.0)
+        if "state" not in result:
+            raise HTTPException(status_code=500,
+                                detail=result.get("summary") or msg("errUpdateFailed"))
+        return result
+
     @app.post("/api/batch/apply")
     def batch_apply(req: BulkApplyRequest) -> dict:
         # Sammel-Aktion auf das ganze Suchergebnis (ADR 0040): der Server
@@ -1698,6 +1810,180 @@ def create_app(
                                 detail=result.get("summary") or msg("errBulkFailed"))
         return result
 
+    # -- Kopie-Export (ADR 0103) ---------------------------------------------
+    # Kopien in den Export-Ordner, auch im Übersichtsmodus: der Export liest
+    # Originale nur und schreibt weder in die Library noch an ihren Ort.
+
+    def _export_conflict(root: str) -> dict | None:
+        conflict = export_lib.root_conflict(
+            root, library_root=configured_import()[0],
+            watch_roots=[src["path"] for src in _configured_watch_sources()],
+            cache_dirs=list(cache_dirs.values()))
+        return msg(_EXPORT_CONFLICT[conflict]) if conflict else None
+
+    def _export_state() -> dict:
+        # Je Aufruf frisch aus der Config: der Ordner wirkt ohne Neustart.
+        root = cfg_export_root(load_config(config_path)) if config_path is not None else None
+        if not root:
+            reason = msg("errExportNoRoot")
+        elif not Path(root).is_dir():
+            reason = msg("errExportRootMissing", root=root)
+        else:
+            reason = _export_conflict(root)
+        return {"available": reason is None, "root": root, "reason": reason}
+
+    def _export_scope(req: ExportRequest) -> list[str]:
+        if req.hashes is not None:
+            if not req.hashes or len(req.hashes) > 2000:
+                raise HTTPException(status_code=400, detail=msg("errBatchSize"))
+            for file_hash in req.hashes:
+                _require_hash(file_hash)
+        try:
+            with read_conn() as conn:
+                return export_lib.scope_hashes(
+                    conn, hashes=req.hashes, filter_expr=req.filter,
+                    view_preds=view_preds(conn, req.view, None))
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=_err(err))
+
+    @app.get("/api/export")
+    def export_state() -> dict:
+        return _export_state()
+
+    @app.post("/api/export/plan")
+    def export_plan(req: ExportRequest) -> dict:
+        # Zahlen für den Dialog: wie viel, wie groß, wohin, wie viel Platz.
+        state = _export_state()
+        if not state["available"]:
+            return state
+        hashes = _export_scope(req)
+        with read_conn() as conn:
+            numbers = export_lib.plan(conn, hashes)
+        return {**state, **numbers,
+                "free": shutil.disk_usage(state["root"]).free,
+                "target": str(export_lib.package_dir(state["root"], req.name, date.today()))}
+
+    @app.post("/api/export")
+    def export_start(req: ExportRequest) -> dict:
+        state = _export_state()
+        if not state["available"]:
+            raise HTTPException(status_code=400, detail=state["reason"])
+        if req.layout not in export_lib.LAYOUTS or req.converted not in export_lib.CONVERTED:
+            raise HTTPException(status_code=400, detail=msg("errNoAction"))
+        hashes = _export_scope(req)
+        if not hashes:
+            raise HTTPException(status_code=400, detail=msg("errExportNothing"))
+        with read_conn() as conn:
+            need = export_lib.plan(conn, hashes)["bytes"]
+        free = shutil.disk_usage(state["root"]).free
+        if need > free:
+            raise HTTPException(status_code=400, detail=msg(
+                "errExportNoSpace", need=f"{need / 1e9:.1f}", free=f"{free / 1e9:.1f}"))
+        target = str(export_lib.package_dir(state["root"], req.name, date.today()))
+        engine.enqueue("export", {
+            "hashes": hashes, "root": state["root"], "target": target,
+            "layout": req.layout, "converted": req.converted, "tags": req.tags,
+            "preview_cache": str(preview_cache),
+            "jxr": jxr_tone().params(),
+            "library_root": configured_import()[0],
+            "watch_roots": [src["path"] for src in _configured_watch_sources()],
+        }, msg("taskExport", n=len(hashes)))
+        return {"queued": True, "count": len(hashes), "target": target}
+
+    # -- Ausschnitt (ADR 0105) -----------------------------------------------
+    # Ein Abschnitt aus einem Song oder Video als neue Datei im Tagesordner
+    # des Export-Ordners. Liest das Original nur; wie der Kopie-Export auch
+    # im Übersichtsmodus erlaubt.
+
+    def _clip_item(file_hash: str) -> dict:
+        if config_path is None or not cfg_clip_enabled(load_config(config_path)):
+            raise HTTPException(status_code=404, detail=msg("errClipOff"))
+        _require_hash(file_hash)
+        with read_conn() as conn:
+            row = conn.execute(
+                "SELECT media_kind, duration, file_size FROM items WHERE file_hash = ?",
+                (file_hash,)).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail=msg("errUnknownItem"))
+            if row[0] not in ("video", "audio"):
+                raise HTTPException(status_code=400, detail=msg("errClipKind"))
+            locations = library.ordered_locations(conn, file_hash, row[2])
+            has_audio = row[0] == "audio" or clip_lib.has_audio_stream(conn, file_hash)
+        usable = [loc for loc in locations if loc["usable"]]
+        named = usable or locations
+        return {"kind": row[0], "duration": row[1], "has_audio": has_audio,
+                "reachable": bool(usable),
+                "name": Path(named[0]["path"]).name if named else file_hash[:12]}
+
+    def _clip_state(file_hash: str) -> dict:
+        item = _clip_item(file_hash)
+        state = _export_state()
+        reason = state["reason"]
+        if reason is None and not item["reachable"]:
+            reason = msg("errNoLocation")
+        target = (str(export_lib.package_dir(state["root"], "", date.today()))
+                  if state["available"] else None)
+        return {**item, "available": reason is None, "reason": reason,
+                "root": state["root"], "target": target,
+                "encoder": clip_lib.encoder_state(),
+                "outputs": list(clip_lib.allowed_outputs(item["kind"], item["has_audio"]))}
+
+    @app.get("/api/clip/{file_hash}")
+    def clip_state(file_hash: str) -> dict:
+        return _clip_state(file_hash)
+
+    @app.post("/api/clip/{file_hash}")
+    def clip_start(file_hash: str, req: ClipRequest) -> dict:
+        state = _clip_state(file_hash)
+        if not state["available"]:
+            raise HTTPException(status_code=400, detail=state["reason"])
+        outputs = list(dict.fromkeys(req.outputs))
+        if not outputs or any(o not in state["outputs"] for o in outputs):
+            raise HTTPException(status_code=400, detail=msg("errClipOutputs"))
+        if state["encoder"] == "no-ffmpeg":
+            raise HTTPException(status_code=400, detail=msg("errClipNoFfmpeg"))
+        if state["encoder"] != "ok" and any(o != "audio" for o in outputs):
+            raise HTTPException(status_code=400, detail=msg("errClipNoH264"))
+        duration = state["duration"]
+        # Ohne bekannte Dauer kein Ausschnitt (die Oberfläche sperrt dann
+        # ohnehin); JSON erlaubt Infinity, das fängt isfinite ab.
+        if duration is None or not (math.isfinite(req.start) and math.isfinite(req.end)):
+            raise HTTPException(status_code=400, detail=msg("errClipRange"))
+        start, end = round(req.start, 3), round(req.end, 3)
+        # Die Dauer im Katalog ist gerundet: eine halbe Sekunde Spiel am Ende.
+        if (not (0 <= start < end) or end - start < clip_lib.MIN_LENGTH
+                or end > duration + 0.5):
+            raise HTTPException(status_code=400, detail=msg("errClipRange"))
+        if not _CLIP_TOKEN.match(req.token or ""):
+            raise HTTPException(status_code=400, detail=msg("errNoAction"))
+        # Vorrang (ADR 0093): der Anwender wartet in der Ansicht; ein
+        # laufender Langläufer gibt an der nächsten Dateigrenze ab.
+        engine.enqueue("clip", {
+            "hash": file_hash, "name": state["name"], "root": state["root"],
+            "target": state["target"], "start": start, "end": end, "outputs": outputs,
+            "token": req.token,
+            "library_root": configured_import()[0],
+            "watch_roots": [src["path"] for src in _configured_watch_sources()],
+        }, msg("taskClip", name=state["name"]), priority=True)
+        return {"queued": True, "target": state["target"],
+                "files": [clip_lib.clip_name(state["name"], start, end, o) for o in outputs]}
+
+    @app.post("/api/export/reveal")
+    def export_reveal(req: RevealPathRequest) -> dict:
+        """Eine Datei IM Export-Ordner im Dateimanager zeigen (Ergebnis
+        eines Ausschnitts). Andere Pfade weist der Endpunkt ab."""
+        root = _export_state()["root"]
+        path = Path(os.path.abspath(req.path))
+        inside = bool(root) and Path(root).resolve() in path.resolve().parents
+        if not inside or not path.is_file():
+            raise HTTPException(status_code=404, detail=msg("errNoLocation"))
+        try:
+            selected, via = reveal.show_in_file_manager(path)
+        except OSError as exc:
+            raise HTTPException(status_code=500,
+                                detail=msg("errRevealFailed", error=str(exc)))
+        return {"revealed": str(path), "selected": selected, "via": via}
+
     # -- Austausch: Zeitkommentare (#228, ADR 0098), Musik-Angaben (ADR 0101) -------
 
     @app.post("/api/exchange/export")
@@ -1713,7 +1999,7 @@ def create_app(
                 return exchange.export_exchange(
                     conn, hashes=req.hashes, filter_expr=req.filter,
                     view_preds=view_preds(conn, req.view, None),
-                    comments=req.comments, fields=req.fields)
+                    comments=req.comments, fields=req.fields, lyrics=req.lyrics)
         except ValueError as err:
             raise HTTPException(status_code=400, detail=_err(err))
 
@@ -1868,8 +2154,8 @@ def create_app(
                     source = None
         if row is None or source is None:
             raise HTTPException(status_code=404, detail=msg("errNoThumb"))
-        thumb_pool.submit(file_hash, source, cached,
-                          media_kind=row["media_kind"], size=thumb_size)
+        thumb_pool.submit(file_hash, source, cached, media_kind=row["media_kind"],
+                          size=thumb_size, tone=jxr_tone(), preview_cache=preview_cache)
         return Response(status_code=202, headers={"Cache-Control": "no-store", "Retry-After": "1"})
 
     @app.get("/api/workflow/{file_hash}")
@@ -1907,7 +2193,8 @@ def create_app(
                                  cache_control="public, max-age=31536000, immutable")
 
     @app.get("/api/preview/{file_hash}")
-    def preview(file_hash: str, native: str | None = Query(None)) -> Response:
+    def preview(file_hash: str, native: str | None = Query(None),
+                v: str | None = Query(None)) -> Response:
         """Gerenderte JPEG-Ansicht für Container ohne Browser-Unterstützung
         (TIFF/PSD, ADR 0052). /api/media bleibt die Originalbytes; hier wird
         on-the-fly über Pillow gerendert — hash-adressiert und damit genauso
@@ -1927,10 +2214,22 @@ def create_app(
         if resolved[1] in PREVIEW_CACHED_MIMES:
             # Teures Rendern (Photo CD 16Base) nur einmal: verlustfreies PNG
             # auf der Platte, erzeugt beim ersten Anzeigen (#208).
-            cached = preview_cache_file(preview_cache, file_hash)
+            # JXR (ADR 0104): die Einstellungen der Umrechnung gehören zum
+            # Cache-Schlüssel. Die Adresse ohne ``v`` leitet auf die mit der
+            # aktuellen Variante um: Die Umleitung ist winzig und wird jedes
+            # Mal neu gefragt, das große Bild dahinter hält der Browser fest,
+            # und eine geänderte Einstellung wird trotzdem sofort sichtbar.
+            tone = jxr_tone()
+            variant = preview_variant(resolved[1], tone)
+            if variant and v != variant:
+                return RedirectResponse(f"/api/preview/{file_hash}?v={variant}",
+                                        status_code=307,
+                                        headers={"Cache-Control": "no-cache"})
+            cached = preview_cache_file(preview_cache, file_hash, variant)
             if not cached.is_file():
-                future = thumb_pool.submit_call(f".png:{file_hash}", write_preview,
-                                                resolved[0], cached)
+                future = thumb_pool.submit_call(
+                    f".png:{file_hash}{variant}", write_preview, resolved[0], cached,
+                    tone=tone, file_hash=file_hash)
                 try:
                     future.result(timeout=_PROXY_WAIT)
                 except TimeoutError:
@@ -1938,7 +2237,7 @@ def create_app(
             if cached.is_file():
                 return MediaFileResponse(cached, media_type="image/png", cache_control=(
                     "public, max-age=31536000, immutable"))
-        data, reason = render_preview(resolved[0])
+        data, reason = render_preview(resolved[0], tone=jxr_tone())
         if data is None:
             # reason kann Meldungs-JSON sein (PSD ohne Composite) — als
             # verschachtelte Meldung übergeben, dann übersetzt das Frontend.
@@ -2076,17 +2375,9 @@ def create_app(
         # Import) — sonst erwürgt der erste Grid-Besuch die Oberfläche mit
         # zehntausenden On-Demand-Generierungen.
         if thumb_cache is not None:
-            engine.enqueue_thumb_warm(thumb_cache, thumb_size, auto=True)
+            warm_thumbs(auto=True)
         warm_audio_auto()
         return {"queued_files": count, "target": str(target)}
-
-    @app.post("/api/scan")
-    def scan(req: ScanRequest) -> dict:
-        if not Path(req.path).is_dir():
-            raise HTTPException(status_code=400,
-                                detail=msg("errNotADirectory", path=req.path))
-        count = engine.enqueue_folder(req.path, configured_rules())
-        return {"queued_files": count}
 
     def reshape_web_pool() -> None:
         """Pool des Web-Prozesses an Leistung + Config anpassen (ADR 0093):
@@ -2159,7 +2450,7 @@ def create_app(
                                      rules=configured_rules(),
                                      priority=True)   # Vorrang vor langen Läufen (ADR 0093)
                 if thumb_cache is not None:
-                    engine.enqueue_thumb_warm(thumb_cache, thumb_size, auto=True)
+                    warm_thumbs(auto=True)
                 warm_audio_auto()
 
             engine.start_watch_source(source, on_scan_ready)
@@ -2186,7 +2477,7 @@ def create_app(
                 priority=True,   # Vorrang vor langen Läufen (ADR 0093)
             )
             if thumb_cache is not None:
-                engine.enqueue_thumb_warm(thumb_cache, thumb_size, auto=True)
+                warm_thumbs(auto=True)
             warm_audio_auto()
 
         engine.start_watch_source(source, on_ready)
@@ -2279,7 +2570,7 @@ def create_app(
             return False
         # Aussortiertes kennt nur das Stat-Gedächtnis, Watcher überspringen es
         # unverändert (ADR 0042) — einmal mit den neuen Regeln prüfen.
-        engine.enqueue_recheck_filtered(rules)
+        engine.enqueue_recheck_filtered(rules, auto=True)
         engine.run_write(msg("taskStandSave"), lambda conn, _p: admin_lib.write_app_state(
             conn, "filter_rules", now) or {})
         return True
@@ -2515,7 +2806,7 @@ def create_app(
         # Der Admin-Knopf ist der EINZIGE Weg mit Retry-Prinzip (bewusste
         # Aktion, z. B. nach ffmpeg-Installation) — die Automatik-Läufe
         # nach Import/Watch erzeugen nur Fehlende (ADR-0042-Ergänzung).
-        engine.enqueue_thumb_warm(thumb_cache, thumb_size, retry_failed=True)
+        warm_thumbs(retry_failed=True)
         return {"queued": "Thumbnails vorwärmen"}
 
     @app.post("/api/admin/audiowarm")
@@ -2569,8 +2860,12 @@ def create_app(
             "akzentfarbe": cfg_instance_accent(config),
             "rankings_enabled": cfg_rankings_enabled(config),
             "audio_enabled": cfg_audio_enabled(config),
+            "clip_enabled": cfg_clip_enabled(config),
+            # Kann dieses ffmpeg, was das Modul braucht? (ADR 0105 Punkt 7)
+            "clip_encoder": clip_lib.encoder_state(),
             "slow_request_ms": int(cfg_slow_request_ms(config)),
             "background": cfg_background_default(config),
+            "export_root": cfg_export_root(config),
             "raw": p.read_text(encoding="utf-8") if p.is_file() else "",
         }
 
@@ -2582,9 +2877,6 @@ def create_app(
             raise HTTPException(status_code=400, detail=msg("errBackgroundMode"))
         if not (16 <= update.thumbnail_size <= 2048):
             raise HTTPException(status_code=400, detail=msg("errThumbSize"))
-        for loc in (update.locations or []):
-            if not loc.name.strip() or not loc.path.strip():
-                raise HTTPException(status_code=400, detail=msg("errLocationFields"))
         if update.import_min_date and update.import_min_date.strip():
             from datetime import datetime
 
@@ -2613,6 +2905,22 @@ def create_app(
             raise HTTPException(status_code=400, detail=msg("errAccent"))
         if update.slow_request_ms is not None and not (0 <= update.slow_request_ms <= 600_000):
             raise HTTPException(status_code=400, detail=msg("errSlowMs"))
+        if update.export_root and update.export_root.strip():
+            # Export-Ordner (ADR 0103) gegen die Library, die Watchordner und
+            # den Cache prüfen, wie sie NACH diesem Speichern gelten.
+            library_after = (update.library_root if update.library_root is not None
+                             else configured_import()[0])
+            conflict = export_lib.root_conflict(
+                update.export_root.strip(), library_root=(library_after or "").strip() or None,
+                watch_roots=[w.path for w in update.watch] if update.watch is not None
+                else [src["path"] for src in _configured_watch_sources()],
+                cache_dirs=list(cache_dirs.values()))
+            if conflict is None:
+                with read_conn() as conn:
+                    if export_lib.holds_originals(conn, update.export_root.strip()):
+                        conflict = "originals"
+            if conflict:
+                raise HTTPException(status_code=400, detail=msg(_EXPORT_CONFLICT[conflict]))
         # Watch-Liste kommt normalerweise über /api/watch/save (Inline-
         # Verwaltung im Dashboard); wird sie hier mitgeschickt, gilt dieselbe
         # Prüfung. None = [[watch]] in der Datei unangetastet lassen.
@@ -2625,10 +2933,6 @@ def create_app(
         background_before = cfg_background_default(cfg_before)
         update_config_file(
             config_path,
-            locations=(
-                [{"name": l.name.strip(), "path": l.path.strip()} for l in update.locations]
-                if update.locations is not None else None
-            ),
             thumbnail_size=update.thumbnail_size,
             library_root=update.library_root,
             verwaltung=update.verwaltung,
@@ -2646,8 +2950,10 @@ def create_app(
             instance_accent=update.akzentfarbe,
             rankings_enabled=update.rankings_enabled,
             audio_enabled=update.audio_enabled,
+            clip_enabled=update.clip_enabled,
             slow_request_ms=update.slow_request_ms,
             background=update.background,
+            export_root=update.export_root,
         )
         if update.slow_request_ms is not None:
             app.state.slow_request_ms = float(update.slow_request_ms)   # sofort (#110)

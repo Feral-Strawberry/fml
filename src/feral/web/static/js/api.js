@@ -101,8 +101,8 @@ export const getStats = () => api("/api/stats");
 
 /** Eine Grid-Seite: {total, offset, items}. sort ∈ added|name|size|container|rating;
     optional gefiltert nach model (Schicht 2) und rating (manuelle Schicht, exakt). */
-export const getItems = ({ limit, offset, sort, model, rating, filter, dupes, total, folder } = {}) =>
-  api(withQuery("/api/items", { limit, offset, sort, model, rating, filter, dupes, total, folder, view: _view }));
+export const getItems = ({ limit, offset, sort, model, rating, filter, dupes, total, folder, rows } = {}) =>
+  api(withQuery("/api/items", { limit, offset, sort, model, rating, filter, dupes, total, folder, rows, view: _view }));
 
 /** Kandidaten im Cover-Dialog (#165): wie getItems, aber immer im
  *  Galerie-Grundbereich — auch aus der Audioansicht heraus. */
@@ -111,8 +111,8 @@ export const getCoverCandidates = ({ filter, offset = 0, limit = 120 } = {}) =>
 
 /** Grid-Position eines Items in der aktuellen Treffermenge (ADR 0060) —
  *  Parameter wie getItems; Antwort {index} (0-basiert, null = nicht drin). */
-export const getItemPosition = ({ hash, sort, model, rating, filter, dupes, folder } = {}) =>
-  api(withQuery("/api/items/position", { hash, sort, model, rating, filter, dupes, folder, view: _view }));
+export const getItemPosition = ({ hash, sort, model, rating, filter, dupes, folder, rows } = {}) =>
+  api(withQuery("/api/items/position", { hash, sort, model, rating, filter, dupes, folder, rows, view: _view }));
 
 // -- Smart Folders (Stufe 3.3, ADR 0018) ----------------------------------------
 
@@ -144,8 +144,7 @@ export const moveInFolder = (id, { hash, before, after }) =>
 export const deleteFolder = (id) => api(`/api/folders/${id}`, { method: "DELETE" });
 
 /** Alle Sidebar-Zähler eines Suchzustands in EINEM Request (#99, ADR 0073):
-    {models, facets, ratings} — dieselben Nutzlasten wie /api/models,
-    /api/facets und /api/ratings, aber aus einem Filterlauf und je Ausdruck
+    {models, facets, ratings} — aus einem Filterlauf und je Ausdruck
     serverseitig gemerkt (eigene Chips klammert der Server je Gruppe aus). */
 export const getSidebar = (filter) => api(withQuery("/api/sidebar", { filter, view: _view }));
 
@@ -265,9 +264,34 @@ export const setMusicFields = (hashes, fields) => postJSON("/api/fields", { hash
 export const bulkApply = (scope, fields) =>
   postJSON("/api/batch/apply", { ...scope, ...fields, view: _view });
 
-/** Austausch (#228, ADR 0098; Musik-Angaben ADR 0101): Export im Scope der
- *  Sammel-Aktion → Austauschdatei, `parts` = {comments, fields} (die beiden
- *  Häkchen); Import erst als Vorschau, dann echt. */
+/** Kopie-Export (ADR 0103), Scope wie bei der Sammel-Aktion. Zustand:
+ *  {available, root, reason}; Plan dazu {count, bytes, converted, tagged, free,
+ *  target}; Start reiht die Aufgabe ein: {queued, count, target}.
+ *  options: {name, layout: "flat"|"date", converted: "png"|"original",
+ *  tags: Angaben von Hand in die Kopie schreiben (ADR 0107)}. */
+export const getExportState = () => api("/api/export");
+export const planExport = (scope) =>
+  postJSON("/api/export/plan", { ...scope, view: _view });
+export const startExport = (scope, options) =>
+  postJSON("/api/export", { ...scope, ...options, view: _view });
+
+/** Ausschnitt (ADR 0105). Zustand eines Items: {available, reason, target,
+ *  encoder: "ok"|"no-h264"|"no-ffmpeg", outputs: ["av"|"video"|"audio"],
+ *  kind, duration, name}. Start reiht die Aufgabe ein: {queued, target,
+ *  files}; `token` findet den Lauf im Verlauf von /api/status wieder. */
+/** Songtext von Hand (ADR 0106): Stand für die Ansicht {lines, manual,
+ *  source, duration}; Speichern liefert {state, items}, `[]` stellt den
+ *  Songtext aus der Datei wieder her. */
+export const getLyricsState = (hash) => api(`/api/lyrics/${hash}`);
+export const setLyrics = (hash, lines) => postJSON(`/api/lyrics/${hash}`, { lines });
+export const getClipState = (hash) => api(`/api/clip/${hash}`);
+export const startClip = (hash, body) => postJSON(`/api/clip/${hash}`, body);
+/** Eine Datei im Export-Ordner im Dateimanager zeigen. */
+export const revealExportPath = (path) => postJSON("/api/export/reveal", { path });
+
+/** Austausch (#228, ADR 0098; Musik-Angaben ADR 0101; Songtext ADR 0106):
+ *  Export im Scope der Sammel-Aktion → Austauschdatei, `parts` = {comments,
+ *  fields, lyrics} (die Häkchen); Import erst als Vorschau, dann echt. */
 export const exportExchange = (scope, parts) =>
   postJSON("/api/exchange/export", { ...scope, ...parts, view: _view });
 export const previewExchangeImport = (data) =>
@@ -304,10 +328,13 @@ export const getTags = () => api("/api/tags");
 // -- Zeitkommentare (Audio A6, #163) ------------------------------------------------
 // Jede Antwort liefert die vollständige, zeitlich sortierte Liste des Items:
 // {comments: [{id, at_ms, text, created_at, updated_at}]}.
-/** Cover eines Songs (#165, ADR 0090): Bild der Bibliothek setzen bzw.
- *  entfernen → {manual} (mit `cover`). */
-export const setCover = (hash, cover) => postJSON(`/api/item/${hash}/cover`, { cover });
-export const removeCover = (hash) => api(`/api/item/${hash}/cover`, { method: "DELETE" });
+/** Cover der Songs einer Auswahl (#165, ADR 0090, #281): Bild der Bibliothek
+ *  setzen bzw. entfernen → {songs, manual} (Stand des ersten Songs); ein
+ *  einzelner Song ist eine Auswahl von eins. Der Stand fürs Öffnen des
+ *  Dialogs → {songs, covered, cover, tags}. */
+export const getCoverState = (hashes) => postJSON("/api/batch/cover/state", { hashes });
+export const setCovers = (hashes, cover) => postJSON("/api/batch/cover", { hashes, cover });
+export const removeCovers = (hashes) => postJSON("/api/batch/cover/remove", { hashes });
 
 export const getComments = (hash) => api(`/api/item/${hash}/comments`);
 export const addComment = (hash, atMs, text) =>
@@ -394,9 +421,6 @@ export const getRoots = () => api("/api/roots");
 export const browse = (path) => api(withQuery("/api/browse", { path }));
 
 // -- Scan & Watch ---------------------------------------------------------------
-
-/** Ordner-Scan einreihen: {queued_files}. */
-export const startScan = (path) => postJSON("/api/scan", { path });
 
 /** Einmal-Import eines Quellordners (ADR 0019); modus wie bei Watchordnern:
  *  "verschieben" leert die Quelle nach erfolgreichem Import (ADR 0025).
@@ -486,12 +510,12 @@ export const clearCache = (kind) => postJSON(withQuery("/api/admin/cache/clear",
 // „Cache zählen" (#118): Verzeichnislauf nur auf Klick, Ergebnis = gemerkter Stand.
 export const getThumbCache = () => api("/api/admin/thumbcache");
 
-/** Config lesen: {editable, path, exists, locations, thumbnail_size, raw}. */
+/** Config lesen: {editable, path, exists, thumbnail_size, raw, …}. */
 export const getConfig = () => api("/api/admin/config");
 
 /** Config schreiben (legt .bak-Backup an): {saved, hint}.
- *  Nimmt das komplette Feld-Objekt (locations, thumbnail_size, library_root,
- *  import_min_date, hotfolder_*, thumbnail_workers/low_priority, show_dupes). */
+ *  Nimmt das komplette Feld-Objekt (thumbnail_size, library_root,
+ *  import_min_date, thumbnail_workers/low_priority, show_dupes, …). */
 export const saveConfig = (fields) => postJSON("/api/admin/config", fields);
 
 // -- URL-Bauer (für src/href — keine fetch-Aufrufe) --------------------------------
@@ -566,7 +590,7 @@ export const mediaUrl = (hash) => `/api/media/${hash}`;
 
 /** Container, die der Browser nicht nativ rendert — die Anzeige nutzt das
  *  serverseitig gerenderte JPEG statt der Originalbytes (ADR 0052). */
-const RENDERED_CONTAINERS = new Set(["tiff", "psd", "pcd"]);
+const RENDERED_CONTAINERS = new Set(["tiff", "psd", "pcd", "jxr"]);
 
 // Formate mit Wiedergabe-Proxy, die manche Browser selbst spielen (Safari:
 // AIFF und ALAC; CAF spielt keiner — Recherche §10). Name = das, was der
@@ -585,7 +609,7 @@ function playsNatively(fmt) {
 }
 
 /** Anzeige-URL eines Items ({file_hash, container, media_kind}): das
- *  Original — oder für TIFF/PSD/PCD die gerenderte /api/preview-Ansicht. Audio
+ *  Original — oder für TIFF/PSD/PCD/JXR die gerenderte /api/preview-Ansicht. Audio
  *  spielt IMMER über /api/preview (A4 #161): der Server liefert das
  *  Original, wo der Browser es kann, sonst den FLAC-Proxy (AIFF/ALAC/CAF),
  *  erzeugt beim ersten Abspielen. Ob ALAC im M4A steckt, weiß nur der
@@ -748,7 +772,10 @@ export function wireMediaFallback(scope, label, d = null) {
     const text = typeof label === "function" ? label(media) : label;
     // Mit Item-Wissen (Video): Poster + Hinweis + 📂-Knopf, wie beim Vorabtest.
     if (d && media.tagName !== "IMG") mountUnplayable(scope, d, text);
-    else scope.innerHTML = `<div class="nopreview">${escHtml(text)}</div>`;
+    else {
+      scope.innerHTML = `<div class="nopreview">${escHtml(text)}</div>`;
+      explainPreview(scope, media.getAttribute("src") || "");
+    }
   };
   media.addEventListener("error", fail, { once: true });
   if (media.tagName === "VIDEO") {
@@ -761,6 +788,21 @@ export function wireMediaFallback(scope, label, d = null) {
       if (media.isConnected && !media.videoWidth) fail();
     }, { once: true });
   }
+}
+
+/** Gerechnete Ansicht (/api/preview): der Server nennt den Grund, warum es
+ *  kein Bild gibt (JXR ohne Windows, PSD ohne Composite; ADR 0104). Ein
+ *  <img> erfährt nur „Fehler", darum einmal nachfragen und den allgemeinen
+ *  Hinweis durch den Grund ersetzen. */
+async function explainPreview(scope, src) {
+  if (!src.startsWith("/api/preview/")) return;
+  const note = scope.querySelector(".nopreview");
+  try {
+    const r = await fetch(src);
+    if (r.ok) return;
+    const reason = serverMsg((await r.json()).detail);
+    if (reason && note?.isConnected) note.textContent = reason;
+  } catch { /* der allgemeine Hinweis bleibt stehen */ }
 }
 
 const escHtml = (s) =>

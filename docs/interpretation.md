@@ -36,9 +36,11 @@ Parser darüber laufen und ersetzt die strukturierten Felder. Kein Datei-Zugriff
 darum auch für 70.000 Items schnell. Der Lauf ist beliebig wiederholbar.
 
 Musik-Angaben von Hand (Titel, Interpret, Album …, siehe
-[Audio-Modul](audio.md#musik-angaben-von-hand)) bleiben dabei stehen: Sie
-werden nach den Parsern über die Werte aus den Tags gelegt und erscheinen
-bei den Feldern mit dem Parser-Namen `manual`.
+[Audio-Modul](audio.md#musik-angaben-von-hand)) und der Songtext von Hand
+(siehe [Songtext von Hand](audio.md#songtext-von-hand)) bleiben dabei
+stehen: Sie werden nach den Parsern über die Werte aus den Tags gelegt und erscheinen
+bei den Feldern mit dem Parser-Namen `manual` (beim Songtext `lyrics`,
+`lyrics_synced` und `song_sections`).
 
 ## Suchen über die Felder
 

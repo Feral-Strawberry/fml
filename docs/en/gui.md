@@ -47,8 +47,9 @@ middle-click the admin in a second tab). If an
 colored pill (plus tab title and favicon color dot - distinguishes
 instances running in parallel). If fml runs in **read-only mode** (the
 default state, ADR 0041), the badge **"👁 Read-only mode"** also sits
-here: fml only catalogs and curates - files are never copied, moved or
-deleted. Unlocking the file-writing paths: Admin → Configuration →
+here: fml only catalogs and curates - files are never moved, deleted or
+copied into the library; the only place written to is the export folder
+(copies, clips). Unlocking the file-writing paths: Admin → Configuration →
 **Library management** (see [admin.md](admin.md)).
 
 **Language (DE/EN):** without any action on your part, the interface
@@ -60,7 +61,7 @@ reloads the page. The language belongs to the viewer (browser), not to
 the instance - two machines can view the same instance in different
 languages (ADR 0054). The search grammar additionally
 understands **English aliases** for its German remnants: `file:` =
-`datei:`, `location:` = `fundort:`, `portrait`/`square`/`landscape` =
+`datei:`, `folder:` = `ordner:`, `location:` = `fundort:`, `portrait`/`square`/`landscape` =
 `hochformat`/`quadratisch`/`querformat`, `-asc`/`-desc` = `-auf`/`-ab`,
 `external` = `extern`, `unknown` = `unbekannt`, `type:` = `typ:` (with
 `image` = `bild`), `duration:` = `dauer:`, `generator:` = `tool:`,
@@ -375,8 +376,8 @@ Everything manual is its own layer - strictly separated from what was
 extracted from the files.
 
 - **Selecting several:** **Shift-click** marks a range, **Ctrl/Cmd-click**
-  adds or removes individual tiles. Rating, tags and model assignment
-  then apply to the **whole selection** (the panel shows a note with the
+  adds or removes individual tiles. Rating, tags, model assignment,
+  music details and cover then apply to the **whole selection** (the panel shows a note with the
   count).
 - **Rating:** keys `1`–`5` on the selected medium (in overview and
   loupe), `0` clears, the same number again clears too (toggle). Or click
@@ -433,8 +434,11 @@ For "narrow down this search, then tag/rate ALL hits" there is the
 **⚡ Bulk action** button on the right of the header above the gallery
 (next to "Reset filters"). It opens a dialog that shows what will be hit
 (the chips + hit count) and offers six actions - whether 50 or 20,000
-hits (in the audio view "Exchange → Export" is added, see
-[Audio](audio.md#exchanging-comments-with-another-fml)):
+hits. The dialog has two sections: at the top **Change the hits** with the
+six actions and the "Apply" button, below it **Export**, which changes
+nothing here: "Export copies …" (see [Exporting copies](export.md)) and,
+in the audio view, "Save exchange file" (see
+[Audio](audio.md#exchanging-comments-with-another-fml)). The six actions:
 
 - **Base rating** (1-5 ★): fills **only unrated items** - existing
   ratings stay untouched. Nothing is destroyed.
@@ -537,7 +541,7 @@ show only their icon.
   LoRA, year, file type, format, resolution, input image, location),
   followed by what only exists here (tags, text, **duration** - input like
   `dauer:`, e.g. `>120` or `1:00-3:00`, applies to audio and video -,
-  metrics, raw-data search, filename, sort order) with value lists and **counters in the current context**.
+  metrics, raw-data search, filename, folder, sort order) with value lists and **counters in the current context**.
   Clicking several values = OR chip; "exclude" makes negative criteria;
   the raw-data search is the opt-in for hits in workflow JSONs (`raw:`).
 - **Typing help:** while typing, the search box suggests matching facets
@@ -550,7 +554,9 @@ show only their icon.
   arrow key there, and Enter searches the full text as usual. If the media
   type lives in the other view ("audio" in the gallery), the row reads
   **"View: → Audio view"** instead of a chip: Enter switches the view, the
-  search stays.
+  search stays. The last suggestion (before "Full text") is always
+  **"Folder: …"** without a counter: Enter on it searches for files in
+  folders of that name (`ordner:`).
 
 The search is **curated**: across the interpreted fields (prompt, model,
 seed, sampler, …), the **filename** (for metadata-poor sources like
@@ -624,7 +630,11 @@ e.g. node names in workflow JSON: `raw: ipadapter`), `datei:` (in
 English `file:`; specifically the **filename** of the locations, without
 directory - substring, exact with `"…"`; handy for metadata-less
 collections like Midjourney exports, and of course usable in ranking
-expressions too), `type:` (German `typ:`; media type
+expressions too), `folder:` (German `ordner:`; the **folder** a location
+lies in, including subfolders: `folder: Kiss_Tribute` matches any folder
+of that name anywhere in the path - whole folder name, case-insensitive -,
+in quotes an exact path: `folder: "D:/Music/Kiss_Tribute"`; `\` and `/`
+count the same), `type:` (German `typ:`; media type
 `image`/`video`/`audio`), `duration:` (German `dauer:`; seconds or m:ss
 with a comparison or as a range: `duration: >120`, `duration: 60-180`,
 see [Audio module](audio.md)) and the media metrics `width`/`height`/`fps`
@@ -775,8 +785,8 @@ affected files ([interpretation.md](interpretation.md#video-codec-and-playabilit
   loupe and single view render a JPEG server-side for them (the original
   stays untouched), Photo CD in its largest size (3072×2048). PSD uses the embedded composite. PSDs saved
   **without "maximize compatibility"** carry no composite (only the
-  layers) — they honestly show "No preview available" instead of a wrong
-  white image. To see them, re-save them once in Photoshop with
+  layers) — they honestly say that no composite is embedded instead of
+  showing a wrong white image. To see them, re-save them once in Photoshop with
   "maximize compatibility". **PDF** is only cataloged (no extractor,
   ADR 0051).
 - **Meant for you only:** the server binds to `localhost` by default and

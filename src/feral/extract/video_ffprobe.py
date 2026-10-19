@@ -22,6 +22,10 @@ Einzige Ausnahme vom „nur ffprobe": ffprobe sieht keine ``uuid``-Boxen. Das
 C2PA-Manifest von MP4/M4A steckt in einer Top-Level-``uuid``-Box (C2PA 2.2
 §A.5, Recherche Audio §7) — die liest ``c2pa_uuid_items`` byte-treu
 (``isobmff:uuid``, Keyword = UUID hex), nur die Box-Köpfe werden gelesen.
+Ebenso sieht ffprobe die Bytes des Covers einer M4A nicht (nur eine
+Bildspur): ``covr_items`` liest ``moov/udta/meta/ilst/covr`` und legt je
+Bild einen Deskriptor ab (``isobmff:covr``, wie ID3-``APIC``), samt
+fml-Kennung eines beim Export gesetzten Covers (ADR 0107).
 """
 
 from __future__ import annotations
@@ -29,11 +33,13 @@ from __future__ import annotations
 import json
 import struct
 import subprocess
+import threading
 
 from ..tools import NO_WINDOW, find_binary, media_input
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from .id3 import picture_descriptor
 from .types import ContainerExtraction, RawMetadataItem
 
 CONTAINERS = ("matroska", "isobmff")
@@ -41,6 +47,9 @@ CONTAINERS = ("matroska", "isobmff")
 # C2PA-Manifest-Box in ISO-BMFF (Top-Level ``uuid``, c2pa-rs bmff_io.rs).
 C2PA_UUID = bytes.fromhex("d8fec3d61b0e483c92975828877ec481")
 _MAX_C2PA = 64 * 1024 * 1024   # Deckel wie id3.MAX_TAG
+_MAX_MOOV = 64 * 1024 * 1024   # Deckel für das Lesen von ``moov`` (Cover)
+# Typ-Kennung im ``data``-Atom eines ``covr`` → MIME.
+_COVR_MIME = {13: "image/jpeg", 14: "image/png", 27: "image/bmp"}
 
 # Obergrenze pro Datei — ffprobe liest nur Header, sollte nie so lange brauchen.
 _TIMEOUT_SECONDS = 30
@@ -90,20 +99,20 @@ def probe(path: str | Path) -> tuple[dict[str, Any] | None, str | None]:
         )
     except FileNotFoundError:
         return None, (
-            "ffprobe nicht gefunden — Datei ist katalogisiert, Metadaten folgen "
-            "nach Installation von ffmpeg bei einem erneuten Scan (siehe DEPENDENCIES.md)."
+            "ffprobe not found - file is cataloged, metadata follows "
+            "on a re-scan after installing ffmpeg (see DEPENDENCIES.md)."
         )
     except subprocess.TimeoutExpired:
-        return None, f"ffprobe-Timeout nach {_TIMEOUT_SECONDS}s."
+        return None, f"ffprobe timeout after {_TIMEOUT_SECONDS} s."
 
     if proc.returncode != 0:
         stderr = proc.stderr.decode("utf-8", errors="replace").strip()
-        return None, f"ffprobe meldet Fehler: {stderr or 'unbekannt'}"
+        return None, f"ffprobe reports an error: {stderr or 'unknown'}"
 
     try:
         return json.loads(proc.stdout), None
     except ValueError:
-        return None, "ffprobe lieferte kein gültiges JSON."
+        return None, "ffprobe returned no valid JSON."
 
 
 def extract(source: str | Path | BinaryIO, *, container: str) -> ContainerExtraction:
@@ -124,7 +133,7 @@ def extract(source: str | Path | BinaryIO, *, container: str) -> ContainerExtrac
         # Offener Strom: nur echte Datei-Objekte tragen in `name` ihren Pfad.
         path = getattr(source, "name", None)
         if not isinstance(path, (str, Path)):
-            result.warnings.append("ffprobe braucht einen Dateipfad, bekam einen anonymen Strom.")
+            result.warnings.append("ffprobe needs a file path, got an anonymous stream.")
             return result
     else:
         path = source
@@ -133,10 +142,12 @@ def extract(source: str | Path | BinaryIO, *, container: str) -> ContainerExtrac
         result.items.extend(c2pa_uuid_items(path, result.warnings))
     data, warning = probe(path)
     if data is None:
-        result.warnings.append(warning or "ffprobe: keine Daten.")
+        result.warnings.append(warning or "ffprobe: no data.")
         return result
 
     result.items.extend(items_from_ffprobe(data, container=container))
+    if container == "isobmff" and any(_is_cover(s) for s in data.get("streams") or []):
+        result.items.extend(covr_items(path, result.warnings))
     result.width, result.height, result.fps = dimensions_from_ffprobe(data)
     result.duration = duration_from_ffprobe(data)
     result.media_kind = media_kind_from_ffprobe(data)
@@ -153,6 +164,34 @@ def subtitle_streams(data: dict[str, Any]) -> list[int]:
             and (s.get("codec_name") or "").lower() in TEXT_SUBTITLES]
 
 
+def read_bounded(cmd: list[str], *, limit: int, timeout: float) -> tuple[int, bytes | None]:
+    """Programm laufen lassen und höchstens ``limit`` Bytes seiner Ausgabe
+    lesen (#251): ``capture_output`` puffert erst alles, ein Deckel danach
+    schützt den Speicher nicht. Mehr als ``limit`` → Prozess beenden, ``None``
+    statt Ausgabe. Wirft ``TimeoutExpired`` nach ``timeout`` Sekunden."""
+    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, **NO_WINDOW)
+    timed_out = threading.Event()
+
+    def kill() -> None:
+        timed_out.set()
+        proc.kill()
+
+    timer = threading.Timer(timeout, kill)
+    timer.start()
+    try:
+        out = proc.stdout.read(limit + 1)
+        if len(out) > limit:
+            proc.kill()
+        rc = proc.wait()
+    finally:
+        timer.cancel()
+        proc.stdout.close()
+    if timed_out.is_set():
+        raise subprocess.TimeoutExpired(cmd, timeout)
+    return rc, (None if len(out) > limit else out)
+
+
 def subtitle_items(path: str | Path, data: dict[str, Any], *, container: str,
                    warnings: list[str]) -> list[RawMetadataItem]:
     """Jede Text-Untertitel-Spur als SRT-Roh-Eintrag (#234). Wirft nicht:
@@ -160,23 +199,24 @@ def subtitle_items(path: str | Path, data: dict[str, Any], *, container: str,
     items: list[RawMetadataItem] = []
     for index in subtitle_streams(data)[:_MAX_SUBTITLE_STREAMS]:
         try:
-            proc = subprocess.run(
+            rc, out = read_bounded(
                 [find_binary("ffmpeg") or "ffmpeg", "-v", "error", "-nostdin",
                  *media_input(path), "-map", f"0:{index}", "-c:s", "srt", "-f", "srt", "-"],
-                capture_output=True, timeout=_TIMEOUT_SECONDS, **NO_WINDOW,
-            )
+                limit=_MAX_SUBTITLE, timeout=_TIMEOUT_SECONDS)
         except FileNotFoundError:
-            warnings.append("ffmpeg nicht gefunden: Untertitel-Spur nicht gelesen.")
+            warnings.append("ffmpeg not found: subtitle track not read.")
             return items
         except subprocess.TimeoutExpired:
-            warnings.append(f"ffmpeg: Untertitel-Spur {index} nach {_TIMEOUT_SECONDS} s abgebrochen.")
+            warnings.append(f"ffmpeg: subtitle track {index} stopped after {_TIMEOUT_SECONDS} s.")
             continue
         except OSError as exc:   # Extraktoren werfen nicht, sie sammeln Warnungen
-            warnings.append(f"ffmpeg: Untertitel-Spur {index} nicht lesbar ({exc}).")
+            warnings.append(f"ffmpeg: subtitle track {index} unreadable ({exc}).")
             continue
-        out = proc.stdout[:_MAX_SUBTITLE]
-        if proc.returncode != 0 or not out.strip():
-            warnings.append(f"ffmpeg: Untertitel-Spur {index} nicht lesbar.")
+        if out is None:
+            warnings.append(f"ffmpeg: subtitle track {index} larger than {_MAX_SUBTITLE // 1024} KiB.")
+            continue
+        if rc != 0 or not out.strip():
+            warnings.append(f"ffmpeg: subtitle track {index} unreadable.")
             continue
         items.append(RawMetadataItem(source=f"{container}:stream{index}.subtitle", keyword="srt",
                                      text=out.decode("utf-8", errors="replace"),
@@ -220,6 +260,78 @@ def c2pa_uuid_items(path: str | Path, warnings: list[str]) -> list[RawMetadataIt
     return items
 
 
+def _boxes(buf: bytes, start: int, end: int):
+    """Kind-Boxen in ``buf[start:end]``: ``(typ, rumpf_anfang, rumpf_ende)``."""
+    pos = start
+    while pos + 8 <= end:
+        size, kind = struct.unpack(">I4s", buf[pos:pos + 8])
+        header = 8
+        if size == 1 and pos + 16 <= end:
+            size, header = struct.unpack(">Q", buf[pos + 8:pos + 16])[0], 16
+        elif size == 0:
+            size = end - pos
+        if size < header or pos + size > end:
+            return
+        yield kind, pos + header, pos + size
+        pos += size
+
+
+def _child(buf: bytes, start: int, end: int, kind: bytes) -> tuple[int, int] | None:
+    for found, body_start, body_end in _boxes(buf, start, end):
+        if found == kind:
+            return body_start, body_end
+    return None
+
+
+def covr_items(path: str | Path, warnings: list[str]) -> list[RawMetadataItem]:
+    """Cover einer M4A (``moov/udta/meta/ilst/covr``) als Bild-Deskriptoren
+    (``isobmff:covr``). Liest nur ``moov``; Kaputtes wird Warnung."""
+    items: list[RawMetadataItem] = []
+    try:
+        with open(path, "rb") as fh:
+            size = fh.seek(0, 2)
+            pos, moov = 0, None
+            while pos + 8 <= size:
+                fh.seek(pos)
+                box_size, box_type = struct.unpack(">I4s", fh.read(8))
+                header = 8
+                if box_size == 1:
+                    box_size, header = struct.unpack(">Q", fh.read(8))[0], 16
+                elif box_size == 0:
+                    box_size = size - pos
+                if box_size < header:
+                    break
+                if box_type == b"moov":
+                    if box_size - header > _MAX_MOOV:
+                        warnings.append("ISO-BMFF: moov too large for the cover — skipped.")
+                        return items
+                    moov = fh.read(box_size - header)
+                    break
+                pos += box_size
+    except (OSError, struct.error) as exc:
+        warnings.append(f"ISO-BMFF cover read failed: {exc!r}")
+        return items
+    if not moov:
+        return items
+    span: tuple[int, int] | None = (0, len(moov))
+    for kind in (b"udta", b"meta", b"ilst", b"covr"):
+        span = _child(moov, *span, kind)
+        if span is None:
+            return items
+        if kind == b"meta":
+            span = (span[0] + 4, span[1])     # FullBox: Version + Flags
+    for kind, start, end in _boxes(moov, *span):
+        if kind != b"data" or end - start < 8:
+            continue
+        type_code = int.from_bytes(moov[start + 1:start + 4], "big")
+        image = moov[start + 8:end]
+        items.append(RawMetadataItem(
+            source="isobmff:covr", keyword=None,
+            text=picture_descriptor(_COVR_MIME.get(type_code, ""), None, "", image),
+            data=None, encoding="utf-8"))
+    return items
+
+
 def add_technical_facts(path: str | Path, result: ContainerExtraction) -> None:
     """Technische Fakten einer Audiodatei aus ffprobe an ``result`` hängen
     (ADR 0083): Format-Eckwerte und die Eckwerte der Tonspur(en) — KEINE
@@ -227,7 +339,7 @@ def add_technical_facts(path: str | Path, result: ContainerExtraction) -> None:
     Ohne ffprobe: Warnung, die Walker-Einträge bleiben."""
     data, warning = probe(path)
     if data is None:
-        result.warnings.append(warning or "ffprobe: keine Daten.")
+        result.warnings.append(warning or "ffprobe: no data.")
         return
     result.items.extend(fact_items(data, container=result.container, audio_only=True))
     result.duration = duration_from_ffprobe(data)

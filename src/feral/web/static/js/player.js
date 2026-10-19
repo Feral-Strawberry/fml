@@ -68,8 +68,9 @@ const pictureOf = (s) => s.cover || (s.artwork ? s.file_hash : null);
 
 const isPlaying = () => !!el && !!cur && !el.paused;
 export const currentHash = () => cur?.file_hash ?? null;
+/** Der Song der Abspielleiste (spielend oder pausiert), sonst null. */
+export const currentSong = () => cur;
 export const playingHash = () => (isPlaying() ? cur.file_hash : null);
-export const isFailed = (hash) => failed.has(hash);
 export const matchOn = () => matchOverride ?? match;
 export const loopOf = (hash) => (loop && loop.hash === hash ? loop : null);
 
@@ -656,7 +657,7 @@ export function initPlayer() {
   on("audio-enabled", (d) => { if (!d?.enabled) stop(); });
   // Cover geändert (#165): der laufende Song zeigt es sofort in der Leiste.
   on("cover-changed", (d) => {
-    if (!cur || cur.file_hash !== d.hash) return;
+    if (!cur || !(d.hashes || [d.hash]).includes(cur.file_hash)) return;
     cur.cover = d.manual?.cover || null;
     setSession();
     repaint(cur.file_hash);

@@ -109,6 +109,12 @@ erDiagram
     text source
     text updated_at
   }
+  manual_lyrics {
+    text file_hash PK, FK
+    text lines
+    text source
+    text updated_at
+  }
   covers {
     text file_hash PK, FK
     text cover_hash FK
@@ -213,6 +219,7 @@ erDiagram
   items ||--o{ item_tags : "file_hash"
   items ||--o{ time_comments : "file_hash"
   items ||--o{ manual_fields : "file_hash"
+  items ||--o| manual_lyrics : "file_hash"
   items ||--o{ covers : "cover_hash"
   items ||--o| covers : "file_hash"
   items ||--o{ folder_order : "file_hash"
@@ -358,6 +365,17 @@ Indexes: `idx_time_comments_item`
 | `field` | text | PK | yes |  |
 | `ordinal` | integer | PK | yes | `0` |
 | `value` | text |  | yes |  |
+| `source` | text |  |  |  |
+| `updated_at` | text |  | yes |  |
+
+Indexes: none
+
+#### `manual_lyrics` · PK `file_hash`
+
+| Column | Type | Key | Required | Default |
+| --- | --- | --- | --- | --- |
+| `file_hash` | text | PK · FK → `items.file_hash` | yes |  |
+| `lines` | text |  | yes |  |
 | `source` | text |  |  |  |
 | `updated_at` | text |  | yes |  |
 
@@ -552,8 +570,9 @@ the canonical field vocabulary (`prompt`, `model`, `seed`, `lora`, `tool`,
 LoRAs, several sampler passes, several artists). The covering index over
 `(field, value_text, file_hash)` serves facets and chip filters. Rows with
 the parser `manual` are not parser results but the music details set by
-hand from `manual_fields`: on writing they replace the parser rows of the
-same field, so every query sees the value in effect.
+hand from `manual_fields` and the lyrics set by hand from `manual_lyrics`
+(fields `lyrics`, `lyrics_synced`, `song_sections`): on writing they
+replace the parser rows of the same field, so every query sees the value in effect.
 
 **Manual layer.** What a person sets, strictly separated from the
 extracted: `annotations` (exactly one row per item: rating 1–5, notes,
@@ -564,12 +583,15 @@ colour and origin of the Finder tags), `smart_folders` (saved searches:
 name plus filter expression, the sort order is part of the expression)
 and `folder_order` (your own order of a saved search, sort "Manual").
 
-Three more tables of the manual layer belong to the audio module:
+Four more tables of the manual layer belong to the audio module:
 `time_comments` (comments at a position in the song, `at_ms` in
 milliseconds), `manual_fields` (music details set by hand: one value per
 song and field, several for artist and genre via `ordinal`; they cover
-the tag values in layer 2) and `covers` (the library image assigned to a
-song as its cover). In `time_comments` and `manual_fields`, `source` is
+the tag values in layer 2), `manual_lyrics` (the lyrics set by hand as
+one document per song: `lines` is JSON `[[start_ms, end_ms, "line"], …]`,
+timings may be missing) and `covers` (the library image assigned to a
+song as its cover). In `time_comments`, `manual_fields` and
+`manual_lyrics`, `source` is
 the origin label of an import from the exchange file, empty for your own
 entries.
 

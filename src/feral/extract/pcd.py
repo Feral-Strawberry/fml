@@ -91,10 +91,10 @@ def extract(source: str | Path) -> ContainerExtraction:
         with open(source, "rb") as fh:
             ipi = fh.read(_IPI_LENGTH)
     except OSError as exc:
-        result.warnings.append(f"Lesefehler: {exc}")
+        result.warnings.append(f"Read error: {exc}")
         return result
     if not is_pcd(ipi) or len(ipi) < _IPI_LENGTH:
-        result.warnings.append("Kein vollständiger PCD_IPI-Kopf.")
+        result.warnings.append("No complete PCD_IPI header.")
         return result
 
     result.items.append(RawMetadataItem(

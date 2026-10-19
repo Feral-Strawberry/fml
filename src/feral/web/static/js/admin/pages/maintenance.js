@@ -182,6 +182,7 @@ export function render(target) {
             <label id="ciOverLbl" hidden><input type="checkbox" id="ciOver"> ${STRINGS.ciOverwrite}</label>
             <button type="button" class="accent" id="ciGo" disabled>${STRINGS.ciGo}</button>
           </div>
+          <div class="stephint" id="ciWhy"></div>
           <div class="st" id="ciMsg"></div>
         </div>
       </div>
@@ -694,7 +695,8 @@ async function runPrune() {
   } catch (err) { msg.className = "st failed"; msg.textContent = err.message; }
 }
 
-// -- Karte: Austausch importieren (#228, ADR 0098; Musik-Angaben ADR 0101) -----------
+// -- Karte: Austausch importieren (#228, ADR 0098; Musik-Angaben ADR 0101;
+//    Songtext von Hand ADR 0106) ------------------------------------------------------
 
 const MAX_COMMENT_FILE = 20 * 1024 * 1024;   // = exchange.MAX_BYTES
 
@@ -704,14 +706,16 @@ function nameList(names, total) {
 }
 
 function renderCommentPreview(p) {
-  const fieldLabel = (f) => STRINGS.musicFieldLabels?.[f] || f;
-  // Je Fundweg: Songs, dann Kommentare und Musik-Angaben (nur, was die Datei trägt).
+  const fieldLabel = (f) => (f === "lyrics" ? STRINGS.lyricsEditTitle : STRINGS.musicFieldLabels?.[f] || f);
+  // Je Fundweg: Songs, dann Kommentare, Musik-Angaben und Songtexte (nur, was die Datei trägt).
   const bucket = (b, head) => `<div>${tpl(head, { items: fmtNum(b.items) })}</div>
     ${p.comments ? `<div class="vdim">${tpl(STRINGS.ciComments, { new: fmtNum(b.new), known: fmtNum(b.known) })}</div>` : ""}
-    ${p.fields ? `<div class="vdim">${tpl(STRINGS.ciFields, { new: fmtNum(b.fields_new), same: fmtNum(b.fields_same), differing: fmtNum(b.fields_differing) })}</div>` : ""}`;
-  const differing = p.by_hash.fields_differing + p.by_song_id.fields_differing;
+    ${p.fields ? `<div class="vdim">${tpl(STRINGS.ciFields, { new: fmtNum(b.fields_new), same: fmtNum(b.fields_same), differing: fmtNum(b.fields_differing) })}</div>` : ""}
+    ${p.lyrics ? `<div class="vdim">${tpl(STRINGS.ciLyrics, { new: fmtNum(b.lyrics_new || 0), same: fmtNum(b.lyrics_same || 0), differing: fmtNum(b.lyrics_differing || 0) })}</div>` : ""}`;
+  const off = (b) => b.fields_differing + (b.lyrics_differing || 0);
+  const differing = off(p.by_hash) + off(p.by_song_id);
   el("ciPrev").innerHTML = `
-    <div>${tpl(STRINGS.ciInFile, { items: fmtNum(p.items), comments: fmtNum(p.comments), fields: fmtNum(p.fields) })}</div>
+    <div>${tpl(STRINGS.ciInFile, { items: fmtNum(p.items), comments: fmtNum(p.comments), fields: fmtNum(p.fields) })}${p.lyrics ? tpl(STRINGS.ciInFileLyrics, { n: fmtNum(p.lyrics) }) : ""}</div>
     ${bucket(p.by_hash, STRINGS.ciByHash)}
     ${p.by_song_id.items ? `<div style="margin-top:6px">${bucket(p.by_song_id, STRINGS.ciBySongId)}</div>
       ${nameList(p.song_id_items.map((s) => `${s.name} → ${s.here.join(", ")}`), p.by_song_id.items)}` : ""}
@@ -723,14 +727,27 @@ function renderCommentPreview(p) {
   el("ciOverLbl").hidden = !differing;
 }
 
-/** Gibt es etwas zu übernehmen? Neue Kommentare, neue Angaben, und mit dem
- *  Häkchen auch abweichende; Suno-ID-Treffer nur mit ihrem Häkchen. */
-function updateCommentGo() {
+/** Warum ist „Übernehmen" gesperrt (#266)? Text, oder "" wenn es etwas zu
+ *  übernehmen gibt: neue Kommentare, neue Angaben, und mit dem Häkchen auch
+ *  abweichende; Suno-ID-Treffer nur mit ihrem Häkchen. Sperre und Begründung
+ *  kommen aus derselben Rechnung, damit der Knopf nie ohne Grund grau ist. */
+function commentBlock() {
   const p = ciPreview;
-  const over = el("ciOver").checked;
-  const fresh = (b) => b.new + b.fields_new + (over ? b.fields_differing : 0);
-  const n = p ? fresh(p.by_hash) + (el("ciSong").checked ? fresh(p.by_song_id) : 0) : 0;
-  el("ciGo").disabled = !n || !el("ciSource").value.trim();
+  const fresh = (b, over) => b.new + b.fields_new + (b.lyrics_new || 0)
+    + (over ? b.fields_differing + (b.lyrics_differing || 0) : 0);
+  const count = (song, over) => fresh(p.by_hash, over) + (song ? fresh(p.by_song_id, over) : 0);
+  const song = el("ciSong").checked, over = el("ciOver").checked;
+  if (count(song, over)) return el("ciSource").value.trim() ? "" : STRINGS.ciNeedSource;
+  if (!p.by_hash.items && !p.by_song_id.items) return STRINGS.ciWhyMissing;
+  if (!count(true, true)) return STRINGS.ciWhyNothing;
+  // Neues gibt es nur hinter einem Häkchen: erst das eine nennen, dann das andere.
+  return count(song, true) ? STRINGS.ciWhyOverwrite : STRINGS.ciWhySongId;
+}
+
+function updateCommentGo() {
+  const why = ciPreview ? commentBlock() : "";   // ohne Datei spricht Schritt 2
+  el("ciGo").disabled = !ciPreview || !!why;
+  el("ciWhy").textContent = why;
 }
 
 async function loadCommentFile() {
@@ -758,7 +775,6 @@ async function loadCommentFile() {
 async function runCommentImport() {
   const msg = el("ciMsg");
   const source = el("ciSource").value.trim();
-  if (!source) { msg.className = "st failed"; msg.textContent = STRINGS.ciNeedSource; return; }
   el("ciGo").disabled = true;
   try {
     const r = await importExchange(ciData, source,
@@ -766,7 +782,9 @@ async function runCommentImport() {
     msg.className = "st done";
     msg.textContent = tpl(STRINGS.ciDone, { added: fmtNum(r.added), known: fmtNum(r.known),
                                             fields: fmtNum(r.fields_set), same: fmtNum(r.fields_same) })
-      + (r.fields_kept ? tpl(STRINGS.ciKept, { n: fmtNum(r.fields_kept) }) : "");
+      + (r.fields_kept ? tpl(STRINGS.ciKept, { n: fmtNum(r.fields_kept) }) : "")
+      + (r.lyrics_set ? tpl(STRINGS.ciDoneLyrics, { n: fmtNum(r.lyrics_set) }) : "")
+      + (r.lyrics_kept ? tpl(STRINGS.ciKeptLyrics, { n: fmtNum(r.lyrics_kept) }) : "");
     el("ciOver").checked = false;
     ciPreview = await previewExchangeImport(ciData);   // zeigt jetzt „schon da"
     renderCommentPreview(ciPreview);

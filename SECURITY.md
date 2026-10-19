@@ -53,8 +53,8 @@ The most important safeguards (full write-up in
 - **A parser error stays with its file**: if an interpretation parser
   fails on one file's metadata, it is skipped for that file; the scan or
   re-interpretation of the library carries on.
-- **Exchange files from another fml (time comments, music details) are
-  untrusted input**: at most 20 MB, checked before parsing, a fixed format
+- **Exchange files from another fml (time comments, music details,
+  lyrics) are untrusted input**: at most 20 MB, checked before parsing, a fixed format
   with length and count limits, accepted as `application/json` only.
 - **Kodak Photo CD files are decoded by a capped reader** (at most 16 MiB
   read, a bounded number of rows per resolution level, the row-marker
@@ -69,13 +69,22 @@ The most important safeguards (full write-up in
   must come from fml's own interface; a request whose `Origin` does not
   match the server is refused, so a foreign website in another tab cannot
   trigger actions.
+- **The export folder is the only place fml writes copies and clips to**:
+  it may not overlap the library, a watch folder or the cache, nor contain
+  catalogued media; existing files are never overwritten, temporary files
+  are exclusive, every copy is verified (against the original's hash, or
+  the unchanged audio for copies with details written in), and ffmpeg
+  writes to an absolute `file:` path only. Originals are only read.
 - **File-system jumps are whitelisted**: "show in file manager" and the
   location breadcrumbs open only locations stored for that item (content
-  verified by hash before revealing); media delivery serves cataloged
+  verified by hash before revealing), the 📂 button after a clip only a
+  file inside the export folder; media delivery serves cataloged
   files by hash only and stops reading when the browser aborts.
 - **The task queue is data, not code**: waiting tasks survive a restart
   as a name from a fixed list plus JSON parameters. In read-only mode no
-  saved task that copies, moves or deletes files is ever restored.
+  saved task that copies into the library, moves or deletes files is ever
+  restored; a saved queue from another machine or database file is
+  dropped.
 - **Clearing a cache deletes only what fml put there** (files matching
   `<2 hex>/<hash>.<suffix>`), never a folder as a whole: a cache path that
   points at a folder with your own files by mistake leaves them alone.

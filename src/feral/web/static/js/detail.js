@@ -7,9 +7,10 @@
 // Loupe. Rating/Tags bekommen ihren Platz im Kopf erst mit Block 3.1.
 
 import { STRINGS } from "./strings.js";
-import { wireReveal, removeCover, loadThumb, getAudioAnalysis, fmtLoudness, getItem, getTags, getModels, mediaUrl, openLocation, releaseVideos, wireMediaFallback, workflowUrl, thumbUrl, canPlay, mediaHtml, kindLabel as mediaKindLabel, fmtDuration, wireUnplayable, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
+import { wireReveal, removeCovers, loadThumb, getAudioAnalysis, fmtLoudness, getItem, getTags, getModels, mediaUrl, openLocation, releaseVideos, wireMediaFallback, workflowUrl, thumbUrl, canPlay, mediaHtml, kindLabel as mediaKindLabel, fmtDuration, wireUnplayable, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
 import { applyDate, applyModel, applyRating, applyTag, colorDotsHtml, note, selectionHashes, tagRemove } from "./curate.js";
 import { MUSIC_FIELDS, mountMusicFields } from "./musicfields.js";
+import { lyricsRowHtml } from "./lyricsedit.js";
 import { mountCommentSection } from "./comments.js";
 import { panelLinesHtml } from "./lyrics.js";
 import { emit, on } from "./main.js";
@@ -208,6 +209,16 @@ export function breadcrumbHtml(loc) {
   return `<span class="locpath">${out.join("")}</span>`;
 }
 
+/** Knopf „✂ Ausschnitt" (Modul, ADR 0105): nur bei Videos und Songs. Was
+ *  der Browser nicht abspielt oder keine Dauer hat, lässt sich hier nicht
+ *  kontrolliert schneiden: Knopf gesperrt, der Grund steht im Tooltip. */
+export function clipButtonHtml(d, enabled) {
+  if (!enabled || (d.media_kind !== "video" && d.media_kind !== "audio")) return "";
+  const ok = canPlay(d) && d.duration > 0;
+  return `<button type="button" class="pclip" id="pClip"${ok ? "" : " disabled"}
+    title="${ok ? STRINGS.clipButtonTitle : STRINGS.clipUnplayable}">✂ ${STRINGS.clipTitle}</button>`;
+}
+
 export function initDetail() {
   const panel = document.getElementById("panel");
   let seq = 0;
@@ -216,6 +227,7 @@ export function initDetail() {
   let curRating = null; // aktueller Stand fürs Toggle (gleiche Zahl löscht)
   let selCount = 1;     // Größe der aktuellen Auswahl (Multiselect-Hinweis)
   let curModel = "";    // angezeigtes manuelles Modell (Doppel-Submit vermeiden)
+  let clipEnabled = false;   // Modul Ausschnitt (ADR 0105): Knopf ✂ nur mit Modul
   const collapsed = loadCollapsed();   // eingeklappte Abschnitte (#219)
 
   function renderManual(manual) {
@@ -288,7 +300,13 @@ export function initDetail() {
   // api.mediaHtml); direkt darunter diese Zeile zum Wählen/Ändern/Entfernen.
   // Das eingebettete Bild (Suno) ist eine Eigenschaft der Datei und steht
   // klein im Abschnitt „Datei" — es zählt nicht als Cover.
+  // Bei Mehrfachauswahl wirken Setzen und Entfernen auf alle Songs der
+  // Auswahl (#281: ein Album bekommt ein Cover); der Dialog nennt die Zahl.
   function coverBarHtml(d) {
+    if (selCount > 1) {
+      return `<div class="pcoverbar" id="pCover"><button type="button" class="accentbtn" data-cover="pick">🖼 ${STRINGS.coverPickSel}</button>
+          <button type="button" data-cover="remove">${STRINGS.coverRemoveSel}</button></div>`;
+    }
     return d.cover_item
       ? `<div class="pcoverbar has" id="pCover"><span class="cvstate" title="${esc(STRINGS.coverFinalHint)}">✓ ${STRINGS.coverFinal}</span>
           <button type="button" data-cover="pick">${STRINGS.coverChange}</button>
@@ -305,15 +323,16 @@ export function initDetail() {
     sec.addEventListener("click", async (e) => {
       const b = e.target.closest("[data-cover]");
       if (!b) return;
+      const hashes = selCount > 1 ? selectionHashes() : [d.file_hash];
       if (b.dataset.cover === "pick") {
-        emit("cover-pick", { hash: d.file_hash, name, tags: (curManual || d.manual).tags,
-                             cover: (curManual || d.manual).cover });
+        emit("cover-pick", { hashes, name });
         return;
       }
       b.disabled = true;
       try {
-        const r = await removeCover(d.file_hash);
-        emit("cover-changed", { hash: d.file_hash, manual: r.manual });
+        const r = await removeCovers(hashes);
+        if (r.songs.length) emit("cover-changed", { hash: r.songs[0], hashes: r.songs, manual: r.manual });
+        else b.disabled = false;
       } catch (err) { b.disabled = false; console.warn(err); }
     });
   }
@@ -385,6 +404,7 @@ export function initDetail() {
           <span class="badgechip origin-interpretiert">${mediaKindLabel(d) || "IMAGE"}</span>
           <span class="vmono">${d.width ? `${d.width}×${d.height} · ` : ""}${d.fps ? `${d.fps} fps · ` : ""}${d.duration != null ? `${fmtDuration(d.duration)} · ` : ""}${esc(d.container.toUpperCase())}${codec ? ` · ${esc(codec)}` : ""} · ${fmtBytes(d.file_size)}</span>
           <span class="ratedots" id="pRate" title="${STRINGS.curateRateTitle}">${dotsHtml(d.manual.rating)}</span>
+          ${clipButtonHtml(d, clipEnabled)}
         </div>
       </div>
       ${selCount > 1 ? `<div class="callout multihint">
@@ -401,6 +421,7 @@ export function initDetail() {
         <input id="pDate" autocomplete="off" placeholder="${esc(STRINGS.curateDatePlaceholder)}" title="${esc(STRINGS.curateDateTitle)}">
         <div class="vdim" id="pDateErr" hidden></div>
         ${d.media_kind === "audio" ? `<div id="pFields"></div>` : ""}
+        ${d.media_kind === "audio" && selCount <= 1 ? lyricsRowHtml(d) : ""}
       </div>
       ${generationHtml(d)}
       ${hasWorkflow ? `<div class="section" data-sec="workflow">${sechead(STRINGS.sectionWorkflow, wfEmbedded ? "ComfyUI" : STRINGS.workflowGeneratedBadge)}
@@ -496,6 +517,12 @@ export function initDetail() {
       if (notesEl.value !== (d.manual.notes || "")) note(d.file_hash, notesEl.value);
     });
 
+    panel.querySelector("#pClip")?.addEventListener("click", () =>
+      emit("clip-open", { item: { ...d, name } }));
+    // Songtext von Hand (ADR 0106): eigene Ansicht, nur für diesen Song.
+    panel.querySelector("#pLyEdit")?.addEventListener("click", () =>
+      emit("lyrics-edit-open", { item: { ...d, name } }));
+
     // 📂 am bevorzugten Fundort = derselbe Knopf wie in Lupe/Einzelansicht
     // (Datei markiert im Explorer/Finder) — für Songs der einzige, denn sie
     // haben keine Lupe und keine Einzelansicht (#162).
@@ -586,14 +613,24 @@ export function initDetail() {
   // träfe die Tastenkürzel (Bewerten, Abspielen, Vergleichen).
   on("fields-changed", async (d) => {
     const hash = curHash;
-    if (!hash || !d.fields.includes("year") || !d.hashes.includes(hash)) return;
+    if (!hash || !d.hashes.includes(hash)) return;
+    // Songtext von Hand gespeichert (ADR 0106): Die Ansicht liegt darüber,
+    // der Fokus steht dort; das Panel darf neu gebaut werden.
+    if (d.fields.includes("lyrics")) { show(hash); return; }
+    if (!d.fields.includes("year")) return;
     let item;
     try { item = await getItem(hash); } catch (err) { console.warn(err); return; }
     const el = panel.querySelector("#pCreated");
     if (el && curHash === hash) el.innerHTML = createdHtml(item);
   });
   // Cover gesetzt/entfernt: Vorschau und Abschnitt hängen am Coverbild — neu laden.
-  on("cover-changed", (d) => { if (d.hash === curHash) show(d.hash); });
+  on("cover-changed", (d) => { if ((d.hashes || [d.hash]).includes(curHash)) show(curHash); });
+  // Modul-Schalter kommt mit den Kennzahlen, oft NACH dem ersten Panel.
+  on("clip-enabled", (d) => {
+    if (clipEnabled === !!d?.enabled) return;
+    clipEnabled = !!d?.enabled;
+    if (curHash) show(curHash);
+  });
 
   showEmpty();
 }

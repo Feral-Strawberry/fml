@@ -112,11 +112,12 @@
 
 Ab Werk läuft die Feral Media Library (fml) im **Übersichtsmodus**: Sie
 katalogisiert und kuratiert nur —
-**Dateien werden nie kopiert, verschoben oder gelöscht** (die
-Hände-weg-Garantie, ADR 0041). Gesperrt sind alle dateischreibenden Wege:
+**Dateien werden nie verschoben, gelöscht oder in die Library kopiert**
+(die Hände-weg-Garantie, ADR 0041). Gesperrt sind alle dateischreibenden Wege:
 der kopieren-/verschieben-Import (auch als Watchordner) und „Abgelehnte
-rausverschieben". Möglich bleiben `katalogisieren`, Ablehnen und das gesamte
-Kuratieren. Ein Badge „👁 Übersichtsmodus" in der Kopfzeile zeigt den Zustand;
+rausverschieben". Möglich bleiben `katalogisieren`, Ablehnen, das gesamte
+Kuratieren und der [Export von Kopien](export.md): Er liest die Originale
+nur und schreibt allein in den Export-Ordner. Ein Badge „👁 Übersichtsmodus" in der Kopfzeile zeigt den Zustand;
 gesperrte Stellen erklären das ehrlich („Im Übersichtsmodus deaktiviert —
 Library-Verwaltung in der Konfiguration einschalten").
 
@@ -375,13 +376,15 @@ darüber:
 
 ### Austausch importieren (eigene Karte, nur mit Audio-Modul)
 
-Übernimmt die Austauschdatei eines anderen fml mit Zeitkommentaren und
-Musik-Angaben von Hand: Datei wählen und Herkunft eintragen → Vorschau
-(gefunden, neu, schon da, nicht gefunden; Treffer nur über die
-Suno-Song-ID eigens; bei den Musik-Angaben neu, gleich, abweichend) →
-Übernehmen. Abweichende eigene Angaben bleiben stehen, außer das Häkchen
+Übernimmt die Austauschdatei eines anderen fml mit Zeitkommentaren,
+Musik-Angaben und Songtexten von Hand: Datei wählen und Herkunft
+eintragen → Vorschau (gefunden, neu, schon da, nicht gefunden; Treffer nur
+über die Suno-Song-ID eigens; bei Musik-Angaben und Songtext neu, gleich,
+abweichend) → Übernehmen. Ist „Übernehmen" gesperrt, steht darunter der
+Grund (etwa: nichts Neues, oder nur abweichende Angaben, die erst mit dem
+Häkchen zum Überschreiben übernommen werden). Abweichende eigene Angaben bleiben stehen, außer das Häkchen
 „Abweichende eigene Angaben überschreiben" ist gesetzt. Ändert nur
-Kommentare und Angaben, keine Dateien. Einzelheiten und das Dateiformat:
+Kommentare, Angaben und Songtexte, keine Dateien. Einzelheiten und das Dateiformat:
 [Audio-Modul → Kommentare austauschen](audio.md#kommentare-mit-einem-anderen-fml-austauschen)
 und [Angaben austauschen](audio.md#angaben-mit-einem-anderen-fml-austauschen).
 
@@ -392,7 +395,9 @@ Alle-Knopf, der die **echte Gesamtzahl** nennt (ADR 0034). Darunter **je
 Fehlerart eine Karte**: Zähler, die jüngsten 20 Einträge („jüngste 20 von
 2013"), je Eintrag „quittieren", unten „alle N dieser Art quittieren".
 Quittieren meldet die Zahl der quittierten Einträge und lädt die Karten
-neu. Arten: `failed` (nicht aufgenommen), `warning` (Extraktor-Warnung),
+neu. Arten: `failed` (nicht aufgenommen), `warning` (Extraktor-Warnung; der
+Text ist technisch und immer englisch, ein Re-Scan der Datei quittiert,
+was er nicht mehr findet),
 `thumbnail` (kein Vorschaubild), `audio` (Audio-Analyse fehlgeschlagen) und
 `playback` (Abspielbarkeit: Video, das kein bzw. nur
 mancher Browser abspielt — ProRes, 10-bit-H.264, HEVC; siehe
@@ -492,7 +497,13 @@ Meldung „gerade beschäftigt" — kurz warten, erneut versuchen.
   nur im Speicher — nach einem Neustart beginnt er leer, das Log hat
   alles). Das Widget unten in der Navigation und der Punkt in der
   Kopfzeile der Galerie zeigen dasselbe in Kurzform (`+2` = zwei
-  wartende).
+  wartende). Aufgaben, die fml von selbst startet, erscheinen dort nur,
+  wenn sie etwas zu tun hatten: die Nachläufer nach einem Import oder
+  Watch-Schub (Thumbnails, Audio analysieren) und die Läufe beim Start
+  oder nach geänderten Import-Regeln (Aussortierte neu prüfen, Songtexte
+  mit Zeiten nachholen). Ohne Arbeit bleibt die Aufgabe davor als
+  „zuletzt" stehen. Über den Knopf gestartet, zeigt jede Aufgabe
+  ihr Ergebnis, auch „0 neu".
 - **Mehrfachklick** stapelt nichts: eine Aufgabe, die schon läuft oder
   wartet, wird nicht erneut eingereiht (Hinweis „läuft bereits").
   Automatische Nachläufer (Thumbnails nach einem Import) dürfen einmal
@@ -506,7 +517,10 @@ Meldung „gerade beschäftigt" — kurz warten, erneut versuchen.
   zu, Rechner herunterfahren), hält die laufende Aufgabe an der nächsten
   Datei an, und alle wartenden werden gesichert. Beim nächsten Start
   geht es dort weiter, wo es aufgehört hat, ohne dass man etwas neu
-  anstoßen muss.
+  anstoßen muss. Die gesicherte Schlange gehört zu diesem Rechner und
+  dieser Datenbank-Datei: Wird die Datenbank auf einen anderen Rechner
+  oder an einen anderen Ort kopiert, verwirft fml sie beim Start (Hinweis
+  im Serverlog), denn ihre Pfade gehören nicht dorthin.
 - **Arbeitsprozess abgestürzt** (rot markiert): die laufende Aufgabe wird als
   abgebrochen gemeldet, wartende bleiben erhalten, der nächste Auftrag
   startet den Prozess neu. Was passiert ist, steht im Serverlog.
@@ -556,10 +570,12 @@ der Konfiguration eine Media Library und Quellen setzen.
 ## Konfiguration bearbeiten
 
 Fünf Karten: **Media Library** (Import-Ziel, **Library-Verwaltung** als
-Übersichtsmodus-Schalter, ältestes plausibles Datum, Import-Regeln),
+Übersichtsmodus-Schalter, ältestes plausibles Datum, Import-Regeln,
+**Export-Ordner** für [Kopien](export.md)),
 **Thumbnails & Leistung** (Größe, Prozesse, Hintergrund beim Start,
 volle Leistung, Langsam-Schwelle), **Oberfläche**, **Instanz** und **Module**
-([Rankings](rankings.md), [Audio](audio.md)). Jede
+([Rankings](rankings.md), [Audio](audio.md),
+[Ausschnitt](ausschnitt.md)). Jede
 Einstellung hat ein Label, die Eingabe, eine kurze Erklärung darunter und
 ein Badge: **sofort** wirkt beim Speichern, **Neustart** erst nach einem
 Neustart des Servers. Änderungen sammeln sich in der **Speicherleiste**

@@ -83,13 +83,13 @@ def extract(source: str | Path | BinaryIO, *, container: str) -> ContainerExtrac
             if getattr(img, "is_animated", False) and isinstance(duration, (int, float)) and duration > 0:
                 result.fps = round(1000 / duration, 2)
     except UnidentifiedImageError:
-        result.warnings.append(f"Pillow konnte die Datei nicht als Bild öffnen ({container}).")
+        result.warnings.append(f"Pillow could not open the file as an image ({container}).")
         return result
     except OSError as exc:
-        result.warnings.append(f"Lesefehler beim Öffnen über Pillow: {exc}")
+        result.warnings.append(f"Read error opening via Pillow: {exc}")
         return result
     except Exception as exc:  # Pillow-Plugins werfen teils eigene Fehlerklassen
-        result.warnings.append(f"Pillow-Fehler: {exc.__class__.__name__}: {exc}")
+        result.warnings.append(f"Pillow error: {exc.__class__.__name__}: {exc}")
         return result
 
     for key in sorted(info):
@@ -175,7 +175,7 @@ def _webp_c2pa_items(
             with open(source, "rb") as fh:
                 items = _walk_riff(fh)
     except (OSError, ValueError) as exc:
-        result.warnings.append(f"RIFF-Walk (C2PA) abgebrochen: {exc}")
+        result.warnings.append(f"RIFF walk (C2PA) stopped: {exc}")
     return items
 
 

@@ -148,7 +148,8 @@ Hat eine Audio-Datei im M4A- oder Matroska-Container eine
 **Text-Untertitel-Spur** (so legt Suno ab V6 den Songtext mit Zeiten ab),
 holt ein zusätzlicher ffmpeg-Lauf sie als SRT-Text, Quell-Label
 `"isobmff:stream1.subtitle"` (die Zahl ist die Nummer der Spur), Keyword
-`srt`, höchstens 1 MiB. Nur bei Audio: Bei einem Film müsste ffmpeg dafür
+`srt`, höchstens 1 MiB (eine größere Spur wird nicht gelesen, die Datei
+bekommt dann eine Warnung). Nur bei Audio: Bei einem Film müsste ffmpeg dafür
 die ganze Datei lesen. Fehlt ffmpeg, bleibt es bei einer Warnung.
 
 ## Robustheit

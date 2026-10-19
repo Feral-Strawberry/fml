@@ -5,7 +5,8 @@ Genre lassen sich je Song von Hand setzen. Die Wahrheit steht in
 ``manual_fields``; ``overlay`` legt sie beim Schreiben der Interpretation
 über die Tag-Werte (Zeilen mit ``parser = 'manual'``), sodass alle
 Lesestellen unverändert den geltenden Wert sehen. In die Dateien wird
-nichts geschrieben (ADR 0041).
+nichts geschrieben (ADR 0041). Der Songtext von Hand (ADR 0106) liegt in
+``manual_lyrics`` und wird in derselben Überdeckung mitgelegt.
 
 Rein bis auf die DB: keine Interpretation hier, das Neu-Interpretieren
 nach einer Änderung macht ``interpret.reparse.reinterpret``.
@@ -104,23 +105,29 @@ def overlay(
 ) -> list["Interpretation"]:
     """Die Angaben von Hand über die Parser-Ergebnisse legen: Für jedes Feld
     mit einem Wert von Hand entfallen die Parser-Zeilen dieses Feldes, an
-    ihre Stelle tritt eine Interpretation ``manual``. Idempotent (ein
-    schon überdecktes Ergebnis bleibt gleich); ohne Angaben von Hand kommt
-    die Eingabe unverändert zurück."""
+    ihre Stelle tritt eine Interpretation ``manual``. Ein Songtext von Hand
+    (ADR 0106) ersetzt ``lyrics``, ``lyrics_synced`` und ``song_sections``
+    aller Parser als Ganzes. Idempotent (ein schon überdecktes Ergebnis
+    bleibt gleich); ohne Angaben von Hand kommt die Eingabe unverändert
+    zurück."""
     from ..interpret.types import InterpretedField, Interpretation   # Lazy: interpret → db
+    from . import manual_lyrics   # Lazy: manual_lyrics → manual_fields (PARSER)
 
     manual = fields_of(conn, file_hash)
+    lyrics = manual_lyrics.projection_of(conn, file_hash)
     base = [i for i in interpretations if i.parser != PARSER]
-    if not manual:
+    if not manual and not lyrics:
         return base
+    gone = set(manual) | (set(manual_lyrics.FIELDS) if lyrics else set())
     covered = [
         Interpretation(i.parser, i.parser_version,
-                       [f for f in i.fields if f.field not in manual])
+                       [f for f in i.fields if f.field not in gone])
         for i in base
     ]
     covered.append(Interpretation(
         PARSER, PARSER_VERSION,
-        [InterpretedField(f, v) for f in FIELDS for v in manual.get(f, [])],
+        [InterpretedField(f, v) for f in FIELDS for v in manual.get(f, [])]
+        + [InterpretedField(f, v) for f in manual_lyrics.FIELDS for v in lyrics.get(f, [])],
     ))
     return covered
 

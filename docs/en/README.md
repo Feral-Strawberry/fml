@@ -53,6 +53,11 @@ GitHub organization).
   all embedded metadata, a dedicated audio view with waveform, a player
   with loudness matching, time comments, comparing and covers for finished
   songs in the gallery.
+- [Exporting copies](export.md) — put media as copies into an export
+  folder, as a selection or a whole search result through the bulk
+  action; the library stays as it is.
+- [Clip](ausschnitt.md) — optional: mark a section of a song or video
+  and write it as WAV or MP4 to the export folder.
 - [Multiple instances](instanzen.md) — parallel, independent galleries
   from one program folder (own DB + port per instance): **sub-galleries
   of a master library**, without touching any files. Start via

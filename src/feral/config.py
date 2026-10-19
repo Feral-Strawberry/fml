@@ -186,6 +186,15 @@ def library_verwaltung(config: dict[str, Any]) -> bool:
     )
 
 
+def export_root(config: dict[str, Any]) -> str | None:
+    """Export-Ordner des Kopie-Exports (``[export] root``, ADR 0103).
+
+    ``None``, wenn nicht konfiguriert — die Sammel-Aktion ist dann gesperrt.
+    """
+    root = config.get("export", {}).get("root")
+    return str(root) if root else None
+
+
 def import_min_date(config: dict[str, Any]) -> str:
     """Untergrenze des Plausibilitätsfensters fürs Erstelldatum
     (``[import] min_date``, ISO-Datum; Standard 2015-01-01, ADR 0019)."""
@@ -255,26 +264,6 @@ _FORMAT_ALIASES = {
 }
 
 
-def scan_locations(config: dict[str, Any]) -> list[dict[str, str]]:
-    """Feste Scan-Orte aus der Config als Liste ``[{name, path}]``.
-
-    Erwartet ``[[scan.locations]]``-Einträge mit ``path`` und optional ``name``.
-    Fehlt der Name, wird der Ordnername aus dem Pfad verwendet. Ungültige Einträge
-    (ohne ``path``) werden übersprungen.
-    """
-    locations = config.get("scan", {}).get("locations", [])
-    result: list[dict[str, str]] = []
-    for item in locations:
-        if not isinstance(item, dict):
-            continue
-        path = item.get("path")
-        if not path:
-            continue
-        name = item.get("name") or Path(path).name or path
-        result.append({"name": str(name), "path": str(path)})
-    return result
-
-
 # -- Instanz ([web], ADR 0041/I5) -------------------------------------------------
 #
 # Zwei Instanzen laufen heute schon per `--config X --db Y --port Z` parallel;
@@ -333,6 +322,16 @@ def audio_enabled(config: dict[str, Any]) -> bool:
     return bool(config.get("audio", {}).get("enabled", False))
 
 
+# -- Modul Ausschnitt ([clip], ADR 0105) ------------------------------------------
+
+def clip_enabled(config: dict[str, Any]) -> bool:
+    """Modul „Ausschnitt" eingeschaltet? (``[clip] enabled``, Standard False.)
+
+    Aus = kein Knopf, keine Kosten. Voraussetzung für die Arbeit ist der
+    Export-Ordner (``[export] root``, ADR 0103)."""
+    return bool(config.get("clip", {}).get("enabled", False))
+
+
 def audio_true_peak(config: dict[str, Any]) -> bool:
     """Peak der Audio-Analyse als True Peak messen? (``[audio] true_peak``,
     Standard True.) Aus = Sample Peak: halbiert etwa die Analysezeit, der
@@ -342,6 +341,26 @@ def audio_true_peak(config: dict[str, Any]) -> bool:
 
 
 # -- Schreiben (Admin-Bereich) --------------------------------------------------
+
+def jxr_tone(config: dict[str, Any]) -> dict[str, float]:
+    """Einstellungen der SDR-Umrechnung von HDR-Screenshots (``[jxr]``,
+    ADR 0104), als Parameter für ``feral.extract.jxr.Tone``:
+
+    - ``paper_white_nits`` (Standard 200): Was im Spiel so hell war, wird Weiß.
+    - ``knee`` (Standard 0.35, Anteil von Weiß): Bis hier bleibt das Bild
+      unverändert, darüber werden die Lichter zusammengeschoben.
+
+    Unsinnige Werte fallen auf den Standard zurück."""
+    def value(key: str, default: float, low: float, high: float) -> float:
+        try:
+            found = float(config.get("jxr", {}).get(key, default))
+        except (TypeError, ValueError):
+            return default
+        return found if low <= found <= high else default
+
+    return {"paper_white": value("paper_white_nits", 200.0, 40, 2000),
+            "knee": value("knee", 0.35, 0.05, 0.95)}
+
 
 def ui_show_dupes(config: dict[str, Any]) -> bool:
     """Dubletten-Ansicht in der Sidebar zeigen? (``[ui] dubletten``, Standard
@@ -389,7 +408,6 @@ def model_sort(config):
 def update_config_file(
     path: str | Path,
     *,
-    locations: list[dict[str, str]] | None = None,
     thumbnail_size: int | None = None,
     library_root: str | None = None,
     verwaltung: bool | None = None,
@@ -407,8 +425,10 @@ def update_config_file(
     instance_accent: str | None = None,
     rankings_enabled: bool | None = None,
     audio_enabled: bool | None = None,
+    clip_enabled: bool | None = None,
     slow_request_ms: float | None = None,
     background: str | None = None,
+    export_root: str | None = None,
 ) -> dict[str, Any]:
     """Aktualisiere verwaltete Felder der Config-Datei und schreibe sie zurück.
 
@@ -417,10 +437,6 @@ def update_config_file(
     Gibt die neue Config zurück.
     """
     config = load_config(path)
-    if locations is not None:
-        config.setdefault("scan", {})["locations"] = [
-            {"name": loc["name"], "path": loc["path"]} for loc in locations
-        ]
     if thumbnail_size is not None:
         config.setdefault("cache", {})["thumbnail_size"] = int(thumbnail_size)
     if library_root is not None:
@@ -429,6 +445,14 @@ def update_config_file(
             config.setdefault("library", {})["root"] = library_root.strip()
         else:
             config.get("library", {}).pop("root", None)
+    if export_root is not None:
+        # Export-Ordner (ADR 0103): leerer String = Eintrag entfernen.
+        if export_root.strip():
+            config.setdefault("export", {})["root"] = export_root.strip()
+        else:
+            config.get("export", {}).pop("root", None)
+            if "export" in config and not config["export"]:
+                config.pop("export")
     if verwaltung is not None:
         # ADR 0041/I4: der Schalter wird beim GUI-Speichern immer explizit —
         # die Migrations-Regel (root vorhanden ⇒ an) greift nur, solange der
@@ -525,6 +549,9 @@ def update_config_file(
     if audio_enabled is not None:
         # Audio-Modul (ADR 0083): wie die Rankings immer explizit schreiben.
         config.setdefault("audio", {})["enabled"] = bool(audio_enabled)
+    if clip_enabled is not None:
+        # Modul Ausschnitt (ADR 0105): wie die anderen Module immer explizit.
+        config.setdefault("clip", {})["enabled"] = bool(clip_enabled)
     if slow_request_ms is not None:
         # Langsam-Schwelle (#110): immer explizit schreiben, ganzzahlig in ms;
         # 0 = nie warnen. Negatives fällt auf den Standard zurück.

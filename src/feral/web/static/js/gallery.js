@@ -11,11 +11,11 @@
 // Dichte-Wechsel), die Spaltenzahl kommt aus dem berechneten Grid-Layout.
 
 import { STRINGS } from "./strings.js";
-import { getItemPosition, getItems, loadThumb, fmtDuration, kindLabel, libraryView, moveInFolder } from "./api.js";
+import { getItemPosition, getItems, loadThumb, fmtDuration, kindLabel, libraryView, moveInFolder, openLocation } from "./api.js";
 import { emit, on } from "./main.js";
 import {
-  CMP_MAX, CMP_MIN, infoRows, listHeadHtml, listStyle, paintRow, rowFacts, rowHtml, seekAt, seekTo,
-  setListStyle, setTimeAxis, timeAxis, togglePlay,
+  CMP_MAX, CMP_MIN, groupRowHtml, infoRows, listHeadHtml, listRows, listStyle, paintRow, rowFacts,
+  rowHtml, ROWS, rowsKind, seekAt, seekTo, setListStyle, setRowsKind, setTimeAxis, timeAxis, togglePlay,
 } from "./audiolist.js";
 import { pinTime } from "./comments.js";
 import { onRepaint, playingHash } from "./player.js";
@@ -133,6 +133,11 @@ export function initGallery() {
   // Die offene Suche geht mit jeder Anfrage mit — der Server braucht sie
   // nur für „manuell" (ohne fällt die Sortierung auf „Hinzugefügt" zurück).
   const folderParam = () => (folderId !== null ? { folder: folderId } : {});
+  // Fundort-Zeilen/Ordnergruppen (ADR 0108): nur in der Liste, nur „Angaben".
+  // `counts` = Songs und Fundorte der Eintragsliste (total zählt Einträge).
+  const rowsParam = () => (listMode && listRows() ? { rows: listRows() } : {});
+  let counts = null;
+  const announced = () => (counts ? { total: counts.songs, locations: counts.locations } : { total });
   let reloadSeq = 0;            // entwertet Antworten überholter Reloads (Sort-Wechsel)
   let firstLoadDone = false;    // Leer-Hinweis erst nach der ersten Antwort zeigen
   // Audioansicht (ADR 0085): dieselbe Virtualisierung als Liste mit einer
@@ -182,10 +187,11 @@ export function initGallery() {
       // Gesamtzähler nur mit Seite 0 anfordern — der Filter-COUNT je
       // Folgeseite war beim Tief-Scrollen ein Prüf-Scan pro Anfrage.
       const d = await getItems({ limit: PAGE, offset: page * PAGE, sort: sortKey,
-                                 total: page === 0 ? 1 : 0, ...filter, ...folderParam() });
+                                 total: page === 0 ? 1 : 0, ...filter, ...folderParam(), ...rowsParam() });
       if (seq !== reloadSeq) return;   // inzwischen neu geladen (Sort/Quelle)
       if (into !== items) { d.items.forEach((it, k) => into.set(page * PAGE + k, it)); return; }
       if (d.total >= 0) total = d.total;
+      if (d.songs !== undefined) counts = { songs: d.songs, locations: d.locations };
       if (page === 0 && listMode) setTimeAxis(d.max_duration);   // gemeinsame Zeitachse (ADR 0087)
       firstLoadDone = true;
       d.items.forEach((it, k) => items.set(page * PAGE + k, it));
@@ -205,6 +211,7 @@ export function initGallery() {
     const seq = ++reloadSeq;           // laufende Antworten alter Seiten entwerten
     firstLoadDone = false;             // „leer"-Hinweis erst NACH der Antwort
     total = 0;
+    counts = null;
     items = new Map();
     loadedPages = new Set();
     tiles.forEach((el) => el.remove());
@@ -215,7 +222,7 @@ export function initGallery() {
     selectedSet = new Set();           // sonst malt renderGrid alte Ringe nach (#33)
     wrap.scrollTop = 0;
     await loadPage(0);
-    emit("items-reloaded", { total, reset: !keepSelection });
+    emit("items-reloaded", { ...announced(), reset: !keepSelection });
     // Zweiter Durchgang im nächsten Frame: Erst mit gesetzter Spacer-Höhe steht
     // fest, ob ein Scrollbalken erscheint (der die Spaltenbreite ändert).
     requestAnimationFrame(() => { measureLayout(); renderGrid(); });
@@ -226,7 +233,8 @@ export function initGallery() {
     // (dann bleibt es beim Anfang der Galerie).
     if (!keepHash || !total) return;
     try {
-      const pos = await getItemPosition({ hash: keepHash, sort: sortKey, ...filter, ...folderParam() });
+      const pos = await getItemPosition({ hash: keepHash, sort: sortKey, ...filter, ...folderParam(),
+                                          ...rowsParam() });
       if (seq !== reloadSeq || selectedHash !== null) return;  // überholt/neu geklickt
       if (pos.index === null || pos.index === undefined) return;
       const it = await galleryItemAt(pos.index);
@@ -263,7 +271,7 @@ export function initGallery() {
     let d;
     try {
       d = await getItems({ limit: PAGE, offset: page * PAGE, sort: sortKey, total: 1, ...filter,
-                           ...folderParam() });
+                           ...folderParam(), ...rowsParam() });
     } catch (err) {
       console.warn(err);               // alter Stand bleibt stehen, nächster Anlass lädt erneut
       return;
@@ -273,12 +281,13 @@ export function initGallery() {
     // geladen wurden, gehören nicht in den neuen Cache — zweite Entwertung.
     seq = ++reloadSeq;
     total = d.total;
+    counts = d.songs !== undefined ? { songs: d.songs, locations: d.locations } : null;
     if (listMode) setTimeAxis(d.max_duration);
     firstLoadDone = true;
     items = new Map();
     loadedPages = new Set([page]);
     d.items.forEach((it, k) => items.set(page * PAGE + k, it));
-    emit("items-refreshed", { total });
+    emit("items-refreshed", announced());
     if (keepHash) {
       let found = null;
       for (const [i, it] of items) {
@@ -289,8 +298,9 @@ export function initGallery() {
       } else if (!total) {
         emit("selection-changed", { hash: null, index: null, hashes: [] });
       } else if (keepIndex !== null) {
-        const idx = Math.min(keepIndex, total - 1);
-        const it = await galleryItemAt(idx);
+        let idx = Math.min(keepIndex, total - 1);
+        let it = await galleryItemAt(idx);
+        if (it?.group) it = await galleryItemAt(++idx);   // Ordnerkopf: die Zeile darunter
         if (seq !== reloadSeq) return;
         if (it) emit("selection-changed", { hash: it.file_hash, index: idx });
         else emit("selection-changed", { hash: null, index: null, hashes: [] });
@@ -335,15 +345,17 @@ export function initGallery() {
     // Position neu befüllt wird. Erst beanspruchen, dann den Rest aus
     // freien Kacheln decken oder neu anlegen, zuletzt die Reihenfolge
     // herstellen: die Zielposition von Index i ist immer Kind Nr. (i - first).
-    const byHash = new Map();
-    for (const el of tiles.values()) if (el.dataset.hash) byHash.set(el.dataset.hash, el);
+    // Fundort-Darstellungen (ADR 0108): derselbe Song steht mehrfach da —
+    // Schlüssel ist dann der Eintrag (Song + Fundort bzw. Ordnerkopf).
+    const byKey = new Map();
+    for (const el of tiles.values()) if (el.dataset.key) byKey.set(el.dataset.key, el);
     const next = new Map();
     for (let i = w.first; i < w.last; i++) {
       const page = Math.floor(i / PAGE);
       if (!loadedPages.has(page)) loadPage(page);
       const item = items.get(i);
-      const el = item && byHash.get(item.file_hash);
-      if (el) { next.set(i, el); byHash.delete(item.file_hash); }
+      const el = item && byKey.get(entryKey(item));
+      if (el) { next.set(i, el); byKey.delete(entryKey(item)); }
     }
     const claimed = new Set(next.values());
     const spare = [...tiles.values()].filter((el) => !claimed.has(el));
@@ -359,24 +371,57 @@ export function initGallery() {
       const el = tiles.get(i);
       el.dataset.index = i;
       if (grid.children[k] !== el) grid.insertBefore(el, grid.children[k] ?? null);
-      if (listMode) fillRow(el, items.get(i), cmp ? undefined : items.get(i - 1));
+      if (listMode) fillRow(el, items.get(i), cmp ? undefined : items.get(i - 1), i);
       else fillTile(el, items.get(i));
     }
   }
 
+  const entryKey = (item) => (item.group ? `g:${item.group.kind}:${item.group.path}`
+    : item.loc ? `${item.file_hash}:${item.loc.id}` : item.file_hash);
+
+  // Voriger Ordnerkopf (gemeinsamer Pfadanfang, ADR 0108): nur über geladene
+  // Seiten; fehlt eine, wird eben nichts abgedunkelt.
+  function prevGroup(i) {
+    for (let k = i - 1; k >= 0; k--) {
+      const it = items.get(k);
+      if (!it) return null;
+      if (it.group) return it.group;
+    }
+    return null;
+  }
+
+  // Ordnerkopf (ADR 0108): keine Auswahl, kein Abspielen (kein data-hash).
+  function fillGroup(el, group, i) {
+    el.classList.add("arow", "agroup");
+    el.classList.remove("selected", "playing", "current");
+    const prev = prevGroup(i);
+    const sig = `grp:${group.kind}:${group.path}:${group.count}:${prev?.path || ""}`;
+    if (el.dataset.sig === sig) return;
+    el.dataset.sig = sig;
+    el.dataset.key = entryKey({ group });
+    delete el.dataset.hash;
+    delete el.dataset.dur;
+    el.innerHTML = groupRowHtml(group, prev);
+  }
+
   // Listenzeile der Audioansicht (ADR 0085). Die Signatur trägt die Vorzeile
   // mit: deren Name bestimmt den abgedunkelten gemeinsamen Anfang.
-  function fillRow(el, item, prev) {
+  function fillRow(el, item, prev, i) {
+    if (item?.group) { fillGroup(el, item.group, i); return; }
     el.classList.add("arow");
+    el.classList.remove("agroup");
     el.classList.toggle("selected", !!item && selectedSet.has(item.file_hash));
     if (!item) {
-      if (el.dataset.hash) { delete el.dataset.hash; delete el.dataset.sig; el.innerHTML = ""; }
+      if (el.dataset.sig) {
+        delete el.dataset.hash; delete el.dataset.key; delete el.dataset.sig; el.innerHTML = "";
+      }
       return;
     }
     const sig = `row:${item.file_hash}:${item.rating || 0}:${prev?.file_hash || ""}:${item.cover || ""}:${item.artwork ? 1 : 0}:${item.colors || ""}:${rowFacts(item)}`;
     if (el.dataset.sig !== sig) {
       el.dataset.sig = sig;
       el.dataset.hash = item.file_hash;
+      el.dataset.key = entryKey(item);
       el.dataset.dur = item.duration ?? "";
       el.innerHTML = rowHtml(item, prev);
       // Miniatur: Cover finalisierter Songs (#165), sonst das eingebettete
@@ -391,11 +436,13 @@ export function initGallery() {
   }
 
   function fillTile(el, item) {
-    el.classList.remove("arow", "playing");
+    el.classList.remove("arow", "agroup", "playing");
     el.classList.toggle("selected", !!item && selectedSet.has(item.file_hash));
     if (!item) {
       // Seite noch unterwegs — leere Kachel als Platzhalter stehen lassen.
-      if (el.dataset.hash) { delete el.dataset.hash; delete el.dataset.sig; el.innerHTML = ""; }
+      if (el.dataset.sig) {
+        delete el.dataset.hash; delete el.dataset.key; delete el.dataset.sig; el.innerHTML = "";
+      }
       return;
     }
     // Signatur statt nur Hash (ADR 0057): nach einem Soft-Refresh wird eine
@@ -405,6 +452,7 @@ export function initGallery() {
     if (el.dataset.sig === sig) return;   // schon aktuell gefüllt
     el.dataset.sig = sig;
     el.dataset.hash = item.file_hash;
+    el.dataset.key = item.file_hash;
     const chip = item.tool || item.container || "";
     // Platzhalter (Design-Muster: Maße mittig) liegt UNTER dem Bild — sichtbar
     // solange das Thumb lädt oder wenn keins existiert (kaputte Datei).
@@ -468,6 +516,7 @@ export function initGallery() {
     const go = e.target.closest(".gotoview");
     if (go) { emit("library-view-set", { view: go.dataset.view }); return; }
     const el = e.target.closest(".tile");
+    if (el?.classList.contains("agroup")) { groupClick(e, el); return; }
     if (!el || !el.dataset.hash) return;
     const hash = el.dataset.hash;
     const index = parseInt(el.dataset.index, 10);
@@ -494,13 +543,13 @@ export function initGallery() {
     }
     if (e.shiftKey && selectedIndex !== null) {
       const [a, b] = selectedIndex < index ? [selectedIndex, index] : [index, selectedIndex];
-      const hashes = [hash];
+      const hashes = new Set([hash]);      // Fundort-Zeilen: jeder Song einmal (ADR 0108)
       for (let i = a; i <= b; i++) {
         const it = items.get(i);           // nur geladene Seiten — im Sichtbereich immer da
-        if (it && it.file_hash !== hash) hashes.push(it.file_hash);
+        if (it?.file_hash) hashes.add(it.file_hash);
       }
       // Anker (selectedIndex) bleibt für weitere Shift-Klicks stehen.
-      emit("selection-changed", { hash, index: selectedIndex, hashes });
+      emit("selection-changed", { hash, index: selectedIndex, hashes: [...hashes] });
       return;
     }
     if (e.ctrlKey || e.metaKey) {
@@ -517,6 +566,35 @@ export function initGallery() {
     }
     emit("selection-changed", { hash, index });
   });
+  // Ordnerkopf (ADR 0108): ein Segment öffnet den Ordner wie im Panel (#37,
+  // über einen Song der Gruppe, der ihn als Fundort hat — Whitelist des
+  // Servers), ⌕ setzt den Chip: ordner: "<Pfad>" samt Unterordnern bzw. in
+  // der Library fundort: library. Ersetzt ein vorhandenes ordner: (Hineinzoomen).
+  function groupClick(e, el) {
+    const index = parseInt(el.dataset.index, 10);
+    const group = items.get(index)?.group;
+    if (!group) return;
+    const seg = e.target.closest("a.seg");
+    if (seg) {
+      e.preventDefault();
+      const first = items.get(index + 1);
+      if (!first?.file_hash) return;
+      openLocation(first.file_hash, seg.dataset.path, "folder").catch((err) => {
+        console.warn(err);
+        const st = el.querySelector(".gerr");
+        if (!st) return;
+        st.textContent = `⚠ ${err.message}`;
+        setTimeout(() => { st.textContent = ""; }, 4000);
+      });
+      return;
+    }
+    if (!e.target.closest(".gfilter")) return;
+    const pred = group.kind === "library"
+      ? { kind: "fundort", negated: false, field: "", op: "=", values: [{ value: "library", exact: false }] }
+      : { kind: "ordner", negated: false, field: "", op: "=", values: [{ value: group.path, exact: true }] };
+    emit("chip-toggle", { pred, additive: false });
+  }
+
   grid.addEventListener("dblclick", (e) => {
     // Doppelklick = Einzelbildansicht (Arbeitsansicht); Space bleibt Lupe.
     const el = e.target.closest(".tile");
@@ -653,7 +731,8 @@ export function initGallery() {
   // „manuell". Der Server ordnet in AUFSTEIGENDER Reihenfolge; bei
   // absteigender Anzeige tauschen „davor" und „dahinter" die Rollen.
   function manualActive() {
-    return listMode && folderId !== null && splitSort(sortKey).base === "manual";
+    // Fundort-Darstellungen (ADR 0108): kein Ziehen — ein Song steht dort mehrfach.
+    return listMode && folderId !== null && splitSort(sortKey).base === "manual" && !listRows();
   }
   on("state-load", (d) => { folder = d.folder ? { id: d.folder.id, key: null } : null; });
   on("folder-origin", (d) => {   // gerade mit ☆ gespeichert: die aktuellen Chips SIND sie
@@ -768,11 +847,58 @@ export function initGallery() {
     if (infoBtn) {
       infoBtn.hidden = !listMode || !!cmp;   // der Vergleich zeigt immer Wellen
       infoBtn.classList.toggle("active", info);
+      // Aktiv wird ☰ zu ☰▾ (Nachtrag ADR 0108): derselbe Knopf öffnet dann
+      // das Menü der Zeilen-Arten; in „Welle" schaltet er nur auf „Angaben".
+      // ▾ hält seinen Platz auch unsichtbar, sonst rückte die Leiste beim Umschalten.
+      const html = `☰<span class="caret${info ? "" : " off"}">▾</span>`;
+      if (infoBtn.innerHTML !== html) infoBtn.innerHTML = html;
+      infoBtn.title = info ? STRINGS.rowsMenuTitle : STRINGS.listInfoTitle;
     }
   }
+
+  // Menü an ☰▾ (Nachtrag ADR 0108): EINE von drei Zeilen-Arten der Liste
+  // „Angaben" — nach Ordnern (Standard), je Fundort, je Song.
+  const rowsMenu = document.createElement("div");
+  rowsMenu.id = "rowsmenu";
+  rowsMenu.hidden = true;
+  document.body.appendChild(rowsMenu);
+  function renderRowsMenu() {
+    const cur = rowsKind();
+    rowsMenu.innerHTML = `<div class="menuhead">${esc(STRINGS.rowsMenuHead)}</div>` + ROWS.map((k) => `
+      <button type="button" class="sortrow${k === cur ? " active" : ""}" data-rows="${k}"
+              title="${esc(STRINGS.rowsTitles[k])}">
+        <span>${esc(STRINGS.rowsLabels[k])}</span><span class="sortcheck">${k === cur ? "✓" : ""}</span>
+      </button>`).join("");
+  }
+  function toggleRowsMenu() {
+    if (!rowsMenu.hidden) { rowsMenu.hidden = true; return; }
+    renderRowsMenu();
+    const r = infoBtn.getBoundingClientRect();
+    rowsMenu.style.top = `${r.bottom + 6}px`;
+    rowsMenu.style.left = `${r.left}px`;
+    rowsMenu.hidden = false;
+  }
+  rowsMenu.addEventListener("click", (e) => {
+    const row = e.target.closest(".sortrow");
+    if (!row) return;
+    rowsMenu.hidden = true;
+    const before = listRows();
+    setRowsKind(row.dataset.rows);
+    syncListStyle();                   // Spalte „Ordner" im Listenkopf
+    if (listRows() !== before) reloadGrid();
+  });
+  document.addEventListener("click", (e) => {
+    if (!rowsMenu.hidden && !e.target.closest("#rowsmenu") && !e.target.closest("[data-liststyle]")) {
+      rowsMenu.hidden = true;
+    }
+  }, true);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !rowsMenu.hidden) rowsMenu.hidden = true;
+  });
   densityBox.addEventListener("click", (e) => {
     if (e.target.closest("button[data-liststyle]")) {
       if (listStyle() !== "info") applyListStyle("info");
+      else toggleRowsMenu();           // ☰▾: Zeilen-Art wählen
       return;
     }
     const btn = e.target.closest("button[data-density]");
@@ -817,14 +943,18 @@ export function initGallery() {
   // Darstellung der Liste (#258): „Welle" oder „Angaben" (flache Zeilen mit
   // Spalten), je Browser gemerkt und getrennt von S/M/L. Der Vergleich zeigt
   // immer Wellen; solange er läuft, ist ☰ ausgeblendet.
-  let headInfo = null;   // Darstellung, in der der Listenkopf gerade steht
+  let headInfo = null;   // Darstellung (+ Fundort-Spalte), in der der Listenkopf steht
   function syncListStyle() {
     const info = listMode && infoRows();
+    const locCol = info && listRows() === "fundorte";
     grid.classList.toggle("info", info);
+    grid.classList.toggle("locs", locCol);
     listHead.classList.toggle("info", info);
+    listHead.classList.toggle("locs", locCol);
     paintScale();
-    if (listMode && headInfo !== info) {
-      headInfo = info;
+    const head = `${info}:${locCol}`;
+    if (listMode && headInfo !== head) {
+      headInfo = head;
       listHead.innerHTML = listHeadHtml();
       paintManualNote();
     }
@@ -836,15 +966,17 @@ export function initGallery() {
       scrollTop: wrap.scrollTop, viewportH: wrap.clientHeight,
       padTop, rowH, gap, cols, total, buffer: 0,
     }).first : 0;
+    const rowsBefore = listRows();
     setListStyle(s);
     try { localStorage.setItem(LISTSTYLE_KEY, listStyle()); } catch { /* privat */ }
     syncListStyle();
+    // Fundort-Darstellung kommt oder geht (ADR 0108): andere Einträge, neu laden.
+    if (listRows() !== rowsBefore) { measureLayout(); reloadGrid(); return; }
     measureLayout();
     renderGrid();                      // Spacer-Höhe steht, bevor gescrollt wird
     wrap.scrollTop = first * (rowH + gap);
     renderGrid();
   }
-  if (infoBtn) infoBtn.title = STRINGS.listInfoTitle;
   try { setListStyle(localStorage.getItem(LISTSTYLE_KEY)); } catch { /* privat */ }
   on("library-view-changed", (d) => {
     dropCompare();
@@ -852,6 +984,7 @@ export function initGallery() {
     reloadSeq++;                      // Antworten der alten Ansicht verwerfen
     firstLoadDone = false;
     total = 0;
+    counts = null;
     items = new Map();
     loadedPages = new Set();
     tiles.forEach((el) => el.remove());
@@ -889,7 +1022,8 @@ export function initGallery() {
     const patch = (map) => {
       for (const [i, it] of map) {
         const now = it && fresh.get(it.file_hash);
-        if (now) map.set(i, now);
+        // Fundort-Zeile (ADR 0108): Name und Fundort gehören der Zeile.
+        if (now) map.set(i, it.loc ? { ...now, name: it.name, loc: it.loc } : now);
       }
     };
     patch(items);
@@ -922,9 +1056,11 @@ export function initGallery() {
 
   function enterCompare() {
     if (!listMode || cmp) return;
+    const seen = new Set();   // Fundort-Zeilen: jeder Song einmal (ADR 0108)
     const list = [...items.entries()]
       .filter(([, it]) => it && selectedSet.has(it.file_hash))
-      .sort((a, b) => a[0] - b[0]).map(([, it]) => it);
+      .sort((a, b) => a[0] - b[0]).map(([, it]) => it)
+      .filter((it) => !seen.has(it.file_hash) && seen.add(it.file_hash));
     if (list.length < CMP_MIN || list.length > CMP_MAX) return;
     cmp = { items, loadedPages, total, scrollTop: wrap.scrollTop, axis: timeAxis(),
             hashes: list.map((it) => it.file_hash), rejected: new Set(), dirty: false };
@@ -1039,10 +1175,16 @@ export function initGallery() {
     // Liste: nur ↑/↓ wechseln die Zeile; ←/→ gehören dem Sprung im Song (A5).
     if (listMode && (e.key === "ArrowLeft" || e.key === "ArrowRight")) return;
     e.preventDefault();   // Grid scrollt selbst (ensureVisible), nicht der Browser
-    const target = selectedIndex === null
+    let target = selectedIndex === null
       ? 0
       : Math.max(0, Math.min(total - 1, selectedIndex + delta));
-    const item = await galleryItemAt(target);
+    let item = await galleryItemAt(target);
+    // Ordnerköpfe (ADR 0108) überspringen, in Laufrichtung.
+    const step = selectedIndex !== null && delta < 0 ? -1 : 1;
+    while (item?.group) {
+      target += step;
+      item = target >= 0 && target < total ? await galleryItemAt(target) : null;
+    }
     if (item) emit("selection-changed", { hash: item.file_hash, index: target });
   });
 

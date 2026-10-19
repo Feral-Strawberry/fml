@@ -9,6 +9,7 @@
 //
 // Event: 'fields-changed' {hashes, fields, items} — Liste (ersetzt die
 // Zeilen aus `items`), Seitenleiste und „Erstellt" im Panel ziehen nach.
+// Dasselbe Event schickt lyricsedit.js mit `fields: ["lyrics"]` (ADR 0106).
 
 import { getMusicFields, setMusicFields } from "./api.js";
 import { STRINGS } from "./strings.js";

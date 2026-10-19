@@ -103,3 +103,35 @@ test("Popover: Sidebar-Reihenfolge mit Medienart, Generator und Dauer", async ()
   });
   toggles.stop();
 });
+
+test("Ordner (#268): letzte Zeile vor „Volltext“, ohne Zähler, ergibt ordner:", async () => {
+  await type("Kiss_Tribute");
+  const rows = taRows();
+  const folder = rows.at(-1);
+  assert.equal(rowText(folder), "Ordner: Kiss_Tribute");
+  assert.equal(folder.querySelector(".tacount"), null);
+  const toggles = record("chip-toggle");
+  click(folder);
+  assert.deepEqual(toggles[0].pred, {
+    kind: "ordner", negated: false, field: "", op: "=",
+    values: [{ value: "Kiss_Tribute", exact: false }],
+  });
+  toggles.stop();
+
+  await type("audio");                             // mit Vorauswahl: Ordner vor Volltext
+  assert.equal(rowText(taRows().at(-2)), "Ordner: audio");
+  assert.equal(rowText(taRows().at(-1)), "Volltext: audio");
+});
+
+test("Popover: Ordner-Eingabe, Anführungszeichen = genauer Pfad", async () => {
+  const pop = document.getElementById("addcrit");
+  click(pop.querySelector('.accat[data-cat="ordner"]'));
+  await flush();
+  const toggles = record("chip-toggle");
+  const input = pop.querySelector(".acinput");
+  input.value = '"D:/Musik/Kiss_Tribute"';
+  keydown("Enter", { target: input });
+  assert.equal(toggles[0].pred.kind, "ordner");
+  assert.deepEqual(toggles[0].pred.values, [{ value: "D:/Musik/Kiss_Tribute", exact: true }]);
+  toggles.stop();
+});

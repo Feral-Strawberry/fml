@@ -12,6 +12,7 @@
 // gespielt oder im Panel gezeigt wird.
 
 import { playAt, repaint } from "./player.js";
+import { on } from "./main.js";
 
 const lines = new Map();      // Hash → [[start_ms, end_ms|null, "Zeile"], …] ([] = keine)
 const sections = new Map();   // Hash → [[start_ms, "Chorus"], …]
@@ -174,8 +175,23 @@ export function followPanel(hash, sec) {
   if (at >= 0) box.scrollTop = Math.max(0, rows[at].offsetTop - box.clientHeight / 3);
 }
 
+/** Songtext eines Songs vergessen (von Hand geändert, ADR 0106): Zeilen und
+ *  Abschnitte kommen beim nächsten Zeichnen frisch, die Abschnitte gleich
+ *  aus der neuen Listenzeile. */
+export function forgetLyrics(hash, item = null) {
+  lines.delete(hash);
+  sections.delete(hash);
+  seedSections(hash, item?.sections);
+  repaint(hash);
+}
+
 /** Klick auf eine Panel-Zeile: dorthin springen (spielt den Song ab dort). */
 export function initLyrics() {
+  on("fields-changed", (d) => {
+    if (!d?.fields?.includes("lyrics")) return;
+    const fresh = new Map((d.items || []).map((it) => [it.file_hash, it]));
+    for (const hash of d.hashes || []) forgetLyrics(hash, fresh.get(hash));
+  });
   document.addEventListener("click", (e) => {
     const row = e.target instanceof Element ? e.target.closest(".lysync .lyl") : null;
     if (row) playAt(row.closest(".lysync").dataset.hash, parseFloat(row.dataset.t) || 0);

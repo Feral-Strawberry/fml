@@ -220,17 +220,6 @@ def overview_stats(
     return {"by_kind": by_kind, "by_year": by_year, "growth": growth, "disks": disks}
 
 
-def _dir_stats(root: Path) -> tuple[int, int]:
-    """(Dateianzahl, Gesamtbytes) eines Verzeichnisbaums; (0, 0) wenn es fehlt."""
-    count = size = 0
-    if root.is_dir():
-        for p in root.rglob("*"):
-            if p.is_file():
-                count += 1
-                size += p.stat().st_size
-    return count, size
-
-
 # -- Caches aufgeschlüsselt (#227) ---------------------------------------------------
 #
 # Alles in den Cache-Ordnern ist abgeleitet und entsteht bei Bedarf neu

@@ -56,14 +56,21 @@ Internet: nie blind vertrauen.
   fremde Eingabe: höchstens 20 MB, geprüft vor dem Einlesen, festes
   Format mit Längen- und Mengengrenzen (2.000 Kommentare je Song, feste
   Feldliste der Musik-Angaben mit denselben Grenzen wie die Eingabe von
-  Hand), nur als `application/json`. Übernommen werden ausschließlich
-  Kommentartext, Stelle, Musik-Angaben und Herkunft; Dateien fasst der
-  Import nicht an.
+  Hand, Songtext mit höchstens 2.000 Zeilen zu 500 Zeichen und Zeiten der
+  Reihe nach), nur als `application/json`. Übernommen werden
+  ausschließlich Kommentartext, Stelle, Musik-Angaben, Songtext und
+  Herkunft; Dateien fasst der Import nicht an.
 - **ffmpeg/ffprobe** (Videos, Audio) bekommen jede Datei als lokale Datei:
   `-protocol_whitelist file` und ein absoluter `file:`-Pfad. Eine präparierte
   Datei (etwa eine versteckte Playlist) kann ffmpeg nicht zu Netzzugriffen
   bringen, ein Dateiname wird nie als Option oder Protokoll gelesen. Jeder
-  Aufruf läuft ohne Shell und mit Zeitlimit.
+  Aufruf läuft ohne Shell und mit Zeitlimit. Schreibt ffmpeg (Ausschnitt,
+  M4A-Kopie mit Angaben von Hand), ist auch das Ziel ein absoluter
+  `file:`-Pfad im Export-Ordner; Werte aus fml gehen als einzelne
+  Argumente hinein, nie als Kommandozeile.
+- **Eine Datei mit zehntausenden Warnungen** (etwa lauter kaputten Chunks)
+  hält den Scan nicht auf: Unter Probleme landen höchstens 50 Warnungen je
+  Datei und eine Sammelzeile.
 
 **Verarbeitung / Datenbank:**
 
@@ -73,8 +80,10 @@ Internet: nie blind vertrauen.
 - **Die Warteschlange** steht in der Datenbank, damit sie einen Neustart
   übersteht: je Aufgabe ein Name aus einer festen Liste und Parameter als
   JSON, nie ausführbarer Code. Im Übersichtsmodus kommt aus dieser
-  Sicherung kein Auftrag zurück, der Dateien kopiert, verschiebt oder
-  löscht.
+  Sicherung kein Auftrag zurück, der Dateien in die Library kopiert,
+  verschiebt oder löscht. Stammt die Sicherung von einem anderen Rechner
+  oder aus einer anderen Datenbank-Datei, wird sie ganz verworfen; ein
+  gesicherter Export in einen inzwischen geänderten Export-Ordner ebenso.
 
 **Anzeige (in der Browser-Oberfläche):**
 
@@ -100,7 +109,9 @@ Internet: nie blind vertrauen.
 - Die **Fundort-Breadcrumbs** (Ordner öffnen, Datei im zugeordneten Programm
   öffnen) nehmen keinen freien Pfad entgegen: erlaubt sind nur die in der
   Datenbank gespeicherten Fundorte des Items bzw. deren Ordner. fml öffnet nur;
-  was das Programm danach tut, entscheidet der Anwender dort.
+  was das Programm danach tut, entscheidet der Anwender dort. Einzige
+  Ausnahme ist der Knopf 📂 nach einem Ausschnitt: Er zeigt eine Datei, die
+  nach Auflösen aller Verknüpfungen im Export-Ordner liegen muss.
 - **Medien-Auslieferung** (`/api/media`): nur katalogisierte Dateien über
   ihren Hash, Range-Anfragen mit genau einem Bereich, abgebrochene Streams
   beenden das Lesen sofort — ein Browser kann den Server nicht mit
@@ -113,6 +124,16 @@ Internet: nie blind vertrauen.
   dort abgelegt hat (Muster `<2 Hex-Zeichen>/<Hash>.<Endung>`), nie einen
   Ordner als Ganzes. Zeigt ein Cache-Pfad in der `config.toml` versehentlich
   auf einen Ordner mit eigenen Dateien, bleiben diese liegen.
+- **Export-Ordner:** Kopien und Ausschnitte schreibt fml nur dorthin. Der
+  Ordner darf nicht in der Library, einem Watchordner oder dem Cache liegen
+  und keinen davon enthalten, und er darf keine katalogisierten Medien
+  enthalten; das prüft schon das Speichern. Der Paketname wird von
+  Zeichen bereinigt, die ein Dateisystem nicht erlaubt, Dateinamen kommen
+  vom Fundort, nie aus Tags. Eine vorhandene Datei wird nie überschrieben
+  (stattdessen ein neuer Name), Zwischendateien werden eindeutig und exklusiv
+  angelegt, und jede Kopie wird erst nach bestandener Prüfung abgelegt:
+  gegen den Hash des Originals, bei einer Kopie mit Angaben von Hand gegen
+  den unveränderten Ton. Die Originale werden nur gelesen.
 - **Finder-Attribute beim Import (macOS):** Die Kopie in der Library
   bekommt die erweiterten Attribute der Quelle, nachdem ihr Inhalt per Hash
   geprüft ist; Zugriffslisten (ACL) werden bewusst nicht übernommen.
@@ -141,8 +162,9 @@ Internet: nie blind vertrauen.
   eigene Oberfläche.
 - **Eine `feral.sqlite` aus fremder Hand nicht öffnen.** Die Datenbank
   enthält neben dem Katalog auch die wartenden Aufgaben mit ihren Pfaden.
-  fml führt daraus nur bekannte Aufgaben aus und im Übersichtsmodus keine
-  dateischreibenden; trotzdem gilt: nur eigene Datenbanken und eigene
+  fml führt daraus nur bekannte Aufgaben aus, im Übersichtsmodus keine
+  dateischreibenden, und verwirft eine Warteschlange, die von einem
+  anderen Rechner oder aus einer anderen Datenbank-Datei stammt; trotzdem gilt: nur eigene Datenbanken und eigene
   Backups starten.
 - **Der Ordner-Browser ist mächtig.** Die Admin-Oberfläche kann Verzeichnisse
   auf dem ganzen Rechner auflisten (für die Auswahl von Quell-/Zielordnern). Das
@@ -181,7 +203,7 @@ fremden Dateien mit:
 | **pydantic** | `2.13.4` | Anfrage-Modelle der Oberfläche; bringt `pydantic-core` (kompiliert) mit. |
 | transitive Pakete | im Lock | annotated-doc, annotated-types, click, colorama (nur Windows), h11, idna, pydantic-core, typing-extensions, typing-inspection; Rolle je Paket in `DEPENDENCIES.md`. |
 | **pip** | `26.2.1` | Der Installer selbst ist gepinnt; die Startskripte bringen das pip im venv auf genau diese Version. |
-| **ffmpeg/ffprobe** | System (optional) | Liest fremde Video-Container. Kein pip-Paket — über den Paketmanager des Systems aktuell halten. Ohne ffmpeg werden Videos nur katalogisiert. |
+| **ffmpeg/ffprobe** | System (optional) | Liest fremde Video- und Audio-Container; schreibt Ausschnitte und M4A-Kopien mit Angaben von Hand. Kein pip-Paket — über den Paketmanager des Systems aktuell halten. Ohne ffmpeg werden Videos nur katalogisiert. |
 | pytest (nur Entwicklung) | `9.1.1` | Nicht im Laufzeit-Pfad; mit seinen vier Abhängigkeiten ebenfalls gelockt. |
 
 Praktisch: die gepinnten Versionen sorgen für reproduzierbare Installationen;

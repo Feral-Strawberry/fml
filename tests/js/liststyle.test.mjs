@@ -62,7 +62,7 @@ test("☰ Angaben: flache Zeilen mit Spalten, kein Lineal, nur ☰ leuchtet, gem
   await flush();
   assert.equal(infoRows(), true);
   assert.ok(grid().classList.contains("info") && head().classList.contains("info"));
-  assert.deepEqual(lit(), ["☰"]);
+  assert.deepEqual(lit(), ["☰▾"]);   // aktiv öffnet ☰▾ die Zeilen-Arten (ADR 0108)
   assert.equal(localStorage.getItem("feral-liststyle"), "info");
   assert.equal(localStorage.getItem("feral-density"), "m");   // die Galerie behält ihr S/M/L
   assert.equal(head().querySelector(".ruler"), null);
@@ -114,7 +114,7 @@ test("der Vergleich zeigt immer Wellen, danach wieder Angaben", async () => {
   await flush();
   assert.ok(grid().classList.contains("info"));
   assert.equal(infoBtn().hidden, false);
-  assert.deepEqual(lit(), ["☰"]);
+  assert.deepEqual(lit(), ["☰▾"]);   // aktiv öffnet ☰▾ die Zeilen-Arten (ADR 0108)
   assert.equal(rows()[0].querySelector(".wv"), null);
 });
 

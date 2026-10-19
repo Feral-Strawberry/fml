@@ -6,6 +6,7 @@ Suche bereit. Die FastAPI-Routen in `app.py` sind nur dünne Hüllen darum.
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
 import sqlite3
@@ -409,7 +410,7 @@ def megapixel_counts(conn: sqlite3.Connection) -> dict[str, int]:
 # Kontext der ANDEREN Chips (die eigenen fliegen raus — Standard-Facetten-
 # muster, sonst stünden bei aktivem [Modell: flux] alle anderen Modelle auf 0
 # und ODER-Erweitern wäre unmöglich). Der Ausschluss passiert SERVERSEITIG:
-# /api/facets beantwortet mehrere Gruppen in einem Request, und sobald Chips
+# /api/sidebar beantwortet mehrere Gruppen in einem Request, und sobald Chips
 # aus mehreren dieser Gruppen aktiv sind, braucht jede Gruppe einen anderen
 # effektiven Filter — ein ?filter= pro Request kann das nicht tragen.
 #
@@ -785,7 +786,7 @@ def facets_payload(
     conn: sqlite3.Connection, *, filter_expr: str | None = None,
     base: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Alle Gruppen des ``/api/facets``-Endpunkts, je Gruppe im Kontext der
+    """Die Facetten-Gruppen der Sidebar (``/api/sidebar``), je Gruppe im Kontext der
     anderen Chips (Block S4). Wirft ``ValueError`` bei ungültigem Ausdruck.
 
     ``base`` ist das ungefilterte Ergebnis (aus dem Epochen-Cache, ADR 0071):
@@ -1088,6 +1089,7 @@ _MIME = {
     "tiff": "image/tiff",
     "psd": "image/vnd.adobe.photoshop",
     "pcd": "image/x-photo-cd",
+    "jxr": "image/vnd.ms-photo",
     "matroska": "video/webm",
     "isobmff": "video/mp4",
     "pdf": "application/pdf",
@@ -1404,6 +1406,135 @@ def count_items(
     return cache.get(("count", where_sql, tuple(params)), compute, scope=scope)
 
 
+# Fundort-Darstellungen der Audioliste (ADR 0108): „fundorte" = je Fundort
+# eine Zeile in der Treffer-Reihenfolge, „ordner" = dieselben Zeilen nach
+# Ordnern gruppiert, mit Kopfzeilen dazwischen.
+LIST_ROWS = ("fundorte", "ordner")
+
+
+def _location_entries(
+    conn: sqlite3.Connection, hashes: list[str], *, grouped: bool,
+    loc_where: str, loc_params: list[Any],
+    library_root: str | None, watch_roots: list[str],
+) -> tuple[list[tuple], int, int]:
+    """Eintragsliste der Fundort-Darstellungen (ADR 0108): Zeilen
+    ``(hash, loc_id, path, kind, n_locs, skip)`` und, gruppiert, Köpfe
+    ``(None, kind, ordner, skip, n_zeilen)``. ``kind`` indiziert
+    ``LOCATION_KINDS``; ``skip`` = Zeichen des Pfads, die die Anzeige
+    weglässt (bei Quellen alles vor dem Namen der Watch-Wurzel).
+
+    Je Song stehen seine Fundorte in der Rangfolge aus ``ordered_locations``
+    (ohne Dateiprüfung, Punkt 12); gruppiert sortiert die Liste stabil nach
+    (Herkunft, Ordner-Komponenten), die Treffer-Reihenfolge bleibt also in
+    jeder Gruppe. Die Library ist EINE Gruppe. ``loc_where`` = positive
+    ``ordner:``/``fundort:``-Chips als Zeilenfilter (Punkt 7). Liefert
+    ``(einträge, zahl_songs, zahl_zeilen)``; 250k-Messung im ADR. Gibt es
+    nur EINEN Ordner, entfällt sein Kopf."""
+    lib = _norm_dir(library_root) if library_root and str(library_root).strip() else None
+    roots = sorted({_norm_dir(r) for r in watch_roots if r and r.strip()},
+                   key=len, reverse=True)   # tiefste Wurzel gewinnt
+    # json_each statt Temp-Tabelle; der Unterselect hält dessen Spalte
+    # ``path`` vom Fundort-Pfad getrennt (NORM_PATH meint ``path``).
+    sql = ("SELECT j.key, l.id, l.file_hash, l.path, l.n FROM json_each(?) j"
+           " JOIN (SELECT id, file_hash, path, (SELECT COUNT(*) FROM file_locations c"
+           "        WHERE c.file_hash = f.file_hash) AS n FROM file_locations f"
+           + (f" WHERE {loc_where}" if loc_where else "")
+           + ") l ON l.file_hash = j.value")
+    rows = []
+    for order, lid, file_hash, path, n in conn.execute(sql, [json.dumps(hashes), *loc_params]):
+        low = path.replace("\\", "/").lower()
+        cut = max(path.rfind("/"), path.rfind("\\"))
+        kind, skip = 2, 0
+        if lib is not None and low.startswith(lib + "/"):
+            kind = 0
+        else:
+            for root in roots:
+                if low.startswith(root + "/"):
+                    kind, skip = 1, root.rfind("/") + 1
+                    break
+        rows.append((order, kind, lid, file_hash, path, n, skip, cut))
+    rows.sort(key=lambda r: (r[0], r[1], r[2]))
+    songs = len({r[3] for r in rows})
+    if not grouped:
+        return [(h, lid, path, kind, n, skip) for _o, kind, lid, h, path, n, skip, _c in rows], \
+            songs, len(rows)
+    def folder_key(r: tuple) -> tuple:
+        if r[1] == 0:
+            return (0, ())
+        return (r[1], tuple(r[4][:max(r[7], 0)].replace("\\", "/").lower().split("/")))
+    rows.sort(key=folder_key)   # stabil: Treffer-Reihenfolge bleibt je Gruppe
+    entries: list[tuple] = []
+    for _key, members in itertools.groupby(rows, key=folder_key):
+        members = list(members)
+        first = members[0]
+        folder = (library_root or "") if first[1] == 0 else first[4][:max(first[7], 0)]
+        entries.append((None, first[1], folder, first[6], len(members)))
+        entries.extend((h, lid, path, kind, n, skip)
+                       for _o, kind, lid, h, path, n, skip, _c in members)
+    # Ein einziger Ordner hat nichts zu gruppieren (Nachtrag ADR 0108): ohne
+    # Kopf — wer nur die Library hat, sieht die gewohnte Liste.
+    if sum(1 for e in entries if e[0] is None) == 1:
+        entries = entries[1:]
+    return entries, songs, len(rows)
+
+
+def _entry_dicts(conn: sqlite3.Connection, entries: list[tuple]) -> list[dict[str, Any]]:
+    """Seite der Eintragsliste → Kopf- und Zeilen-Dicts (ADR 0108). Eine
+    Zeile ist das Item des Songs mit dem Namen und den Angaben DIESES
+    Fundorts (``loc``); ein Kopf trägt nur ``group``."""
+    hashes = list(dict.fromkeys(e[0] for e in entries if e[0] is not None))
+    by_hash = {}
+    if hashes:
+        marks = ",".join("?" * len(hashes))
+        rows = conn.execute(_GRID_DISPLAY_SQL + f" WHERE i.file_hash IN ({marks})", hashes)
+        by_hash = {d["file_hash"]: d for d in _item_dicts(rows.fetchall())}
+    out: list[dict[str, Any]] = []
+    for e in entries:
+        if e[0] is None:
+            _h, kind, folder, skip, count = e
+            out.append({"group": {"kind": LOCATION_KINDS[kind], "path": folder,
+                                  "skip": skip, "count": count}})
+            continue
+        h, lid, path, kind, n, skip = e
+        item = by_hash.get(h)
+        if item is None:   # zwischen Epochen-Prüfung und Anzeige gelöscht
+            continue
+        name = path[max(path.rfind("/"), path.rfind("\\")) + 1:]
+        out.append({**item, "name": name, "loc": {
+            "id": lid, "path": path, "kind": LOCATION_KINDS[kind], "skip": skip, "count": n}})
+    return out
+
+
+def _location_list(
+    conn: sqlite3.Connection, rows: str, *, sort_key: str, where_sql: str,
+    params: list[Any], filter_expr: str | None, cache: EpochCache | None,
+    scope: dict | None,
+) -> tuple[list[tuple], int, int]:
+    """Die (gecachte) Eintragsliste eines Zustands: Trefferliste wie
+    ``list_items`` (ADR 0048, hier immer materialisiert), dann die Fundorte.
+    Schlüssel = Modus + Trefferlisten-Schlüssel + Zeilenfilter + Wurzeln."""
+    loc_where, loc_params = filters.location_where(
+        filters.parse(filter_expr) if filter_expr else [])
+    library_root = filters.library_root_provider()
+    watch_roots = list(watch_roots_provider())
+    hits_key = ("items", sort_key, where_sql, tuple(params))
+
+    def hits() -> list[str]:
+        return _materialize_hits(conn, sort_key, where_sql, params)
+
+    def compute() -> tuple[list[tuple], int, int]:
+        hashes = cache.get(hits_key, hits, scope=scope) if cache is not None else hits()
+        return _location_entries(
+            conn, hashes, grouped=rows == "ordner", loc_where=loc_where,
+            loc_params=loc_params, library_root=library_root, watch_roots=watch_roots)
+
+    if cache is None:
+        return compute()
+    key = ("locrows", rows, *hits_key, loc_where, tuple(loc_params),
+           library_root, tuple(watch_roots))
+    return cache.get(key, compute, scope=scope)
+
+
 def list_items(
     conn: sqlite3.Connection,
     *,
@@ -1420,6 +1551,7 @@ def list_items(
     view_preds: tuple[filters.Predicate, ...] = (),
     with_max_duration: bool = False,
     folder: int | None = None,
+    rows: str | None = None,
 ) -> dict[str, Any]:
     """Eine Seite des Bestands fürs Grid, Sortierung per Whitelist (``_SORTS``).
 
@@ -1445,6 +1577,9 @@ def list_items(
     Treffermenge, die gemeinsame Zeitachse der Audioliste (ADR 0087).
     ``folder`` = offene gespeicherte Suche, Grundlage der Sortierung
     „manuell" (#218); ohne sie fällt ``manual`` auf ``added`` zurück.
+    ``rows`` (``LIST_ROWS``, ADR 0108) = Fundort-Darstellung: ``items``
+    sind dann Fundort-Zeilen (mit ``loc``) und Ordnerköpfe (``group``),
+    ``total`` zählt Einträge, ``songs``/``locations`` legen die Zahlen bei.
     """
     where_sql, params, sort_key, filtered = _grid_query_parts(
         sort=sort, model=model, rating=rating, filter_expr=filter_expr, dupes=dupes,
@@ -1458,6 +1593,13 @@ def list_items(
         extra["max_duration"] = (
             cache.get(("maxdur", where_sql, tuple(params)), compute, scope=scope)
             if cache is not None and filtered else compute())
+    if rows in LIST_ROWS:
+        entries, songs, locations = _location_list(
+            conn, rows, sort_key=sort_key, where_sql=where_sql, params=params,
+            filter_expr=filter_expr, cache=cache, scope=scope)
+        return {"total": len(entries), "offset": offset, "songs": songs,
+                "locations": locations,
+                "items": _entry_dicts(conn, entries[offset:offset + limit]), **extra}
     if cache is not None and _list_cached(sort_key, filtered):
         # Trefferlisten-Cache (ADR 0048), NUR für gefilterte Zustände: die
         # fertig sortierte Hash-Liste einmal materialisieren, an die
@@ -1527,6 +1669,7 @@ def item_position(
     cache: EpochCache | None = None,
     view_preds: tuple[filters.Predicate, ...] = (),
     folder: int | None = None,
+    rows: str | None = None,
 ) -> int | None:
     """Grid-Position (0-basiert) eines Items in der Treffermenge — oder ``None``.
 
@@ -1537,11 +1680,17 @@ def item_position(
     DENSELBEN Trefferlisten-Cache (ADR 0048, identischer Schlüssel) —
     die Position ist dann ein Listen-Lookup. Ungefiltert zählt eine
     ROW_NUMBER-Query einmal durch (eine Nutzeraktion, kein Scroll-Pfad).
+    Mit ``rows`` (ADR 0108) die erste Zeile des Songs in der Eintragsliste.
     """
     where_sql, params, sort_key, filtered = _grid_query_parts(
         sort=sort, model=model, rating=rating, filter_expr=filter_expr, dupes=dupes,
         view_preds=view_preds, folder=folder,
     )
+    if rows in LIST_ROWS:
+        entries, _songs, _locs = _location_list(
+            conn, rows, sort_key=sort_key, where_sql=where_sql, params=params,
+            filter_expr=filter_expr, cache=cache, scope=None)
+        return next((i for i, e in enumerate(entries) if e[0] == file_hash), None)
     if cache is not None and _list_cached(sort_key, filtered):
         key = ("items", sort_key, where_sql, tuple(params))
         hashes = cache.get(
@@ -1628,8 +1777,11 @@ _GRID_DISPLAY_SQL = """
                 ORDER BY t.color)) AS colors,
            -- Eingebettetes Bild eines Songs (#198): nur für Audio-Zeilen
            -- gerechnet (CASE), dieselbe Bedingung wie manual.has_embedded_picture.
-           CASE WHEN i.media_kind = 'audio' THEN EXISTS (
-               SELECT 1 FROM raw_metadata r
+           -- 2 = ein von fml beim Export gesetztes Cover (ADR 0107), 1 = ein
+           -- anderes Bild, NULL = keins.
+           CASE WHEN i.media_kind = 'audio' THEN (
+               SELECT MAX(CASE WHEN r.value_text LIKE '%"fml": true%' THEN 2 ELSE 1 END)
+                 FROM raw_metadata r
                 WHERE r.file_hash = i.file_hash
                   AND (r.value_text LIKE '{"mime": %'
                        OR (r.keyword = 'codec_type' AND r.value_text = 'video')))
@@ -1694,8 +1846,11 @@ def items_by_hash(conn: sqlite3.Connection, hashes: Sequence[str]) -> list[dict[
 
 
 def _shows_artwork(row: sqlite3.Row) -> bool:
-    """Zeigt der Song sein eingebettetes Bild als Anzeigebild (#198)?"""
-    return bool(row["embedded"]) and not row["cover"] and not row["tool"]
+    """Zeigt der Song sein eingebettetes Bild als Anzeigebild (#198)? Bei
+    erkanntem KI-Erzeuger nur, wenn fml das Bild beim Export selbst gesetzt
+    hat (``embedded = 2``, ADR 0107): dann ist es kein Standardbild."""
+    return (bool(row["embedded"]) and not row["cover"]
+            and (not row["tool"] or row["embedded"] == 2))
 
 
 def _item_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
@@ -1884,7 +2039,8 @@ def location_kind(
 
 
 def ordered_locations(
-    conn: sqlite3.Connection, file_hash: str, file_size: int | None
+    conn: sqlite3.Connection, file_hash: str, file_size: int | None, *,
+    roots: tuple[str | None, list[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Alle Fundorte eines Items, sortiert nach der Regel aus dem
     ADR-0062-Nachtrag (Issue #37): **brauchbar vor unbrauchbar** (Datei
@@ -1894,9 +2050,16 @@ def ordered_locations(
 
     Je Zeile: ``path``, ``exists`` (Datei da), ``usable`` (da + Größe
     stimmt), ``kind`` (Herkunftsklasse), ``preferred``.
+
+    ``roots`` = ``(library_root, watch_roots)`` für Aufrufer im
+    Worker-Prozess (Kopie-Export, ADR 0103): dort sind die Provider nicht
+    gesetzt, die Wurzeln reisen als Aufgaben-Parameter mit.
     """
-    library_root = filters.library_root_provider()
-    watch_roots = watch_roots_provider()
+    if roots is not None:
+        library_root, watch_roots = roots
+    else:
+        library_root = filters.library_root_provider()
+        watch_roots = watch_roots_provider()
     rows = conn.execute(
         "SELECT id, path FROM file_locations WHERE file_hash = ? ORDER BY id",
         (file_hash,),

@@ -317,3 +317,68 @@ def test_restore_drops_file_writing_tasks_in_overview_mode(tmp_path):
         assert names == ["_sleep"]
     finally:
         second.shutdown()
+
+
+def test_restore_drops_queue_from_another_installation(tmp_path):
+    """#251: eine Schlange aus einer DB von einem anderen Rechner (oder
+    einer anderen DB-Datei) läuft nicht los, ihre Pfade gehören nicht hierher."""
+    from feral.web.admin import write_app_state
+    from feral.web.engine import QUEUE_STAMP_KEY
+
+    db = tmp_path / "feral.sqlite"
+    first = ScanEngine(db, persist_queue=True, paused=True)
+    first.enqueue("_sleep", {"n": 1}, {"key": "fremd"})
+    first.shutdown()
+    conn = sqlite3.connect(db)
+    with conn:
+        write_app_state(conn, QUEUE_STAMP_KEY, {"host": "anderer-rechner", "db": "/x/feral.sqlite"})
+    conn.close()
+    second = ScanEngine(db, persist_queue=True, paused=True)
+    try:
+        assert second.restore_queue() == 0
+        assert second.status()["queue"] == []
+        assert second.persist_queue()
+        conn = sqlite3.connect(db)
+        assert conn.execute("SELECT COUNT(*) FROM task_queue").fetchone()[0] == 0
+        conn.close()
+    finally:
+        second.shutdown()
+
+
+def test_restore_keeps_own_queue_and_refreshes_config_params(tmp_path):
+    """#251: die eigene Schlange kommt zurück (Stempel passt); Parameter aus
+    der laufenden Config (``refresh``) ersetzen die gesicherten."""
+    from feral.web.admin import read_app_state
+    from feral.web.engine import QUEUE_STAMP_KEY
+
+    db = tmp_path / "feral.sqlite"
+    first = ScanEngine(db, persist_queue=True, paused=True)
+    first.enqueue("cache_clear", {"kind": "thumbs", "dirs": {"thumbs": "/alt"}}, {"key": "cc"})
+    first.shutdown()
+    conn = sqlite3.connect(db)
+    assert read_app_state(conn, QUEUE_STAMP_KEY) == first.queue_stamp()
+    conn.close()
+    second = ScanEngine(db, persist_queue=True, paused=True)
+    try:
+        assert second.restore_queue(refresh={"cache_clear": {"dirs": {"thumbs": "/neu"}}}) == 1
+        with second._lock:
+            assert second._pending[0].params == {"kind": "thumbs", "dirs": {"thumbs": "/neu"}}
+    finally:
+        second.shutdown()
+
+
+def test_restore_drops_tasks_whose_target_no_longer_applies(tmp_path):
+    """Ein gesicherter Export in einen inzwischen geänderten Export-Ordner
+    kommt nicht zurück (``keep``); alles andere schon."""
+    db = tmp_path / "feral.sqlite"
+    first = ScanEngine(db, persist_queue=True, paused=True)
+    first.enqueue("export", {"root": "/alter/ordner", "hashes": []}, {"key": "export"})
+    first.enqueue("_sleep", {"n": 1}, {"key": "harmlos"})
+    first.shutdown()
+    second = ScanEngine(db, persist_queue=True, paused=True)
+    try:
+        keep = lambda name, params: name != "export" or params.get("root") == "/neuer/ordner"
+        assert second.restore_queue(keep=keep) == 1
+        assert second.status()["queue"] == [{"key": "harmlos"}]
+    finally:
+        second.shutdown()

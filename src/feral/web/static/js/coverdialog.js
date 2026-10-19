@@ -5,11 +5,13 @@
 // Tags des Songs (für ihn erzeugtes Artwork liegt so oben) und lässt sich
 // wie die Chip-Leiste verfeinern — Chips ↔ Text NUR über /api/filter/parse|
 // build (ADR 0035), ein eigener Zustand nur für diesen Dialog, nicht der
-// Suchzustand der Galerie. Öffnen über 'cover-pick' {hash, name, tags,
-// cover}; nach dem Setzen 'cover-changed' {hash, manual}.
+// Suchzustand der Galerie. Öffnen über 'cover-pick' {hashes, name}; das Cover
+// gilt für alle Songs der Auswahl (#281, ein Song = Auswahl von eins), die
+// Startsuche nimmt ihre gemeinsamen Tags. Nach dem Setzen 'cover-changed'
+// {hash, hashes, manual}.
 
 import { STRINGS } from "./strings.js";
-import { buildFilter, getCoverCandidates, loadThumb, parseFilter, setCover } from "./api.js";
+import { buildFilter, getCoverCandidates, getCoverState, loadThumb, parseFilter, setCovers } from "./api.js";
 import { emit, on } from "./main.js";
 import { registerDialog } from "./overlays.js";
 import { chipText, inputExpression, liveInput } from "./search.js";
@@ -33,7 +35,7 @@ export function initCoverDialog() {
   overlay.hidden = true;
   document.body.appendChild(overlay);
 
-  let song = null;       // {hash, name, cover}
+  let song = null;       // {hashes, name, songs, covered} — die Auswahl
   let preds = [];        // Chips des Dialogs (parse-Form)
   let expr = "";         // Ausdruck der Chips (kanonisch)
   let live = "";         // getippte, noch nicht festgemachte Begriffe (wie die Suche)
@@ -55,8 +57,12 @@ export function initCoverDialog() {
   function frame() {
     overlay.innerHTML = `
       <div class="pickbox coverbox" role="dialog" tabindex="-1">
-        <div class="pickhead"><b>${esc(STRINGS.coverDlgTitle.replace("{name}", song.name))}</b></div>
+        <div class="pickhead"><b>${esc(song.songs > 1
+          ? STRINGS.coverDlgTitleSel.replace("{n}", song.songs)
+          : STRINGS.coverDlgTitle.replace("{name}", song.name))}</b></div>
         <div class="sdhint">${esc(STRINGS.coverDlgHint)}</div>
+        ${song.songs > 1 && song.covered
+          ? `<div class="sdhint cvreplace">${esc(STRINGS.coverDlgReplace.replace("{m}", song.covered))}</div>` : ""}
         <div class="cvsearch"><span class="cvchips"></span>
           <input type="text" class="cvinput" placeholder="${esc(STRINGS.coverDlgRefine)}">
           <span class="sdcount"></span></div>
@@ -142,11 +148,10 @@ export function initCoverDialog() {
 
   async function commit() {
     if (!song || !pick) return;
-    const hash = song.hash;
     try {
-      const r = await setCover(hash, pick);
+      const r = await setCovers(song.hashes, pick);
       close();
-      emit("cover-changed", { hash, manual: r.manual });
+      emit("cover-changed", { hash: r.songs[0], hashes: r.songs, manual: r.manual });
     } catch (err) { showError(err.message); }
   }
 
@@ -201,16 +206,22 @@ export function initCoverDialog() {
     }
   }, true);
 
-  on("cover-pick", (d) => {
-    if (!d?.hash) return;
-    song = { hash: d.hash, name: d.name || d.hash.slice(0, 12), cover: d.cover || null };
+  on("cover-pick", async (d) => {
+    if (!d?.hashes?.length) return;
+    const mySeq = ++seq;
+    let state;
+    try { state = await getCoverState(d.hashes); }
+    catch (err) { console.warn(err); return; }
+    if (mySeq !== seq || !state.songs) return;
+    song = { hashes: d.hashes, name: d.name || d.hashes[0].slice(0, 12),
+             songs: state.songs, covered: state.covered };
     live = "";
-    pick = song.cover;
+    pick = state.cover;
     frame();
     overlay.hidden = false;
     unregister = registerDialog(overlay, close);
     choose(pick);
-    applyExpression(startExpression(d.tags));
+    applyExpression(startExpression(state.tags));
     overlay.querySelector(".cvinput").focus();
   });
 }

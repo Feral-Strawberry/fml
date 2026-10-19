@@ -1,6 +1,6 @@
 # Die Testsuite — was sie prüft und woran man erkennt, dass alles gut ist
 
-> Was ist das? Das Projekt bringt eine automatische Testsuite mit: gut **1200
+> Was ist das? Das Projekt bringt eine automatische Testsuite mit: rund **1500
 > kleine Prüfprogramme**, die in rund einer Minute durchlaufen und jede zentrale
 > Zusage der Software kontrollieren. Vor jeder Codeänderung, die eingecheckt
 > wird, läuft die komplette Suite. Diese Seite erklärt, **wie man sie startet**,
@@ -30,14 +30,14 @@ pytest -q
 Am Ende steht eine Zeile wie:
 
 ```
-1050 passed in 57s
+1225 passed in 75s
 ```
 
 - **passed** = bestanden. Die genaue Zahl wächst mit dem Projekt; wichtig ist:
-  **0 failed, 0 errors**. Die Zeile zählt gut 1000 Python-Tests und jede
-  der 44 Testdateien der Oberfläche (Gruppe 9) als **einen** Test; in
-  diesen Dateien stecken zusammen rund 270 Einzelprüfungen. Daher „gut
-  1200" in der Einleitung und eine kleinere Zahl hier.
+  **0 failed, 0 errors**. Die Zeile zählt knapp 1200 Python-Tests und jede
+  der 50 Testdateien der Oberfläche (Gruppe 9) als **einen** Test; in
+  diesen Dateien stecken zusammen rund 330 Einzelprüfungen. Daher „rund
+  1500" in der Einleitung und eine kleinere Zahl hier.
 - **skipped** ist in Ordnung: einige Tests brauchen die Werkzeuge
   `ffmpeg`/`ffprobe` und überspringen sich selbst, wenn diese auf dem Rechner
   nicht installiert sind. Die App funktioniert dann trotzdem, nur ohne
@@ -141,6 +141,9 @@ egal, auf welchem alten Stand sie war.
 | `test_scan.py` | Der komplette Ablauf erkennen → hashen → auslesen → interpretieren → speichern liefert die richtigen Zählungen; eine unlesbare Datei wird als „Scan-Problem" vermerkt statt den Lauf abzubrechen. |
 | `test_importer.py` (27 Tests) | Der Import-Workflow mit allen Sicherheitsgarantien (siehe [import.md](import.md)). |
 | `test_moveout.py` | Das Rausverschieben aus der Bibliothek: nur Kopien in der Media Library, nie fremde Fundorte; am Ziel in Datumsstruktur, Namenskollisionen bekommen ein Suffix; fehlende oder inzwischen veränderte Dateien werden gemeldet und nicht angefasst. |
+| `test_export.py` | Kopien exportieren: bitgleiche, geprüfte Kopie mit Änderungsdatum, gleicher Inhalt wird übersprungen, anderer bekommt `name (1).ext`, flach oder nach Jahr/Monat/Tag, Paketname bereinigt, Photo CD als PNG, zu wenig Platz startet nichts, nicht erreichbare Dateien mit Grund; der Export-Ordner darf nicht in Library, Watchordner oder Cache liegen und keine katalogisierten Originale enthalten; erlaubt auch im Übersichtsmodus. |
+| `test_tagwrite.py` | Angaben von Hand in die Kopie: der eigene ID3-Schreiber setzt Angaben, Songtext (`USLT`, mit Zeiten `SYLT`) und Cover und lässt alle übrigen Einträge stehen, M4A per ffmpeg ohne Neukodierung, der Ton bleibt nachweislich gleich, das Original wird nie angefasst. |
+| `test_clip.py` | Ausschnitt: Dateiname aus Quelle und Zeitbereich, ffmpeg bekommt nur lokale Dateien, WAV und MP4 sitzen genau an der markierten Stelle, derselbe Ausschnitt zweimal ergibt keine zweite Datei; die Schnittstelle weist ungültige Bereiche ab (auch unendliche Zeiten und Songs ohne bekannte Dauer). |
 | `test_boot_backfill.py` | Der Datums-Nachtrag beim Start läuft nur, wenn es Medien gibt, die er datieren könnte. |
 | `test_diagnose.py` | Das Diagnose-Kommando `python -m feral.diagnose video-codecs` zählt die Codecs im Bestand, ohne die Datenbank zu verändern. |
 
@@ -176,8 +179,9 @@ welche Herkunft hat.
 |---|---|
 | `test_manual_date.py` | Datum von Hand (`1997`, `1997-05`, `12.05.1997`) gewinnt immer, Leeren holt das abgeleitete Datum zurück; das Jahr aus den Musik-Tags steht in der Datums-Kaskade vor dem Dateistempel. |
 | `test_manual_fields.py` | Musik-Angaben von Hand: Eingabeprüfung, der Wert von Hand überdeckt den Tag und Leeren holt ihn zurück, „Neu interpretieren" lässt die Angaben stehen, Jahr von Hand im Datum, Listenzeile mit Titel, Nr., Jahr und Genre, Schnittstelle und Aufgabe für große Auswahl. |
+| `test_manual_lyrics.py` | Songtext von Hand: Eingabeprüfung (Leerraum, Leerzeilen, Grenzen, Reihenfolge der Zeiten), Zeiten nur wenn jede Zeile eine hat, Vorlage aus der Datei mit festgeschriebener Solo-Schätzung, Überdeckung von Songtext, Zeilen und Abschnitten samt Volltext, „Neu interpretieren" lässt ihn stehen, Wiederherstellen, Ablehnen, Schnittstelle. |
 | `test_time_comments.py` | Zeitkommentare an Songs: anlegen, ändern, löschen, in der Suche, in der Listenzeile und im Detail. |
-| `test_exchange.py` | Zeitkommentare und Musik-Angaben von Hand zwischen zwei fml austauschen: Export und Import als Rundreise, derselbe Import zweimal ändert nichts, Zuordnung über die Song-ID nur mit Bestätigung, abweichende eigene Angaben bleiben außer auf Ansage, das alte Kommentar-Format bleibt lesbar, kaputte und zu große Dateien werden abgewiesen. |
+| `test_exchange.py` | Zeitkommentare, Musik-Angaben und Songtext von Hand zwischen zwei fml austauschen (Songtext je Song neu, gleich, abweichend mit erster abweichender Zeile, nur an Songs): Export und Import als Rundreise, derselbe Import zweimal ändert nichts, Zuordnung über die Song-ID nur mit Bestätigung, abweichende eigene Angaben bleiben außer auf Ansage, das alte Kommentar-Format bleibt lesbar, kaputte und zu große Dateien werden abgewiesen. |
 | `test_cover.py` | Cover eines Songs: ein Verweis auf ein katalogisiertes Bild, kein Upload; Songs mit Cover erscheinen in der Galerie, Ablehnen des Bildes nimmt sie wieder heraus. |
 | `test_folder_order.py` | Eigene Reihenfolge einer gespeicherten Suche: Verschieben, neue Songs am Ende, Löschen der Suche räumt die Reihenfolge mit ab. |
 
@@ -192,6 +196,7 @@ welche Herkunft hat.
 | `test_web_app_static.py` | Die Oberfläche wird korrekt ausgeliefert, und der Browser bekommt nach einem Update keine veraltete Version aus dem Zwischenspeicher. |
 | `test_admin.py` | Der Admin meldet korrekte Kennzahlen (inkl. Übersichts-Zahlen: Art, Jahrgänge, Zuwachs, Speicherplatz); Scan-Probleme lassen sich erfassen und auflösen; verwaiste Datenbankeinträge (Datei existiert nicht mehr) werden gefunden und aufgeräumt. |
 | `test_bulk.py` | Sammel-Aktionen auf Auswahl oder Suchergebnis: Bewerten (füllt nur Unbewertetes), Taggen, Notiz anhängen, Modell setzen und Ablehnen treffen genau die Treffer, nie mehr; Ablehnen sperrt das Medium, löscht das Vorschaubild und lässt die Datei liegen. |
+| `test_location_rows.py` | Audioliste nach Fundorten: je Fundort eine Zeile in der Reihenfolge der Treffer, Ordnergruppen mit der Library zuerst und Unterordnern direkt unter ihrem Ordner, ein einziger Ordner bekommt keinen Kopf, in jedem Ordner gilt die gewählte Sortierung, `ordner:`- und `fundort:`-Kriterien filtern die Zeilen, ohne Zeilen-Art bleibt es bei einer Zeile je Song. |
 | `test_rankings.py` | Ranking per Paarvergleich: Paarung, Wertung, Ausscheiden und Wieder-Hereinholen, Bestenliste, Neuberechnung liefert dieselben Scores. |
 | `test_web_cache.py` | Der Zwischenspeicher für Trefferlisten und Zähler: kein Treffer ohne aktuelle `data_version`, ein Schreibvorgang irgendeiner Verbindung führt zur Neuberechnung, das gecachte Ergebnis ist das ungecachte. |
 | `test_audio_library.py`, `test_audio_view.py`, `test_music_library.py` | Audio in der Bibliothek: Medienart aus den Spuren, Dauer in Suche und Sortierung, Galerie ohne Audio und Audioansicht nur mit Audio, Interpret/Album/Genre in Suche, Seitenleiste und Album-Sortierung. |
@@ -239,7 +244,7 @@ der Browser-Seite aus (`tests/js/`), pytest startet sie mit
 | `tests/js/admin_overview_pending.test.mjs` | Übersicht in zwei Stufen: Kennzahlen/Diagramme sofort, teure Zahlen (Fundorte, Thumbnail-Cache) zeigen „…“ und einen Prüfhinweis, bis `/api/admin/info` da ist; keine Einblend-Animation. |
 | `tests/js/admin_logs.test.mjs` | Seite Logs: beide Dateien sofort (je ein Aufruf mit `?file=`), „nur WARNING und höher“ als `?level=warning`, Zeilenzahl und Auffrischen je Datei, Einfärbung, ehrliche Leermeldung, Zeilenumbruch/untereinander (im Browser gemerkt), Auffrischen nach fertiger Aufgabe. |
 | `tests/js/admin_issues.test.mjs` | Seite Probleme (A3, #66): je Fehlerart eine Karte mit Zähler und „jüngste n von N", Alle-Knopf mit echter Zahl, Quittieren meldet die Zahl und lädt neu; Sperrliste getrennt geladen, seitenweise (100) mit Zurück/Weiter und Bereich, Suche mit „n Treffer von gesamt", Entsperren einzeln und alle (nur nach Bestätigung). |
-| `tests/js/admin_maintenance.test.mjs` | Seite Wartung (A3): vier Karten mit Aktionszeilen, Zustand je Zeile aus dem Status-Poll (läuft mit Balken → Warteschlange mit Position → zuletzt ✓), Einreihen und synchrone Aktionen inline, Rausverschieben-, Import-Regeln- und Aufräum-Karten mit zweistufigem Schärfen (Aufräumen: Bereich, Vorschau nur auf Knopfdruck, Bereichswechsel entwertet), DB-Aufteilung nur auf Knopfdruck und ehrlich „nicht verfügbar" ohne dbstat. |
+| `tests/js/admin_maintenance.test.mjs` | Seite Wartung (A3): vier Karten mit Aktionszeilen, Zustand je Zeile aus dem Status-Poll (läuft mit Balken → Warteschlange mit Position → zuletzt ✓), Einreihen und synchrone Aktionen inline, Rausverschieben-, Import-Regeln- und Aufräum-Karten mit zweistufigem Schärfen (Aufräumen: Bereich, Vorschau nur auf Knopfdruck, Bereichswechsel entwertet), DB-Aufteilung nur auf Knopfdruck und ehrlich „nicht verfügbar" ohne dbstat; Austausch importieren mit Musik-Angaben und Songtexten in Vorschau, Sperre und Zusammenfassung. |
 | `tests/js/admin_arenas.test.mjs` | Seite Rankings (A3): Tabelle mit allen Spalten, Löschen nur nach Bestätigungsdialog, Scores neu berechnen mit Inline-Ergebnis. |
 | `tests/js/context.test.mjs` | Bearbeiten-Modus für Rankings (ADR 0081/#133): „Bearbeiten: 🏆 Name" vorn, Kopfzeile `editing`, Speichern nur bei Abweichung ohne `sort:`, Umbenennen sichert nur den Namen, ✕ zurück ins Ranking; gespeicherte Suche öffnet keinen Modus. |
 | `tests/js/savedialog.test.mjs` | Speicherdialog (#133): ohne Ursprung nur Speichern; aus geladener Suche Ursprung im Dialog, Name vorbelegt, „»Name« überschreiben" (PUT) und „Als neue Suche speichern" (POST), Ursprung endet beim Leeren. |
@@ -253,6 +258,10 @@ der Browser-Seite aus (`tests/js/`), pytest startet sie mit
 | `tests/js/media.test.mjs`, `tests/js/audioview.test.mjs`, `tests/js/artwork.test.mjs`, `tests/js/cover.test.mjs` | Audio in der Oberfläche: eine Weiche entscheidet Bild, Video oder Ton; der Umschalter zur Audioansicht behält die Chips, Leertaste spielt statt Lupe; eingebettetes Bild als Miniatur; Cover setzen und entfernen. |
 | `tests/js/player.test.mjs`, `tests/js/listcompare.test.mjs` | Der eigene Player: Abspielkopf je Zeile, Lautheitsangleich, Loop, Tempo, „Alle abspielen", Medientasten; Vergleichen engt die Liste auf 2 bis 6 Songs ein und bringt sie mit Esc unverändert zurück. |
 | `tests/js/liststyle.test.mjs`, `tests/js/musicfields.test.mjs` | Darstellung der Audioliste (Regler „☰ S M L", flache Zeilen mit Spalten, Vergleich zeigt weiter Wellen) und die Musik-Angaben von Hand im Panel (vorbelegt, „(verschieden)", Setzen und Zurücknehmen für die Auswahl). |
+| `tests/js/lyricsedit.test.mjs` | Songtext von Hand: Zeilen teilen, verbinden und einfügen, geschätzte Zeiten für neue Zeilen, Zeile „Songtext" im Panel, Ansicht öffnen, tippen und speichern, Schließen mit ungespeicherten Änderungen, „Stand der Datei wiederherstellen" in zwei Schritten; Zeitfeld: Strg/⌘+Enter trägt die Abspielzeit ein und geht weiter (aus Zeit- und Textfeld, Leerzeilen übersprungen), Enter übernimmt Getipptes und geht nach unten, ↑/↓ wechseln die Zeile, ungültige Eingabe, Entf, AltGr bleibt dem Tippen, große Uhr, Speichern gesperrt bei Zeiten außer der Reihe. |
+| `tests/js/clip.test.mjs`, `tests/js/exportdialog.test.mjs` | Ausschnitt (Zeiten in jeder Schreibweise, Bereich ziehen und verschieben, I/O und Pfeile, Häkchen je Ausgabe, gesperrt mit Grund) und der Dialog „Kopien exportieren" (Zahlen, Ziel folgt dem Paketnamen, zu wenig Platz, Häkchen für Angaben von Hand). |
+| `tests/js/locationrows.test.mjs`, `tests/js/timeaxis.test.mjs` | Audioliste: Zeilen-Arten an ☰▾ (Standard „Nach Ordnern"), Ordnerköpfe, Auswahl je Song, ↑/↓ überspringen Köpfe, ⌕ setzt `ordner:`; Zeitachse höchstens 7 Minuten, Gestauchtes trägt » und springt im eigenen Maßstab. |
+| `tests/js/previewreason.test.mjs` | Eine gerechnete Ansicht ohne Bild nennt den Grund des Servers (etwa PSD ohne Composite) statt nur „Keine Vorschau verfügbar". |
 | `tests/js/comments.test.mjs`, `tests/js/lyrics.test.mjs`, `tests/js/manualorder.test.mjs` | Zeitkommentare (Taste K, Pins auf der Welle, Herkunfts-Etikett), Songtext mit Zeiten (aktuelle Zeile in der Leiste, Abschnittsmarken, mitlaufendes Panel) und die Sortierung „Manuell" einer gespeicherten Suche. |
 
 **„Erwartet rot":** Einige dieser Tests beschreiben Verhalten, das erst noch

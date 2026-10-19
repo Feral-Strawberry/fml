@@ -1,5 +1,6 @@
-"""Austausch zwischen zwei fml: Zeitkommentare (#228, ADR 0098) und
-Musik-Angaben von Hand (#256, ADR 0101). Export als Datei, Import mit Vorschau.
+"""Austausch zwischen zwei fml: Zeitkommentare (#228, ADR 0098),
+Musik-Angaben von Hand (#256, ADR 0101) und Songtext von Hand (#287,
+ADR 0106). Export als Datei, Import mit Vorschau.
 
 Zwei fml-Instanzen tauschen Anmerkungen über eine JSON-Datei aus. Zuordnung
 über den Datei-Hash (SHA-256, rechnerunabhängig); findet der Hash nichts,
@@ -13,13 +14,16 @@ Format (englische Schlüssel, in ``docs/audio.md`` beschrieben)::
                 "suno_ids": ["…"],
                 "comments": [{"at_ms": 61000, "text": "…",
                               "created_at": "…", "updated_at": "…"}],
-                "fields": {"artist": ["…"], "album": ["…"], "year": ["1996"]}}]}
+                "fields": {"artist": ["…"], "album": ["…"], "year": ["1996"]},
+                "lyrics": [[2000, null, "[Verse]"], [2000, 5500, "Zeile"]]}]}
 
-Die Abschnitte ``comments`` und ``fields`` sind je Song wahlweise. In
-``fields`` reisen NUR Angaben von Hand, nie Werte aus den Tags: Die stecken
-in der Datei, und als „von Hand" importiert wären sie beim Empfänger
-festgeschrieben. Dateien im alten Format ``fml-time-comments`` Version 1
-(nur Kommentare) bleiben lesbar.
+Die Abschnitte ``comments``, ``fields`` und ``lyrics`` sind je Song
+wahlweise. In ``fields`` und ``lyrics`` reisen NUR Angaben von Hand, nie
+Werte aus der Datei: Die stecken in der Musikdatei, und als „von Hand"
+importiert wären sie beim Empfänger festgeschrieben. ``lyrics`` hat das
+Format von ``manual_lyrics.lines`` (Startzeit darf fehlen). Die Version
+bleibt 1: Ältere fml ignorieren den unbekannten Abschnitt. Dateien im alten
+Format ``fml-time-comments`` Version 1 (nur Kommentare) bleiben lesbar.
 
 Die Datei ist fremde Eingabe: ``parse_exchange`` prüft Schema, Typen und
 Deckel, bevor irgendetwas die Datenbank sieht; Pfade kommen darin nicht vor
@@ -30,7 +34,8 @@ zweimal ändert nichts, und ein Rückweg (A → B → A) verdoppelt nichts.
 Musik-Angaben: je Song und Feld *neu* (hier steht kein Wert von Hand) wird
 übernommen, *gleich* übersprungen, *abweichend* (hier steht ein anderer Wert
 von Hand) bleibt stehen, außer der Aufrufer lässt ausdrücklich die Datei
-gewinnen (ADR 0003: eine Seite gewinnt, kein Zusammenführen).
+gewinnen (ADR 0003: eine Seite gewinnt, kein Zusammenführen). Der Songtext
+von Hand zählt je Song als Ganzes genauso.
 """
 
 from __future__ import annotations
@@ -43,7 +48,7 @@ from typing import Any
 
 from datetime import datetime
 
-from ..db import manual_fields
+from ..db import manual_fields, manual_lyrics
 from ..db.store import now_iso, update_search_index
 from ..interpret.reparse import reinterpret
 from ..messages import UserError
@@ -73,14 +78,17 @@ _CHUNK = 500
 def _carrying_hashes(
     conn: sqlite3.Connection, *, hashes: list[str] | None, filter_expr: str | None,
     view_preds: tuple[filters.Predicate, ...], comments: bool, fields: bool,
+    lyrics: bool = False,
 ) -> list[str]:
-    """Items des Scopes, die etwas zum Mitnehmen tragen (Kommentare und/oder
-    Angaben von Hand, je nach Häkchen)."""
+    """Items des Scopes, die etwas zum Mitnehmen tragen (Kommentare, Angaben
+    oder Songtext von Hand, je nach Häkchen)."""
     parts = []
     if comments:
         parts.append("EXISTS (SELECT 1 FROM time_comments c WHERE c.file_hash = i.file_hash)")
     if fields:
         parts.append("EXISTS (SELECT 1 FROM manual_fields f WHERE f.file_hash = i.file_hash)")
+    if lyrics:
+        parts.append("EXISTS (SELECT 1 FROM manual_lyrics y WHERE y.file_hash = i.file_hash)")
     if not parts:
         return []
     has = "(" + " OR ".join(parts) + ")"
@@ -105,10 +113,12 @@ def _carrying_hashes(
 def export_exchange(
     conn: sqlite3.Connection, *, hashes: list[str] | None = None,
     filter_expr: str | None = None, view_preds: tuple[filters.Predicate, ...] = (),
-    comments: bool = True, fields: bool = True, now: str | None = None,
+    comments: bool = True, fields: bool = True, lyrics: bool = True,
+    now: str | None = None,
 ) -> dict[str, Any]:
-    """Austauschdatei für alle Items des Scopes, die Zeitkommentare und/oder
-    Musik-Angaben von Hand tragen (``comments``/``fields`` = die Häkchen).
+    """Austauschdatei für alle Items des Scopes, die Zeitkommentare,
+    Musik-Angaben oder Songtext von Hand tragen (``comments``/``fields``/
+    ``lyrics`` = die Häkchen).
 
     Scope wie bei den Sammel-Aktionen: ``hashes`` (Auswahl) gewinnt über
     ``filter_expr`` (Suchergebnis; leer = alle) samt Grundbereich der Ansicht.
@@ -116,7 +126,7 @@ def export_exchange(
     items = []
     for file_hash in _carrying_hashes(conn, hashes=hashes, filter_expr=filter_expr,
                                       view_preds=view_preds, comments=comments,
-                                      fields=fields):
+                                      fields=fields, lyrics=lyrics):
         row = conn.execute(
             """SELECT i.duration,
                       (SELECT path FROM file_locations l WHERE l.file_hash = i.file_hash
@@ -142,6 +152,10 @@ def export_exchange(
             by_hand = manual_fields.fields_of(conn, file_hash)
             if by_hand:
                 entry["fields"] = {f: by_hand[f] for f in manual_fields.FIELDS if f in by_hand}
+        if lyrics:
+            found_lyrics = manual_lyrics.lines_of(conn, file_hash)
+            if found_lyrics:
+                entry["lyrics"] = found_lyrics[0]
         items.append(entry)
     return {"format": FORMAT, "version": VERSION, "exported_at": now or now_iso(),
             "items": items}
@@ -164,6 +178,7 @@ class ExchangeItem:
     suno_ids: list[str] = field(default_factory=list)
     comments: list[ExchangeComment] = field(default_factory=list)
     fields: dict[str, list[str]] = field(default_factory=dict)   # Musik-Angaben von Hand
+    lyrics: list[list[Any]] | None = None                        # Songtext von Hand
 
 
 def _bad(detail: str) -> UserError:
@@ -226,8 +241,22 @@ def parse_exchange(data: Any) -> list[ExchangeItem]:
                 raise _bad(f"items[{n}].comments.text")
             parsed.append(ExchangeComment(at_ms, text.strip(), _stamp(c.get("created_at"))))
         items.append(ExchangeItem(file_hash, name, suno_ids, parsed,
-                                  {} if legacy else _parse_fields(raw.get("fields", {}), n)))
+                                  {} if legacy else _parse_fields(raw.get("fields", {}), n),
+                                  None if legacy else _parse_lyrics(raw.get("lyrics"), n)))
     return items
+
+
+def _parse_lyrics(raw: Any, n: int) -> list[list[Any]] | None:
+    """Abschnitt ``lyrics`` eines Songs: dieselbe Prüfung wie die Eingabe von
+    Hand (ADR 0106 Punkt 5). Die Songlänge des Empfängers kennt die Datei
+    nicht; geprüft wird gegen die allgemeine Obergrenze. Leer = kein Text."""
+    if raw is None:
+        return None
+    try:
+        lines = manual_lyrics.check_lines(raw)
+    except UserError:
+        raise _bad(f"items[{n}].lyrics") from None
+    return lines or None
 
 
 def _parse_fields(raw: Any, n: int) -> dict[str, list[str]]:
@@ -319,22 +348,59 @@ def _field_plan(
     return new, differing, same
 
 
+def _lyrics_plan(conn: sqlite3.Connection, target: str, item: ExchangeItem) -> str | None:
+    """Songtext eines Songs gegen den Stand hier: ``new`` (hier kein Songtext
+    von Hand), ``same``, ``differing`` (hier ein anderer von Hand) oder
+    ``None`` (nichts zu tun: kein Songtext in der Datei, kein Song)."""
+    if not item.lyrics or not manual_lyrics.is_song(conn, target):
+        return None
+    here = manual_lyrics.lines_of(conn, target)
+    if here is None:
+        return "new"
+    return "same" if here[0] == item.lyrics else "differing"
+
+
+def _ms_text(ms: int | None) -> str:
+    if ms is None:
+        return ""
+    tenth = round(ms / 100)
+    return f"{tenth // 600}:{(tenth % 600) / 10:04.1f} "
+
+
+def _first_difference(here: list[list[Any]], file: list[list[Any]]) -> tuple[str, str]:
+    """Die erste Zeile, in der sich zwei Songtexte unterscheiden (Text oder
+    Startzeit), lesbar für die Vorschau: „0:12.3 Zeile"; fehlt eine Zeile, „–"."""
+    for a, b in zip(here, file):
+        if (a[0], a[2]) != (b[0], b[2]):
+            return _ms_text(a[0]) + a[2], _ms_text(b[0]) + b[2]
+    if len(here) == len(file):
+        return "", ""                     # nur Endzeiten weichen ab
+    longer = here if len(here) > len(file) else file
+    extra = longer[min(len(here), len(file))]
+    shown = _ms_text(extra[0]) + extra[2]
+    return (shown, "–") if longer is here else ("–", shown)
+
+
 def preview_import(conn: sqlite3.Connection, items: list[ExchangeItem]) -> dict[str, Any]:
     """Was würde der Import tun? Nur lesend.
 
-    ``by_hash``/``by_song_id``: Items, neue bzw. schon vorhandene Kommentare
-    und die Musik-Angaben (``fields_new``/``fields_same``/``fields_differing``);
+    ``by_hash``/``by_song_id``: Items, neue bzw. schon vorhandene Kommentare,
+    die Musik-Angaben (``fields_new``/``fields_same``/``fields_differing``)
+    und die Songtexte (``lyrics_new``/``lyrics_same``/``lyrics_differing``,
+    je Song);
     ``song_id_items`` listet die Rückfall-Treffer (Name in der Datei → Name
     hier) zur Bestätigung, ``missing_names`` die Unauffindbaren,
     ``differing`` die abweichenden Angaben (Song, Feld, hier, in der Datei).
     """
     def bucket() -> dict[str, int]:
         return {"items": 0, "new": 0, "known": 0,
-                "fields_new": 0, "fields_same": 0, "fields_differing": 0}
+                "fields_new": 0, "fields_same": 0, "fields_differing": 0,
+                "lyrics_new": 0, "lyrics_same": 0, "lyrics_differing": 0}
 
     out: dict[str, Any] = {
         "items": len(items), "comments": sum(len(i.comments) for i in items),
         "fields": sum(len(i.fields) for i in items),
+        "lyrics": sum(1 for i in items if i.lyrics),
         "by_hash": bucket(), "by_song_id": bucket(),
         "song_id_items": [], "missing": 0, "missing_names": [], "differing": [],
     }
@@ -361,6 +427,15 @@ def preview_import(conn: sqlite3.Connection, items: list[ExchangeItem]) -> dict[
                     {"name": name, "field": f, "here": "; ".join(here[f]),
                      "file": "; ".join(values), "song_id": how == "song_id"}
                     for f, values in differing.items()]
+            plan = _lyrics_plan(conn, target, item)
+            if plan:
+                bucket[f"lyrics_{plan}"] += 1
+            if plan == "differing" and len(out["differing"]) < 200:
+                here_line, file_line = _first_difference(
+                    manual_lyrics.lines_of(conn, target)[0], item.lyrics)
+                out["differing"].append({
+                    "name": _display_name(conn, target) or target[:12], "field": "lyrics",
+                    "here": here_line, "file": file_line, "song_id": how == "song_id"})
         if how == "song_id" and len(out["song_id_items"]) < 200:
             out["song_id_items"].append({
                 "name": item.name or item.file_hash[:12],
@@ -374,20 +449,22 @@ def apply_import(
     include_song_id: bool = False, overwrite_fields: bool = False,
     min_date: datetime | None = None, now: str | None = None,
 ) -> dict[str, Any]:
-    """Kommentare und Musik-Angaben übernehmen, in EINER Transaktion.
-    Liefert Zähler.
+    """Kommentare, Musik-Angaben und Songtexte übernehmen, in EINER
+    Transaktion. Liefert Zähler.
 
     Übernommene Kommentare tragen ``source`` als Herkunft; ``created_at``
     bleibt, wenn die Datei einen brauchbaren Wert hat (sonst jetzt).
     Übernommene Angaben tragen ``source`` ebenso; abweichende eigene Angaben
     bleiben stehen, außer ``overwrite_fields`` lässt die Datei gewinnen
-    (ADR 0101 Punkt 9). Geänderte Songs werden aus ihren Roh-Blobs neu
+    (ADR 0101 Punkt 9). Für den Songtext von Hand gilt dasselbe je Song als
+    Ganzes (ADR 0106 Punkt 8). Geänderte Songs werden aus ihren Roh-Blobs neu
     interpretiert (``min_date`` = Untergrenze der Datumsregel fürs Datum).
     """
     source = clean_source(source)
     ts = now or now_iso()
     summary = {"added": 0, "known": 0, "items": 0, "skipped_song_id": 0, "missing": 0,
-               "fields_set": 0, "fields_same": 0, "fields_kept": 0}
+               "fields_set": 0, "fields_same": 0, "fields_kept": 0,
+               "lyrics_set": 0, "lyrics_same": 0, "lyrics_kept": 0}
     with conn:
         for item in items:
             how, targets = _targets(conn, item)
@@ -416,9 +493,20 @@ def apply_import(
                 changes = {**new, **(differing if overwrite_fields else {})}
                 summary["fields_same"] += same
                 summary["fields_kept"] += 0 if overwrite_fields else len(differing)
-                if changes and manual_fields.set_fields(conn, [target], changes,
-                                                        source=source, now=ts):
-                    reinterpret(conn, [target], dates="year" in changes, min_date=min_date)
+                changed = bool(changes) and bool(manual_fields.set_fields(
+                    conn, [target], changes, source=source, now=ts))
+                if changed:
                     summary["fields_set"] += len(changes)
+                plan = _lyrics_plan(conn, target, item)
+                if plan == "same":
+                    summary["lyrics_same"] += 1
+                elif plan == "differing" and not overwrite_fields:
+                    summary["lyrics_kept"] += 1
+                elif plan and manual_lyrics.set_lyrics(conn, target, item.lyrics,
+                                                       source=source, now=ts):
+                    summary["lyrics_set"] += 1
+                    changed = True
+                if changed:
+                    reinterpret(conn, [target], dates="year" in changes, min_date=min_date)
             summary["items"] += 1
     return summary

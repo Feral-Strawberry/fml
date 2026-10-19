@@ -17,6 +17,23 @@ server is only reachable at `127.0.0.1`.
 > the six-digit range and is designed for 250,000+ media. It is a hobby
 > project under active development - make backups (see "Good to know").
 
+## New in 2026.10.2
+
+Media can now go out as well, and the originals stay where they are:
+
+- **Export copies:** put a selection or a search result into an export
+  folder as verified copies, for video editing, a CD or someone else, via
+  the bulk action. Works in read-only mode too.
+- **Details travel along:** music details, lyrics and cover set by hand
+  go into the copy of MP3 and M4A files if you like; another fml then
+  shows that cover as well.
+- **Clip:** mark a section of a song or video, listen to it in a loop and
+  write it as WAV or MP4 (module, off by default).
+- **Lyrics by hand:** correct or add the lyrics and tap along the
+  timings with a key press.
+- **Music collection by folder:** the audio list groups by folder, shows
+  duplicates with all their locations, plus the search term `folder:`.
+
 ## New in 2026.10.1
 
 This completes the audio module:
@@ -30,22 +47,6 @@ This completes the audio module:
 - **Audio list for managing:** the control **☰ S M L** switches between
   rows with a waveform and flat rows with title, artist, album, number,
   year and genre.
-
-## New in 2026.10
-
-- **Work quietly, pause, carry on:** two buttons in the header switch
-  background tasks to **Quiet** (one process, lowest priority) or pause
-  them. Whatever is waiting survives a restart.
-- **Music collection:** artist, album and genre from the tags, as groups
-  in the sidebar, in the search and as the sort order "Album".
-- **Lyrics with timings:** during playback the current line sits below
-  the waveform, the sections (`[Chorus]`, `[Verse]`) are marked on the
-  waveform, and the text follows along in the panel.
-- **Exchanging time comments:** export comments as a file and import them
-  into another fml, with an origin label.
-- **More room, more order:** collapse sections of the right panel or fold
-  it away entirely (**P** key), a **date set by hand** for files with a
-  wrong date, **Finder tags** on macOS as colored tags.
 
 Everything in detail: [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -74,7 +75,9 @@ disk, and I want **overview, search and curation** - but nobody except me
 should ever move a file."
 
 - **Hands-off guarantee:** in read-only mode (the factory default) fml
-  **copies, moves and deletes not a single file.** The guarantee is
+  **copies, moves and deletes not a single file** in its place or into a
+  library. The only place it writes to is an export folder you set up
+  yourself, for copies and clips. The guarantee is
   enforced server-side - the affected functions are not hidden but locked,
   and they say so honestly. A badge "👁 Read-only mode" in the top bar
   shows the state.
@@ -83,8 +86,9 @@ should ever move a file."
   writing notes, **rejecting** (removes a medium from the catalog only -
   the file stays put) and jumping to the file in Explorer/Finder via the
   📂 button.
-- **What deliberately does not work:** copy, move and moving out rejected
-  files - everything that creates or moves files.
+- **What deliberately does not work:** copying into the library, moving
+  and moving out rejected files - everything that moves files or creates
+  them in the library.
 
 You can safely let fml loose on a foreign or organically grown collection
 in this mode, just to **understand** it first.
@@ -227,9 +231,19 @@ apart, including separate size figures.
   a song ("Chorus" at 1:40) that can be **exchanged** with another fml as
   a file, **comparing** up to six versions, **your own order** per saved
   search for auditioning a playlist, and **covers** from your own
-  library that bring finished songs into the gallery. fml never changes
-  the audio files themselves. All details:
+  library that bring finished songs into the gallery. Title, artist,
+  album and the **lyrics** (with timings you tap along) can be filled in
+  **by hand** where needed, and a **by folder** layout shows the
+  collection the way it lies on disk. fml never changes the audio files
+  themselves. All details:
   [`docs/en/audio.md`](docs/en/audio.md).
+- **Export copies and clips:** the bulk action puts a selection or a
+  whole search result into an export folder as **copies**: the original
+  bit for bit, verified after writing, duplicates recognised. Songs can
+  take their details, lyrics and cover set by hand into the copy. The
+  optional **Clip** module cuts a section of a song or video as WAV or
+  MP4. All details: [`docs/en/export.md`](docs/en/export.md),
+  [`docs/en/ausschnitt.md`](docs/en/ausschnitt.md).
 - **Multiple instances:** fml can run several times in parallel - each
   instance with its own database, port, name and accent color. This lets
   you carve **topic-specific sub-galleries** out of one consolidated
@@ -244,18 +258,23 @@ apart, including separate size figures.
 
 ## What fml does not do
 
-- **No image or audio editing, no export:** fml is a catalog and viewing
-  device.
-  The jump back into generation is the workflow download for ComfyUI.
+- **No image or audio editing:** fml is a catalog and viewing device.
+  The only things that go out are copies and clips in an export folder.
+  The copies are bit-identical, except Kodak Photo CD (as PNG) and songs
+  into whose copy fml writes the details set by hand if you ask it to.
+  The jump back into
+  generation is the workflow download for ComfyUI.
 - **No deleting of files** - in any mode. The only two places where fml
   touches files at all are the import and "Move rejected out", both only
-  with library management enabled, both hash-verified.
+  with library management enabled, both hash-verified. The export only
+  reads the originals and writes nowhere but the export folder.
 - **No network service:** binds only to `127.0.0.1`, no user accounts, no
   remote access. The database belongs on a local disk, not on a network
   share.
 - **No sync between instances or machines:** ratings and tags live in the
-  database of their instance. The only exception: time comments on songs
-  can be taken over as a file from one fml into another.
+  database of their instance. The only exception: time comments, music
+  details and lyrics set by hand on songs can be taken over as a file
+  from one fml into another.
 - **No AI analysis of image content** (yet): fml reads what is in the
   files - it does not guess tags from pixels. Local VLM enrichment as a
   clearly separated layer is planned.
@@ -350,6 +369,8 @@ interface points it out if it is missing.
 [`docs/en/instanzen.md`](docs/en/instanzen.md) (multiple instances /
 sub-galleries) · [`docs/en/audio.md`](docs/en/audio.md) (audio module) ·
 [`docs/en/rankings.md`](docs/en/rankings.md) (rankings) ·
+[`docs/en/export.md`](docs/en/export.md) (exporting copies) ·
+[`docs/en/ausschnitt.md`](docs/en/ausschnitt.md) (clip) ·
 [`docs/en/admin.md`](docs/en/admin.md) (admin &
 maintenance) · [`docs/en/architektur.md`](docs/en/architektur.md)
 (technical concept) · [`docs/en/security.md`](docs/en/security.md)
@@ -412,3 +433,32 @@ out (or `conda deactivate`, then `source .venv/bin/activate`; permanently:
 
 Code in `src/feral/`, tests in `tests/`, docs in `docs/`. Data (DB,
 cache, media) lives **outside** the repo (`.gitignore`).
+
+### Where things are documented
+
+If you want to understand the code, start with the diagrams rather than
+the sources:
+
+- [`docs/en/architektur.md`](docs/en/architektur.md) - **the entry
+  point.** The technical concept in four diagrams: processes and their
+  boundaries, how a file gets into the catalog with the two metadata
+  layers, from a search to the gallery, installation and supply chain.
+  Plus the guard rails the code keeps to.
+- [`docs/en/schema.md`](docs/en/schema.md) - the database: ER diagram and
+  all tables with columns, keys and indexes, generated from the real
+  schema.
+- [`docs/en/extraction.md`](docs/en/extraction.md) and
+  [`docs/en/interpretation.md`](docs/en/interpretation.md) - the two
+  metadata layers in detail: raw extraction per container, parsers per
+  generator.
+- [`docs/en/persistence.md`](docs/en/persistence.md) and
+  [`docs/en/scanning.md`](docs/en/scanning.md) - how data is stored,
+  queried and taken in.
+- [`docs/en/tests.md`](docs/en/tests.md) - what the test suite guards and
+  how to read its result.
+- [`docs/en/security.md`](docs/en/security.md) and
+  [`DEPENDENCIES.md`](DEPENDENCIES.md) - handling of foreign files, every
+  dependency with its reason.
+
+All chapters at a glance: [`docs/en/README.md`](docs/en/README.md).
+

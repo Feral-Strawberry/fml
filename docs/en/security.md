@@ -54,14 +54,21 @@ internet: never trust it blindly.
 - **Exchange files from another fml** (Import exchange file) are
   untrusted input: at most 20 MB, checked before reading, a fixed format
   with length and quantity limits (2,000 comments per song, a fixed list
-  of music detail fields with the same limits as entering them by hand),
-  only as `application/json`. Only comment text, position, music details
-  and origin are taken over; the import does not touch files.
+  of music detail fields with the same limits as entering them by hand,
+  lyrics with at most 2,000 lines of 500 characters and timings in order),
+  only as `application/json`. Only comment text, position, music details,
+  lyrics and origin are taken over; the import does not touch files.
 - **ffmpeg/ffprobe** (videos, audio) receive every file as a local file:
   `-protocol_whitelist file` and an absolute `file:` path. A crafted file
   (such as a hidden playlist) cannot make ffmpeg access the network, and a
   file name is never read as an option or protocol. Every call runs without
-  a shell and with a time limit.
+  a shell and with a time limit. Where ffmpeg writes (clip, M4A copy with
+  details set by hand), the target is an absolute `file:` path in the
+  export folder as well; values from fml go in as single arguments, never
+  as a command line.
+- **A file with tens of thousands of warnings** (such as nothing but broken
+  chunks) does not hold up the scan: at most 50 warnings per file plus one
+  summary line end up under Issues.
 
 **Processing / database:**
 
@@ -70,8 +77,10 @@ internet: never trust it blindly.
   search terms; field and sort names come from fixed whitelists.
 - **The queue** is kept in the database so that it survives a restart:
   per task a name from a fixed list and parameters as JSON, never
-  executable code. In read-only mode, no job that copies, moves or
-  deletes files comes back from this backup.
+  executable code. In read-only mode, no job that copies into the
+  library, moves or deletes files comes back from this backup. A backup
+  from another machine or another database file is dropped entirely; so is
+  a saved export into an export folder that has changed since.
 
 **Display (in the browser interface):**
 
@@ -98,7 +107,9 @@ internet: never trust it blindly.
 - The **location breadcrumbs** (open folder, open file in its associated
   application) accept no free path: only the item's locations stored in
   the database, or their folders, are allowed. fml only opens; what the
-  application does afterwards is decided by the user there.
+  application does afterwards is decided by the user there. The one
+  exception is the 📂 button after a clip: it shows a file that, once all
+  links are resolved, must lie inside the export folder.
 - **Media delivery** (`/api/media`): only cataloged files via their hash,
   range requests with exactly one range, aborted streams stop reading
   immediately — a browser cannot block the server with half-open video
@@ -111,6 +122,16 @@ internet: never trust it blindly.
   itself put there (pattern `<2 hex characters>/<hash>.<extension>`),
   never a folder as a whole. If a cache path in `config.toml` accidentally
   points at a folder with files of your own, those stay where they are.
+- **Export folder:** fml writes copies and clips there only. The folder
+  must not lie inside the library, a watch folder or the cache, must not
+  contain any of them, and must not contain catalogued media; saving the
+  setting already checks this. The package name is cleaned of characters
+  a file system does not allow, file names come from the location, never
+  from tags. An existing file is never overwritten (a new name instead),
+  temporary files are created unique and exclusive, and every copy is only
+  put in place after passing its check: against the hash of the original,
+  for a copy with details set by hand against the unchanged audio. The
+  originals are only read.
 - **Finder attributes on import (macOS):** the copy in the library gets
   the extended attributes of the source after its content has been
   verified by hash; access control lists (ACL) are deliberately not
@@ -139,7 +160,8 @@ internet: never trust it blindly.
   through unchanged, otherwise the check hits fml's own interface too.
 - **Do not open a `feral.sqlite` from someone else.** Besides the catalog,
   the database also contains the waiting tasks with their paths. fml only
-  runs known tasks from it, and none that write files in read-only mode;
+  runs known tasks from it, none that write files in read-only mode, and
+  drops a queue that comes from another machine or another database file;
   still: only start your own databases and your own backups.
 - **The folder browser is powerful.** The admin interface can list
   directories across the whole machine (for choosing source/target
@@ -178,7 +200,7 @@ take part in processing the untrusted files:
 | **pydantic** | `2.13.4` | Request models of the interface; brings `pydantic-core` (compiled). |
 | transitive packages | in the lock | annotated-doc, annotated-types, click, colorama (Windows only), h11, idna, pydantic-core, typing-extensions, typing-inspection; role of each in `DEPENDENCIES.md`. |
 | **pip** | `26.2.1` | The installer itself is pinned; the start scripts bring the venv's pip to exactly this version. |
-| **ffmpeg/ffprobe** | system (optional) | Reads untrusted video containers. Not a pip package — keep current via the system's package manager. Without ffmpeg, videos are only cataloged. |
+| **ffmpeg/ffprobe** | system (optional) | Reads untrusted video and audio containers; writes clips and M4A copies with details set by hand. Not a pip package — keep current via the system's package manager. Without ffmpeg, videos are only cataloged. |
 | pytest (development only) | `9.1.1` | Not in the runtime path; locked together with its four dependencies. |
 
 Practically: the pinned versions provide reproducible installs; when

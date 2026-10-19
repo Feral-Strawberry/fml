@@ -150,7 +150,8 @@ If an audio file in an M4A or Matroska container has a **text subtitle
 track** (this is how Suno stores the lyrics with timings from V6 on), an
 additional ffmpeg run fetches it as SRT text, source label
 `"isobmff:stream1.subtitle"` (the number is the number of the track),
-keyword `srt`, at most 1 MiB. Audio only: for a film, ffmpeg would have
+keyword `srt`, at most 1 MiB (a larger track is not read; the file gets
+a warning instead). Audio only: for a film, ffmpeg would have
 to read the whole file for this. If ffmpeg is missing, it stays at a
 warning.
 

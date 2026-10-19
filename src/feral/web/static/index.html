@@ -29,7 +29,8 @@
     <button type="button" id="sort"></button>
     <div id="density">
       <!-- Audioliste (#258): ☰ = Darstellung „Angaben" (flache Zeilen ohne
-           Welle), S/M/L = Welle in dieser Höhe. Nur in der Audioansicht. -->
+           Welle), S/M/L = Welle in dieser Höhe. Nur in der Audioansicht.
+           Aktiv wird ☰ zu ☰▾ und öffnet die Zeilen-Arten (ADR 0108). -->
       <button type="button" data-liststyle="info" hidden>☰</button>
       <button type="button" data-density="s">S</button>
       <button type="button" data-density="m">M</button>
@@ -104,6 +105,9 @@
 <div id="loupe" hidden></div>
 <div id="single" hidden></div>
 <div id="compare" hidden></div>
+<!-- Ausschnitt (ADR 0105): liegt über allen anderen Ebenen. -->
+<div id="clip" hidden></div>
+<div id="lyedit" hidden></div>
 
 <script type="module" src="/static/js/main.js"></script>
 </body>

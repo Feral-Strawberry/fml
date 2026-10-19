@@ -20,9 +20,11 @@ step. Every installed package is named with an exact version and checksum.
 Two processes, one database. The web process answers every request and
 stays fluid because everything long-running happens in a second process.
 **The two write paths are shown in red:** short changes (rating, tags,
-notes, music details, duels) are written by the web process itself under a lock,
+notes, music details, lyrics, covers, duels) are written by the web process itself under a lock,
 everything long-running (scan, import, re-interpret, thumbnails) is
-written by the worker. The worker is started with `spawn`, gets one task
+written by the worker. Copy export and clip run in the worker as well;
+they only read the database and write files nowhere but the export
+folder. The worker is started with `spawn`, gets one task
 at a time and reports progress through a second queue; if it dies, the
 next task restarts it. Media go through their own thread pool so large
 videos never block a gallery request. The watcher checks every watch
@@ -54,15 +56,21 @@ runs over the whole collection without opening a single file. Ratings,
 tags, notes and time comments are stored separately and are never
 overwritten by a parser.
 
-There is exactly one bridge in the opposite direction: the **music
-details set by hand** (title, artist, album, number, year, genre). They
-live in the manual layer too, but are **laid over the values from the
+There are two bridges in the opposite direction: the **music details
+set by hand** (title, artist, album, number, year, genre) and the
+**lyrics set by hand** (with timings and sections). Both live in the manual layer too, but are **laid over the values from the
 tags** when layer 2 is written. That way search, sidebar, sort order and
 full text see the value in effect without any special case. The origin
 stays visible on the value, the file stays unchanged, and clearing the
 detail brings the tag value back. Details: [Extraction](extraction.md),
 [Interpretation](interpretation.md),
 [Audio module](audio.md#music-details-by-hand).
+
+Only into a **copy** do these details also reach a file: during the
+[copy export](export.md), `tagwrite.py` writes them into the copy of a
+song if asked to, for MP3 through its own ID3 writer, for M4A through
+ffmpeg without re-encoding. The original stays untouched, and the copy
+is only put in place once its audio has been checked.
 
 ## From search to gallery
 
@@ -101,8 +109,9 @@ updates directly on the lock. Details: [Security](security.md),
 ## Guard rails
 
 - **The original is sacred:** fml only touches files when importing and
-  when moving rejected files out. Out of the box it runs in read-only
-  mode: never copy, move or delete.
+  when moving rejected files out, and writes copies and clips nowhere
+  but the export folder. Out of the box it runs in read-only mode: never
+  move, delete or copy into the library.
 - **Everything derived is reproducible:** layer 2, thumbnails, creation
   date, full-text index and the audio analysis (loudness, waveform) can
   be recomputed from hash, raw blobs and the manual layer, without

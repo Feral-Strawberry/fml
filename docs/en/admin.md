@@ -107,11 +107,12 @@
 ## Read-only mode and library management (default: hands off)
 
 Out of the box the Feral Media Library (fml) runs in **read-only mode**:
-it only catalogs and curates — **files are never copied, moved or
-deleted** (the hands-off guarantee, ADR 0041). Locked are all
+it only catalogs and curates — **files are never moved, deleted or
+copied into the library** (the hands-off guarantee, ADR 0041). Locked are all
 file-writing paths: the copy/move import (also as a watch folder) and
-"Move rejected out". Still possible are `catalog`, rejecting and all
-curation. A badge "👁 Read-only mode" in the top bar shows the state;
+"Move rejected out". Still possible are `catalog`, rejecting, all
+curation and the [export of copies](export.md): it only reads the
+originals and writes to the export folder alone. A badge "👁 Read-only mode" in the top bar shows the state;
 locked places explain it honestly ("Disabled in read-only mode — enable
 library management in the configuration").
 
@@ -363,13 +364,15 @@ The same three steps as the two cards above:
 
 ### Import exchange file (its own card, only with the audio module)
 
-Takes over the exchange file of another fml with time comments and music
-details set by hand: choose the file and enter the origin → preview
-(found, new, already there, not found; matches only by Suno song ID
-listed separately; for the music details new, identical, differing) →
-take over. Your own differing details stay unless the checkbox
-"Overwrite my own differing details" is ticked. Changes comments and
-details only, never files. Details and the file format:
+Takes over the exchange file of another fml with time comments, music
+details and lyrics set by hand: choose the file and enter the origin →
+preview (found, new, already there, not found; matches only by Suno song
+ID listed separately; for music details and lyrics new, identical,
+differing) → take over. If "Take over" is locked, the reason is shown
+below it (for example: nothing new, or only differing details, which are
+only taken over with the overwrite checkbox). Your own differing details stay unless the checkbox
+"Overwrite my own differing details" is ticked. Changes comments,
+details and lyrics only, never files. Details and the file format:
 [Audio module → Exchanging comments](audio.md#exchanging-comments-with-another-fml)
 and [Exchanging details](audio.md#exchanging-details-with-another-fml).
 
@@ -380,7 +383,9 @@ which names the **true total** (ADR 0034). Below it **one card per error
 kind**: counter, the 20 most recent entries ("latest 20 of 2013"),
 "dismiss" per entry, "dismiss all N of this kind" at the bottom.
 Dismissing reports the number of dismissed entries and reloads the cards.
-Kinds: `failed` (not ingested), `warning` (extractor warning), `thumbnail`
+Kinds: `failed` (not ingested), `warning` (extractor warning; the text is
+technical and always English, a re-scan of the file dismisses what it no
+longer finds), `thumbnail`
 (no preview), `audio` (audio analysis failed) and `playback` (video that no or only some
 browsers play —
 ProRes, 10-bit H.264, HEVC; see
@@ -473,7 +478,13 @@ integrity check) does a write show "busy" — wait a moment and retry.
   of the most recently finished ones (duration, result; in memory only —
   after a restart it starts empty, the log has everything). The widget at
   the bottom of the navigation and the dot in the gallery's top bar show
-  the same in short form (`+2` = two waiting).
+  the same in short form (`+2` = two waiting). Tasks fml starts on its
+  own only appear there when they had something to do: the follow-ups
+  after an import or watch batch (thumbnails, analyze audio) and the runs
+  at startup or after changed import rules (re-check filtered files,
+  fetch timed lyrics). Without work, the task before them stays as
+  "last". Started from its button, every
+  task shows its result, even "0 new".
 - **Repeated clicks** do not pile up: a task that is already running or
   waiting is not queued again (hint "already running"). Automatic
   follow-ups (thumbnails after an import) may queue once behind a running
@@ -485,7 +496,10 @@ integrity check) does a write show "busy" — wait a moment and retry.
 - **The queue survives restarts:** when fml is closed (window closed,
   computer shut down), the running task stops at the next file and all
   waiting ones are saved. On the next start it continues where it left
-  off, without having to start anything again.
+  off, without having to start anything again. The saved queue belongs to
+  this computer and this database file: if the database is copied to
+  another computer or another place, fml drops it on start (note in the
+  server log), because its paths do not belong there.
 - **Worker process crashed** (marked red): the running task is reported as
   aborted, waiting tasks are kept, the next task restarts the process. What
   happened is in the server log.
@@ -535,10 +549,12 @@ operation, set a media library and sources in the configuration.
 ## Editing the configuration
 
 Five cards: **Media library** (import target, **library management** as
-the read-only-mode switch, oldest plausible date, import rules),
+the read-only-mode switch, oldest plausible date, import rules,
+**export folder** for [copies](export.md)),
 **Thumbnails & performance** (size, processes, background at start,
 full power, slow threshold), **Interface**, **Instance** and **Modules**
-([rankings](rankings.md), [audio](audio.md)). Every setting has
+([rankings](rankings.md), [audio](audio.md),
+[clip](ausschnitt.md)). Every setting has
 a label, the input, a short explanation underneath and a badge:
 **immediate** takes effect on save, **restart** only after restarting the
 server. Changes collect in the **save bar** at the bottom, which only

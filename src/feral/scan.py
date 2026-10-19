@@ -18,6 +18,7 @@ Aufruf als CLI:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sqlite3
 import sys
@@ -140,6 +141,32 @@ def note_playability(
         return
     key, params = issue
     record_issue(conn, path, "playback", msg_dump(key, **params))
+
+
+# Höchstens so viele Warnungen je Datei landen unter Probleme; eine präparierte
+# Datei (tausende kaputte Chunks) soll den Scan nicht mit Schreibgriffen fluten.
+_MAX_WARNINGS = 50
+
+
+def _capped(warnings: Sequence[str]) -> list[str]:
+    """Warnungen entdoppelt und gedeckelt, der Rest als eine Sammelzeile."""
+    unique = list(dict.fromkeys(warnings))
+    if len(unique) <= _MAX_WARNINGS:
+        return unique
+    rest = len(unique) - _MAX_WARNINGS
+    return [*unique[:_MAX_WARNINGS], f"... and {rest} more warnings"]
+
+
+def _resolve_stale_warnings(conn: sqlite3.Connection, path: Path, current: list[str]) -> None:
+    """Offene Warnungen einer Datei quittieren, die der Re-Scan nicht mehr
+    meldet (#251: z. B. derselbe Befund mit neuem Wortlaut). Die aktuellen
+    Warnungen bleiben offen."""
+    with conn:   # EIN Parameter statt einer Variable je Warnung (SQLite-Limit)
+        conn.execute(
+            "UPDATE scan_issues SET resolved = 1 WHERE path = ? AND kind = 'warning' "
+            "AND resolved = 0 AND message NOT IN (SELECT value FROM json_each(?))",
+            (str(path), json.dumps(current)),
+        )
 
 
 def _resolve_issues(conn: sqlite3.Connection, path: Path) -> None:
@@ -280,8 +307,10 @@ def _process_file(
         report.with_metadata += 1
     if extraction.warnings:
         report.files_with_warnings += 1
-        for warning in extraction.warnings:
-            _record_issue(conn, path, "warning", msg_dump("issueWarning", text=warning))
+        messages = [msg_dump("issueWarning", text=w) for w in _capped(extraction.warnings)]
+        for message in messages:
+            _record_issue(conn, path, "warning", message)
+        _resolve_stale_warnings(conn, path, messages)
     else:
         _resolve_issues(conn, path)  # Datei ist jetzt sauber → Altlasten quittieren
 

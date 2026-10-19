@@ -103,10 +103,7 @@ main#adpage { overflow: auto; padding: 26px 32px 60px; }
 
 /* Gleich hohe Diagramm-Felder in einer Karte */
 .panels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; align-items: stretch; }
-.panels.p4 { grid-template-columns: repeat(4, 1fr); }
-@media (max-width: 1300px) { .panels.p4 { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 1160px) { .panels { grid-template-columns: 1fr; } }
-@media (max-width: 760px)  { .panels.p4 { grid-template-columns: 1fr; } }
 .panel { padding: 12px 13px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--border-soft); min-width: 0; display: flex; flex-direction: column; }
 .panel > .mlabel { margin-bottom: 10px; display: flex; justify-content: space-between; }
 .panel > .mlabel b { font-family: var(--mono); color: var(--text); font-weight: 600; letter-spacing: 0; text-transform: none; }
@@ -288,10 +285,6 @@ input[type=text]:focus-visible, input[type=number]:focus-visible { border-color:
   main#adpage { padding: 18px 16px 40px; }
 }
 
-/* Sprachumschalter/Verweise in Seiten */
-.sublink { color: var(--accent); }
-.sublink:hover { text-decoration: underline; }
-.pagemsg { margin-top: 12px; font-size: 12px; color: var(--dim); }
 /* Logs-Seite: zwei Dateien nebeneinander, Monospace, kein Umbruch,
    horizontal scrollbar, neueste Zeile unten. */
 .logcard .chead { flex-wrap: wrap; row-gap: 6px; }
@@ -383,7 +376,6 @@ input[type=text]:focus-visible, input[type=number]:focus-visible { border-color:
 .srcform .optline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .srcform .optline select { font-size: 12px; }
 .srcform .optline .accentbtn { margin-left: auto; }
-.srcrow { margin-bottom: 14px; }
 .srchead { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .srccard { gap: 6px; }
 .srccard .srcname { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; min-width: 0; }

@@ -297,3 +297,44 @@ def test_scan_hevc_is_limited_not_unplayable(db, tmp_path, monkeypatch):
     scan_directory(db, root)
     row = db.execute("SELECT kind, message FROM scan_issues").fetchone()
     assert row["kind"] == "playback" and '"key": "issueLimitedPlayback"' in row["message"]
+
+
+def test_rescan_resolves_warnings_it_no_longer_reports(db, tmp_path, monkeypatch):
+    """#251: meldet der Re-Scan einer Datei andere Warnungen (z. B. denselben
+    Befund in neuem Wortlaut), wird die alte quittiert, die neue bleibt offen."""
+    from feral import scan as scan_mod
+    from feral.extract.types import ContainerExtraction
+
+    root = tmp_path / "bilder"
+    root.mkdir()
+    (root / "a.png").write_bytes(b"\x00" * 32)
+    said = ["Datei endet ohne IEND-Chunk."]
+    monkeypatch.setattr(scan_mod.container, "extract",
+                        lambda *a, **k: ContainerExtraction(container="png", warnings=list(said)))
+    scan_directory(db, root)
+    said[:] = ["File ends without an IEND chunk."]
+    (root / "a.png").write_bytes(b"\x01" * 32)   # Stat-Gedächtnis: geänderte Datei
+    scan_directory(db, root)
+    open_ = [r[0] for r in db.execute(
+        "SELECT message FROM scan_issues WHERE kind = 'warning' AND resolved = 0")]
+    assert len(open_) == 1 and "IEND chunk" in open_[0]
+
+
+def test_many_warnings_are_capped_and_do_not_break_the_scan(db, tmp_path, monkeypatch):
+    """Eine präparierte Datei mit zehntausenden Warnungen (kaputte Chunks)
+    bricht den Scan nicht ab (SQLite-Variablenlimit) und flutet Probleme
+    nicht: höchstens 50 Zeilen plus eine Sammelzeile."""
+    from feral import scan as scan_mod
+    from feral.extract.types import ContainerExtraction
+
+    root = tmp_path / "bilder"
+    root.mkdir()
+    (root / "a.png").write_bytes(b"\x00" * 32)
+    said = [f"tEXt chunk {i}: CRC mismatch." for i in range(40_000)] + ["tEXt chunk 0: CRC mismatch."]
+    monkeypatch.setattr(scan_mod.container, "extract",
+                        lambda *a, **k: ContainerExtraction(container="png", warnings=list(said)))
+    report = scan_directory(db, root)
+    assert report.files_with_warnings == 1
+    open_ = [r[0] for r in db.execute(
+        "SELECT message FROM scan_issues WHERE kind = 'warning' AND resolved = 0")]
+    assert len(open_) == 51 and any("39950 more warnings" in m for m in open_)

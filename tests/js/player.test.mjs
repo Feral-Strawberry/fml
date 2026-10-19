@@ -158,18 +158,26 @@ test("Eigener Abspielkopf je Zeile: Wechsel pausiert und merkt die Stelle", asyn
   assert.equal(player.positionOf(hashOf(1)), 70);
 });
 
-test("Pfeiltasten: ausgewählte Zeile ±5 s, Shift ±1 s — auch ohne dass sie spielt", async () => {
+test("Leertaste und ←/→ gelten dem Song der Leiste, egal welche Zeile ausgewählt ist (#260)", async () => {
   const { emit } = await import("./bus.mjs");
-  emit("selection-changed", { hash: hashOf(1), index: 0 });          // Song 1 ist nicht geladen
+  assert.equal(player.playingHash(), hashOf(2));                     // Song 2 läuft bei 0:42
+  emit("selection-changed", { hash: hashOf(1), index: 0 });          // Song 1 ausgewählt, nicht geladen
   keydown("ArrowRight");
   await flush();
-  assert.equal(player.positionOf(hashOf(1)), 75);
+  assert.equal(player.positionOf(hashOf(2)), 47);                    // der laufende Song springt
   keydown("ArrowLeft", { shiftKey: true });
   await flush();
-  assert.equal(player.positionOf(hashOf(1)), 74);
-  assert.equal(player.currentHash(), hashOf(2));                     // nichts umgeschaltet
+  assert.equal(player.positionOf(hashOf(2)), 46);
+  assert.equal(player.positionOf(hashOf(1)), 70);                    // die Auswahl bleibt unberührt
+  keydown(" ");
+  await flush();
+  assert.equal(player.playingHash(), null);                          // pausiert …
+  assert.equal(player.currentHash(), hashOf(2));                     // … statt Song 1 zu starten
+  keydown(" ");
+  await flush();
+  assert.equal(player.playingHash(), hashOf(2));
   // Leertaste nach einem MAUS-Klick auf einen Knopf (⏮, ≈ Lautheit …):
-  // Play/Pause der Zeile, nicht noch einmal der Knopf (#162).
+  // Play/Pause, nicht noch einmal der Knopf (#162).
   const btn = bar().querySelector('[data-act="match"]');
   btn.focus();
   const before = player.matchOn();
@@ -177,14 +185,48 @@ test("Pfeiltasten: ausgewählte Zeile ±5 s, Shift ±1 s — auch ohne dass sie 
   await flush();
   assert.equal(player.matchOn(), before);                            // Knopf nicht erneut
   assert.notEqual(document.activeElement, btn);                      // Fokus weg
-  assert.equal(player.playingHash(), hashOf(1));                     // ausgewählte Zeile spielt
-  keydown(" ");
+  assert.equal(player.playingHash(), null);
+  // In Eingabefeldern (Suchleiste, Panel) bleibt die Leertaste ein Leerzeichen.
+  keydown(" ", { target: document.getElementById("q") });
+  const field = document.createElement("textarea");
+  document.body.appendChild(field);
+  keydown(" ", { target: field });
   await flush();
   assert.equal(player.playingHash(), null);
-  // Enter öffnet für Songs keine Einzelansicht (#162).
+  assert.equal(player.currentHash(), hashOf(2));
+  field.remove();
+});
+
+test("Enter startet die ausgewählte Zeile, ein zweites Enter pausiert sie (#260)", async () => {
+  assert.equal(player.currentHash(), hashOf(2));                     // Song 1 ist ausgewählt
   keydown("Enter");
   await flush();
-  assert.equal(document.getElementById("single").hidden, true);
+  assert.equal(player.playingHash(), hashOf(1));
+  assert.equal(document.getElementById("single").hidden, true);      // keine Einzelansicht (#162)
+  fire("loadedmetadata");
+  keydown("Enter");
+  await flush();
+  assert.equal(player.playingHash(), null);
+  assert.equal(player.currentHash(), hashOf(1));
+  keydown(" ");                                                      // Leertaste: wieder der Song der Leiste
+  await flush();
+  assert.equal(player.playingHash(), hashOf(1));
+  player.pause();
+});
+
+test("Leere Leiste: Leertaste und ←/→ gelten der ausgewählten Zeile, auch ohne dass sie spielt", async () => {
+  const { emit } = await import("./bus.mjs");
+  player.stop();
+  emit("selection-changed", { hash: hashOf(3), index: 2 });
+  keydown("ArrowRight");
+  await flush();
+  assert.equal(player.positionOf(hashOf(3)), 5);
+  assert.equal(player.currentHash(), null);                          // nichts gestartet
+  keydown(" ");
+  await flush();
+  assert.equal(player.playingHash(), hashOf(3));
+  fire("loadedmetadata");
+  player.pause();
 });
 
 test("Neumalen während der Wiedergabe lässt ❚❚ und die Leiste unangetastet (#211)", async () => {

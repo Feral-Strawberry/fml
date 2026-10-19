@@ -44,6 +44,10 @@ wird davon nie überschrieben. Die Musik-Angaben von Hand liegen in
 `feral/db/manual_fields.py` (`set_fields`, `fields_of`, `state`,
 `overlay`): `overlay` legt sie beim Schreiben der interpretierten Felder
 über die Werte aus den Tags, sodass jede Abfrage den geltenden Wert sieht.
+Der Songtext von Hand liegt als ein Dokument je Song in
+`feral/db/manual_lyrics.py` (`check_lines`, `set_lyrics`, `editable`,
+`projection`); dieselbe Überdeckung ersetzt damit Songtext, Zeilen mit
+Zeiten und Abschnitte aus der Datei als Ganzes.
 
 ## Wichtige Eigenschaften
 

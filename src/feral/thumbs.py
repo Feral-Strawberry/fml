@@ -25,6 +25,7 @@ from __future__ import annotations
 import heapq
 import io
 import itertools
+import logging
 import os
 import sqlite3
 import subprocess
@@ -33,11 +34,14 @@ from concurrent.futures import CancelledError, Future, ProcessPoolExecutor, wait
 from pathlib import Path
 
 from .db.manual import has_embedded_picture
-from .extract import pcd, psd
+from .extract import jxr, pcd, psd
 from .messages import dump as msg_dump
 from .processes import ffmpeg_quiet_args
 from .tools import NO_WINDOW, find_binary, media_input
 from PIL import Image, UnidentifiedImageError
+from PIL.PngImagePlugin import PngInfo
+
+log = logging.getLogger(__name__)
 
 DEFAULT_SIZE = 320
 
@@ -49,6 +53,10 @@ _FFMPEG_TIMEOUT = 60
 # Als Meldungs-JSON (Block M.2, ADR 0054): der Grund landet in .fail-Markern,
 # Scan-Problemen und im /api/preview-Fehler — übersetzt wird im Frontend.
 _PSD_NO_COMPOSITE = msg_dump("thumbPsdNoComposite")
+# JPEG XR dekodiert nur der Decoder von Windows (ADR 0104): auf anderen
+# Systemen ist die Datei katalogisiert, aber ohne Bild.
+_JXR_WINDOWS_ONLY = msg_dump("thumbJxrWindowsOnly")
+JXR_MIME = "image/vnd.ms-photo"
 
 
 def thumb_path(cache_dir: str | Path, file_hash: str) -> Path:
@@ -117,10 +125,13 @@ class ThumbPool:
     def submit(
         self, file_hash: str, source: str | Path, dest: Path,
         *, media_kind: str, size: int = DEFAULT_SIZE,
+        tone: jxr.Tone = jxr.Tone(), preview_cache: str | Path | None = None,
     ) -> Future:
-        """Reihe die Generierung ein (oder liefere die schon laufende Future)."""
+        """Reihe die Generierung ein (oder liefere die schon laufende Future).
+        ``tone``/``preview_cache`` betreffen nur JXR (``generate_thumbnail``)."""
         return self.submit_call(file_hash, generate_thumbnail, str(source), dest,
-                                media_kind=media_kind, size=size)
+                                media_kind=media_kind, size=size, tone=tone,
+                                preview=jxr_preview_file(preview_cache, file_hash, tone))
 
     def submit_call(self, key: str, fn, *args, priority: int = 0, **kwargs) -> Future:
         """Beliebige reine Cache-Arbeit (picklebare Modulfunktion) einreihen,
@@ -200,7 +211,8 @@ class ThumbPool:
 
 
 def generate_thumbnail(
-    source: str | Path, dest: Path, *, media_kind: str, size: int = DEFAULT_SIZE
+    source: str | Path, dest: Path, *, media_kind: str, size: int = DEFAULT_SIZE,
+    tone: jxr.Tone = jxr.Tone(), preview: Path | None = None,
 ) -> bool:
     """Erzeuge das Thumbnail einer Mediendatei nach `dest` (atomar).
 
@@ -213,7 +225,7 @@ def generate_thumbnail(
     tmp = dest.with_name(dest.name + f".tmp{os.getpid()}")
     try:
         if media_kind == "image":
-            ok, reason = _image_thumbnail(source, tmp, size)
+            ok, reason = _image_thumbnail(source, tmp, size, tone, preview)
         elif media_kind in ("video", "audio"):
             # Audio (#165): das eingebettete Cover — ffmpeg führt es als
             # einzige Bildspur, der „erste Frame" ist das Bild.
@@ -230,7 +242,70 @@ def generate_thumbnail(
         tmp.unlink(missing_ok=True)
 
 
-def _image_thumbnail(source: str | Path, tmp: Path, size: int) -> tuple[bool, str]:
+def jxr_preview_file(preview_cache: str | Path | None, file_hash: str,
+                     tone: jxr.Tone) -> Path | None:
+    """Wo das Anzeigebild einer JXR liegt (``None`` ohne Vorschau-Cache)."""
+    if not preview_cache:
+        return None
+    return preview_cache_file(preview_cache, file_hash, tone.variant())
+
+
+def _render_jxr(source: str | Path, tone: jxr.Tone, preview: Path | None = None,
+                ) -> tuple[Image.Image | None, str]:
+    """JXR als SDR-Bild (ADR 0104); ``(None, grund)``, wenn es nicht geht.
+
+    Mit ``preview`` (Platz des Anzeigebilds im Vorschau-Cache) wird nur EINMAL
+    gerechnet: Liegt das PNG schon dort, kommt das Bild von dort; sonst wird
+    es nach dem Rechnen dort abgelegt. Vorschaubild und Einzelansicht teilen
+    sich so eine Dekodierung (ADR 0104 Punkt 6)."""
+    if preview is not None and preview.is_file():
+        try:
+            with Image.open(preview) as cached:
+                cached.load()
+                return cached.convert("RGB"), ""
+        except (UnidentifiedImageError, OSError, ValueError):
+            pass                            # kaputtes Cache-Bild: neu rechnen
+    try:
+        img = jxr.render(source, tone)
+    except jxr.JxrUnsupported:
+        return None, _JXR_WINDOWS_ONLY
+    except (jxr.JxrError, OSError, MemoryError) as exc:
+        return None, f"JPEG XR: {exc.__class__.__name__}: {exc}"
+    if preview is not None:
+        try:
+            # Cache-Dateien heißen <hash>[.<variante>].png.
+            _save_jxr_png(img, source, preview, tone, preview.name.split(".", 1)[0])
+        except OSError as exc:              # Cache voll o. Ä.: das Bild gibt es trotzdem
+            log.warning("jxr: preview not stored: %s", exc)
+    return img, ""
+
+
+def _save_jxr_png(img: Image.Image, source: str | Path, dest: Path, tone: jxr.Tone,
+                  file_hash: str | None) -> None:
+    """Anzeigebild als PNG ablegen (atomar), mit seiner Herkunft als
+    Textfeldern."""
+    info = PngInfo()
+    for key, value in jxr.provenance(source, file_hash, tone).items():
+        info.add_text(key, value)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + f".tmp{os.getpid()}")
+    try:
+        img.save(tmp, "PNG", compress_level=3, pnginfo=info)
+        os.replace(tmp, dest)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _image_thumbnail(source: str | Path, tmp: Path | io.BytesIO, size: int,
+                     tone: jxr.Tone = jxr.Tone(), preview: Path | None = None,
+                     quality: int = 85) -> tuple[bool, str]:
+    if jxr.is_jxr_file(source):
+        img, reason = _render_jxr(source, tone, preview)
+        if img is None:
+            return False, reason
+        img.thumbnail((size, size))
+        img.save(tmp, "JPEG", quality=quality)
+        return True, ""
     try:
         with Image.open(source) as img:
             if img.format == "PSD" and not psd.has_real_composite(source):
@@ -241,13 +316,28 @@ def _image_thumbnail(source: str | Path, tmp: Path, size: int) -> tuple[bool, st
                 img = pcd.render(source, max_factor=1 if size <= pcd.BASE_W else 4)
             # Animierte Formate: Frame 0 ist der Poster-Frame.
             img.thumbnail((size, size))
-            img.convert("RGB").save(tmp, "JPEG", quality=85)
+            img.convert("RGB").save(tmp, "JPEG", quality=quality)
         return True, ""
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         return False, f"Pillow: {exc.__class__.__name__}: {exc}"
 
 
-def render_preview(source: str | Path) -> tuple[bytes | None, str]:
+COVER_SIZE = 1200   # längste Kante des Covers in einer exportierten Kopie (ADR 0107)
+
+
+def cover_jpeg(source: str | Path, *, size: int = COVER_SIZE,
+               tone: jxr.Tone = jxr.Tone()) -> tuple[bytes | None, str]:
+    """Coverbild für die Kopie eines Songs (ADR 0107 Punkt 7): JPEG,
+    längste Kante ``size``, nie vergrößert, Qualität 90 — dieselbe Strecke
+    wie die Thumbnails (PSD, Photo CD, JXR inklusive). ``(None, grund)``
+    bei Fehlschlag, wirft nicht."""
+    buf = io.BytesIO()
+    ok, reason = _image_thumbnail(source, buf, size, tone, quality=90)
+    return (buf.getvalue(), "") if ok else (None, reason)
+
+
+def render_preview(source: str | Path, *,
+                   tone: jxr.Tone = jxr.Tone()) -> tuple[bytes | None, str]:
     """Bilddatei in voller Größe als JPEG rendern (TIFF/PSD/PCD-Anzeige, ADR 0052).
 
     Gibt ``(jpeg_bytes, "")`` bei Erfolg zurück, ``(None, grund)`` bei
@@ -255,6 +345,13 @@ def render_preview(source: str | Path) -> tuple[bytes | None, str]:
     liefert Pillow das eingebettete Composite, CMYK/Lab werden nach RGB
     konvertiert.
     """
+    if jxr.is_jxr_file(source):
+        img, reason = _render_jxr(source, tone)
+        if img is None:
+            return None, reason
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=90)
+        return buf.getvalue(), ""
     try:
         with Image.open(source) as img:
             if img.format == "PSD" and not psd.has_real_composite(source):
@@ -269,20 +366,39 @@ def render_preview(source: str | Path) -> tuple[bytes | None, str]:
         return None, f"Pillow: {exc.__class__.__name__}: {exc}"
 
 
-# Anzeigebilder, deren Rendern spürbar dauert (Photo CD 16Base ≈ 1,6 s),
-# werden einmal verlustfrei als PNG abgelegt (#208) — TIFF/PSD rendern
-# schnell genug on the fly.
-PREVIEW_CACHED_MIMES = frozenset({"image/x-photo-cd"})
+# Anzeigebilder, deren Rendern spürbar dauert (Photo CD 16Base ≈ 1,6 s,
+# JXR in 4K ≈ 1,8 s), werden einmal verlustfrei als PNG abgelegt (#208,
+# ADR 0104) — TIFF/PSD rendern schnell genug on the fly.
+PREVIEW_CACHED_MIMES = frozenset({"image/x-photo-cd", JXR_MIME})
 
 
-def preview_cache_file(cache_dir: str | Path, file_hash: str) -> Path:
-    """``<cache>/<hash[:2]>/<hash>.png`` (sharded wie die Thumbnails)."""
-    return Path(cache_dir) / file_hash[:2] / f"{file_hash}.png"
+def preview_variant(container_or_mime: str | None, tone: jxr.Tone) -> str:
+    """Zusatz im Cache-Schlüssel für Formate, deren Anzeigebild von einer
+    Einstellung abhängt: bei JXR Papierweiß und Knie, sonst leer."""
+    return tone.variant() if container_or_mime in ("jxr", JXR_MIME) else ""
 
 
-def write_preview(source: str | Path, dest: Path) -> str:
+def preview_cache_file(cache_dir: str | Path, file_hash: str, variant: str = "") -> Path:
+    """``<cache>/<hash[:2]>/<hash>[.<variante>].png`` (sharded wie die
+    Thumbnails)."""
+    name = f"{file_hash}.{variant}.png" if variant else f"{file_hash}.png"
+    return Path(cache_dir) / file_hash[:2] / name
+
+
+def write_preview(source: str | Path, dest: Path, *,
+                  tone: jxr.Tone = jxr.Tone(), file_hash: str | None = None) -> str:
     """Anzeigebild einmal verlustfrei ablegen (PNG, atomar); ``""`` bei
-    Erfolg, sonst der Grund. Läuft im Thumbnail-Pool (picklebar)."""
+    Erfolg, sonst der Grund. Läuft im Thumbnail-Pool (picklebar). Ein
+    JXR-Bild trägt als Textfelder, woraus es entstand (``file_hash``)."""
+    if jxr.is_jxr_file(source):
+        img, reason = _render_jxr(source, tone)
+        if img is None:
+            return reason
+        try:
+            _save_jxr_png(img, source, dest, tone, file_hash)
+        except OSError as exc:
+            return f"JPEG XR: {exc.__class__.__name__}: {exc}"
+        return ""
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + f".tmp{os.getpid()}")
     try:
@@ -384,6 +500,8 @@ def warm_thumbnails(
     progress=None,
     pool: "ThumbPool | None" = None,
     retry_failed: bool = False,
+    tone: jxr.Tone = jxr.Tone(),
+    preview_cache: str | Path | None = None,
 ) -> dict:
     """Fehlende Thumbnails erzeugen; Fehlgeschlagene nur auf Wunsch erneut.
 
@@ -485,13 +603,16 @@ def warm_thumbnails(
         if pool is None:
             finish_one(
                 file_hash, issue_path,
-                ok=generate_thumbnail(source, dest, media_kind=media_kind, size=size),
+                ok=generate_thumbnail(source, dest, media_kind=media_kind, size=size,
+                                      tone=tone, preview=jxr_preview_file(
+                                          preview_cache, file_hash, tone)),
             )
             done += 1
             report()
             conn.commit()
         else:
-            batch.append((pool.submit(file_hash, source, dest, media_kind=media_kind, size=size),
+            batch.append((pool.submit(file_hash, source, dest, media_kind=media_kind, size=size,
+                                      tone=tone, preview_cache=preview_cache),
                           file_hash, issue_path))
             # Schubgröße je Runde neu: Leise/Normal wirkt mitten im Lauf (ADR 0093).
             if len(batch) >= pool.workers * 2:

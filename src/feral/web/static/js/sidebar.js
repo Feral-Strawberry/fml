@@ -23,11 +23,8 @@ import { emit, on } from "./main.js";
 import { serverMsg } from "./servermsg.js";
 import { viewKinds } from "./libview.js";
 
-// TODO(Feral Strawberry) — bewusst offengehalten:
-// Roh-Modellwerte aus den Metadaten (z. B. "sd_xl_base_1.0.safetensors")
-// auf lesbare Sidebar-Namen mappen. Vorschlag: Liste von [RegExp, Label]-
-// Paaren durchprobieren; unbekannte Werte unverändert zurückgeben.
-// Erster Schritt (Feral Strawberry, 2026-07-09): Modelldatei-Endungen abstreifen —
+// Lesbare Sidebar-Namen für Roh-Modellwerte aus den Metadaten (z. B.
+// "sd_xl_base_1.0.safetensors"): Modelldatei-Endungen abstreifen —
 // ComfyUI führt ".safetensors" & Co. mit, A1111 nicht; ohne Anzeigewert.
 // Varianten-Mapping bewusst NICHT (ein Buchstabe Unterschied ist oft
 // bedeutsam bei ~60 Checkpoints). Nur Anzeige: Tooltip (title) und
@@ -343,6 +340,7 @@ export function initSidebar() {
   // Audio-Modul (ADR 0083/0084): die Zeile „Audio" der Medienart gibt es nur
   // mit Modul; Popover/Tipphilfe (advanced.js) hören auf 'audio-enabled'.
   let audioEnabled = null;
+  let clipEnabled = null;
   const rankingsBox = nav.querySelector("#sbRankings");
   let arenasSeq = 0;
   const renderArenas = (rankings) => {
@@ -436,6 +434,10 @@ export function initSidebar() {
       if (audioEnabled !== !!s.audio) {
         audioEnabled = !!s.audio;
         emit("audio-enabled", { enabled: audioEnabled });
+      }
+      if (clipEnabled !== !!s.clip) {
+        clipEnabled = !!s.clip;
+        emit("clip-enabled", { enabled: clipEnabled });
       }
     }
     if (models.status === "fulfilled") {

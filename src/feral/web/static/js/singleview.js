@@ -380,7 +380,7 @@ export function initSingleView() {
   // Cover (#165): ein neues Cover zeichnet die Bühne neu; ohne Cover verlässt
   // der Song die Galerie — wie beim Ablehnen zurück in die Übersicht.
   on("cover-changed", (d) => {
-    if (!open || !cur || cur.hash !== d.hash) return;
+    if (!open || !cur || !(d.hashes || [d.hash]).includes(cur.hash)) return;
     if (d.manual?.cover) show(cur.hash, cur.index); else close();
   });
 

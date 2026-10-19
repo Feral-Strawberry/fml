@@ -274,7 +274,7 @@ img.pe-icon {
 }
 #sort:hover { color: var(--text); border-color: var(--accent-line); }
 .sortarrow { color: var(--accent); font-size: 11px; }
-#sortmenu {
+#sortmenu, #rowsmenu {
   position: fixed;
   z-index: 60;
   min-width: 170px;
@@ -287,7 +287,7 @@ img.pe-icon {
   flex-direction: column;
   gap: 1px;
 }
-#sortmenu[hidden] { display: none; }
+#sortmenu[hidden], #rowsmenu[hidden] { display: none; }
 .sortrow {
   display: flex;
   justify-content: space-between;
@@ -734,7 +734,6 @@ img.pe-icon {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
 }
 .audioglyph { font-size: 64px; line-height: 1; color: var(--faint); }
-.audiodur { font-family: var(--mono); font-size: 12px; color: var(--dim); }
 .audiostage .aplayer { width: min(100%, 640px); }
 .ppreview:has(.aplayer) { aspect-ratio: auto; cursor: default; }
 /* Audioansicht: die Zeile ist der Player — kein zweiter im Panel (#162) */
@@ -1095,8 +1094,14 @@ body.view-audio #panel .ppreview .audiostage.hascover { padding-bottom: 14px; }
 #pFields .mfhand { background: none; border: none; padding: 0; font-size: 10px; color: var(--accent); white-space: nowrap; cursor: pointer; }
 #pFields .mfhand[hidden] { display: none; }
 #pFields .mfnote { margin-top: 6px; font-size: 11px; }
+/* Songtext von Hand (ADR 0106): Zeile unter den Musik-Angaben, Knopf öffnet die Ansicht. */
+.lyedrow { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 6px; align-items: center; margin-top: 8px; }
+.lyedrow .mflabel { font-size: 11px; color: var(--dim); }
+.lyedstate { font-size: 11px; color: var(--faint); }
+.lyedstate.manual { color: var(--accent); }
+#pLyEdit { font-size: 11px; padding: 2px 8px; }
+#pLyEdit:hover { border-color: var(--accent-line); color: var(--accent); }
 .multihint { margin: 10px 14px 0; }
-.badgechip.origin-manuell { color: #d9a441; border-color: #d9a44155; }
 
 /* ---------- Verstellbare Panel-Trenner ---------- */
 .vsplit {
@@ -1173,9 +1178,38 @@ body.panel-folded #body > #panel, body.panel-folded #splitR { display: none; }
 .bulkrow .sdname { flex: 1; min-width: 0; }
 .bulkrow textarea.sdname { resize: vertical; font-family: inherit; }
 .bulkrow .sdhint { flex: none; max-width: 45%; }
-/* Austausch (ADR 0101): zwei Häkchen und der Export-Knopf in einer Reihe */
-.bulkrow .bulkexparts { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.bulkrow .bulkexparts label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--dim); white-space: nowrap; }
+/* Zwei Abschnitte (ADR 0103 Punkt 12): „Treffer ändern" samt Anwenden und
+   „Export" (ändert hier nichts), jeder mit Trennlinie und Überschrift. */
+.bulksec { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px; }
+.bulksechead { font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+.bulksechead span { margin-left: 10px; letter-spacing: 0; text-transform: none; color: var(--faint); }
+.bulksec > .sdactions { margin-left: 138px; }
+.bulkfoot > .sdactions { margin-left: 0; justify-content: flex-end; }
+/* Block-Zeile: Beschriftung links, rechts die Bedienelemente und DARUNTER
+   ihr Hinweis — so gehört jeder Hinweis sichtbar zu seiner Funktion. */
+.bulkrow.bulkblock { display: grid; grid-template-columns: 128px minmax(0, 1fr); column-gap: 10px; row-gap: 2px; align-items: start; }
+.bulkrow.bulkblock > label { width: auto; line-height: 28px; }
+.bulkrow.bulkblock .bulkctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 28px; }
+.bulkrow.bulkblock .bulkctl label { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text); white-space: nowrap; cursor: pointer; }
+.bulkrow.bulkblock .sdhint { grid-column: 2; max-width: none; }
+/* Export: je Funktion ein Kasten — Titel, Erklärung und Optionen links,
+   rechts der eine Knopf dieser Funktion. */
+.bulkcard {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 10px 12px; background: var(--panel2);
+  border: 1px solid var(--border); border-radius: 10px;
+}
+.bulkcardtext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.bulkcardtext b { font-size: 12.5px; font-weight: 600; }
+.bulkcardtext .bulkctl { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 2px; }
+.bulkcardtext .bulkctl label { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; white-space: nowrap; cursor: pointer; }
+.bulkcard > button {
+  flex: none; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); cursor: pointer; padding: 6px 12px; font-size: 12px;
+}
+.bulkcard > button:hover:not(:disabled) { border-color: var(--accent-line); }
+.exptarget, .exppath { overflow-wrap: anywhere; }
+.bulkbox button:disabled { opacity: .45; cursor: default; }
 .bulkstars { display: flex; flex: none; gap: 1px; }
 .bstar {
   background: none;
@@ -1200,8 +1234,6 @@ body.panel-folded #body > #panel, body.panel-folded #splitR { display: none; }
 }
 .sdactions button:hover { border-color: var(--accent-line); }
 .sdactions .sdprimary { border-color: var(--accent-line); color: var(--accent); }
-.sdactions .sddelete { color: var(--dim); margin-left: auto; }
-.sdactions .sddelete:hover, .sdactions .sddelete[data-armed] { color: var(--accent); border-color: var(--accent-line); }
 
 
 /* ---------- Einzelbildansicht (Arbeitsansicht: Zoom + breites Panel) ---------- */
@@ -1660,6 +1692,9 @@ body.view-audio #gridwrap { padding: 0; scrollbar-gutter: stable; }
   box-shadow: inset 0 0 0 1px var(--border);
   white-space: nowrap;
 }
+/* Im Panel höchstens ein Drittel der Zeile, Rest gekürzt (ganzer Name im
+   Tooltip): ein langes Etikett quetschte den Text sonst auf ein Zeichen (#251). */
+#pComs .com .csrc { flex: 0 1 auto; max-width: 33%; overflow: hidden; text-overflow: ellipsis; }
 #pComs .com .ctext { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 #pComs .com .ctext input { width: 100%; padding: 2px 6px; font-size: 12px; }
 #pComs .com .x { flex: none; margin-left: auto; background: none; border: 0; color: var(--faint); font-size: 10px;
@@ -1667,6 +1702,9 @@ body.view-audio #gridwrap { padding: 0; scrollbar-gutter: stable; }
 #pComs .com:hover .x { visibility: visible; }
 /* Wellenfläche auf der gemeinsamen Zeitachse (ADR 0087); Klick springt. */
 .arow .wv { position: relative; margin: 6px 0 0 38px; height: var(--wh, 18px); cursor: pointer; }
+/* Gestauchter Song (ADR 0109): länger als die gedeckelte Achse, » im rechten Polster. */
+.arow .wv .sqz { position: absolute; right: -12px; top: 50%; transform: translateY(-50%); font-size: 12px;
+  line-height: 1; color: var(--dim); pointer-events: none; }
 /* Vergleich in der Liste (A7 #164, Optik-Referenz A0): nur die markierten
    Songs, höhere Wellen, Kommentartexte stehen über der Welle.
    Feste Höhe = Polster 28 + Kopfzeile 26 + Beschriftungsraum 75 + Wellenfläche;
@@ -1715,6 +1753,42 @@ body.list-compare #pbar { display: none; }
   #grid.list.info .arow .rtop, #listhead.info { --lcols: 28px minmax(0, 1.4fr) minmax(0, 1fr) 54px 64px 26px; }
   .arow .c-album, #listhead.info .c-album { display: none; }
 }
+
+/* Fundort-Zeilen und Ordnergruppen (ADR 0108): Spalte „Ordner" ohne
+   Gruppierung, Ordnerkopf als eigene Zeile in Zeilenhöhe, ⧉N an Songs mit
+   mehreren Fundorten. */
+#grid.list.info.locs .arow .rtop, #listhead.info.locs {
+  --lcols: 28px minmax(120px, 1.4fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) 30px 40px minmax(0, .8fr) 54px 64px 26px; }
+@container (max-width: 740px) {
+  #grid.list.info.locs .arow .rtop, #listhead.info.locs {
+    --lcols: 28px minmax(120px, 1.4fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) 54px 64px 26px; }
+}
+@container (max-width: 620px) {
+  #grid.list.info.locs .arow .rtop, #listhead.info.locs {
+    --lcols: 28px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) 54px 64px 26px; }
+}
+.arow .c-folder { font-family: var(--mono); font-size: 10.5px; }
+.arow .rname .rlocs { flex: none; margin-left: 6px; font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.tile.arow.agroup { background: var(--panel2); cursor: default; }
+.tile.arow.agroup:hover { background: var(--panel2); }
+.arow .gtop { display: flex; align-items: center; gap: 8px; min-width: 0; height: 26px; }
+.arow .gtop .lockind { flex: none; padding: 0 5px; border-radius: 3px; font-size: 9.5px;
+  text-transform: uppercase; letter-spacing: .04em; background: var(--panel); color: var(--dim); }
+.arow .gpath { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--mono); font-size: 11.5px; color: var(--text); }
+.arow .gpath a.seg { color: inherit; text-decoration: none; }
+.arow .gpath a.seg:hover { text-decoration: underline; }
+.arow .gpath a.seg.pre { color: var(--faint); }
+.arow .gpath .gsep { margin: 0 5px; color: var(--faint); }
+.arow .gpath .glib { color: var(--dim); }
+.arow .gerr { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 11px; color: var(--accent); }
+.arow .gcount { flex: none; margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+.arow .gfilter { flex: none; width: 24px; height: 22px; padding: 0; border-radius: 6px; font-size: 13px; line-height: 1; }
+.sortrow .sortcheck { min-width: 1ch; color: var(--accent); }
+#rowsmenu .menuhead { padding: 4px 10px 2px; font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--faint); }
+#density button .caret { margin-left: 2px; font-size: 9px; }
+#density button .caret.off { visibility: hidden; }   /* Platz bleibt: die Leiste springt nicht */
 
 /* ---------- Cover eines Songs (Audio A8, #165, ADR 0090) ---------- */
 /* Galerie-Kachel des finalisierten Songs: Vorschaubild des Coverbilds, ♪ + Dauer, ▶ */
@@ -1773,3 +1847,169 @@ body.list-compare #pbar { display: none; }
 }
 .helpclose { width: 30px; height: 30px; padding: 0; }
 .helpframe { flex: 1; width: 100%; border: 0; background: #fff; }
+
+/* ---------- Ausschnitt (Modul, ADR 0105): Ansicht über allen Ebenen ---------- */
+.pclip { font-size: 11px; padding: 2px 8px; margin-left: auto; }
+.pclip:hover:not(:disabled) { border-color: var(--accent-line); color: var(--accent); }
+.pclip:disabled { opacity: .45; cursor: default; }
+#clip {
+  position: fixed; inset: 0; z-index: 65;   /* über Einzelansicht (60), unter Dialogen */
+  background: var(--bg); color: var(--text);
+  display: flex; flex-direction: column;
+}
+#clip[hidden] { display: none; }
+#clip .lphead { border-bottom: 1px solid var(--border-soft); }
+#clip .cltitle { font-weight: 600; }
+#clip .lpmeta { color: var(--faint); }
+#clip #clClose {
+  background: none; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); cursor: pointer; padding: 4px 10px;
+}
+#clip .lpfoot {
+  flex: none; display: flex; justify-content: center; gap: 16px;
+  padding: 8px 20px; color: var(--faint); font-size: 11px;
+  border-top: 1px solid var(--border-soft);
+}
+.clbody {
+  flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column;
+  gap: 12px; padding: 16px 24px; width: min(100%, 1100px); margin: 0 auto;
+}
+.clstage {
+  flex: 1; min-height: 120px; display: flex; align-items: center; justify-content: center;
+  background: var(--panel2); border-radius: 10px; overflow: hidden; cursor: pointer;
+}
+.clstage video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.clstage.audio { flex: none; height: 180px; background: none; }
+.clstage.audio .audiocover { height: 100%; aspect-ratio: 1; }
+.cltl { display: flex; align-items: center; gap: 10px; }
+.cltl .tm { font-family: var(--mono); font-size: 11px; color: var(--dim); flex: none; }
+.cltrack {
+  position: relative; flex: 1; height: 44px; border-radius: 6px; cursor: pointer;
+  background: var(--panel2); box-shadow: inset 0 0 0 1px var(--border-soft);
+  touch-action: none; user-select: none;
+}
+.cltrack.wave { height: 96px; }
+.cltrack canvas { position: absolute; left: 0; top: 0; height: 100%; display: block; pointer-events: none; }
+.clrange {
+  position: absolute; top: 0; bottom: 0; min-width: 2px; cursor: grab;
+  background: var(--accent-dim); box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.clrange:active { cursor: grabbing; }
+.clh {
+  position: absolute; top: -3px; bottom: -3px; width: 12px; cursor: ew-resize;
+  display: flex; justify-content: center;
+}
+.clh::after { content: ""; width: 4px; border-radius: 2px; background: var(--accent); opacity: .55; }
+.clh.a { left: -6px; }
+.clh.b { right: -6px; }
+.clrange[data-active="a"] .clh.a::after, .clrange[data-active="b"] .clh.b::after { opacity: 1; }
+.clph {
+  position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px;
+  background: var(--text); pointer-events: none;
+}
+.clrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
+.clrow .lab { width: 64px; color: var(--dim); flex: none; }
+.clrow label { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
+.clrow input:not([type]) { width: 78px; font-family: var(--mono); text-align: right; }
+.clrow .pbtn {
+  width: 30px; height: 30px; padding: 0; border-radius: 50%; display: inline-flex;
+  align-items: center; justify-content: center; font-size: 11px; color: var(--text); background: var(--panel2);
+}
+.clrow .clpos { min-width: 64px; }
+.clrow #clTarget { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--dim); }
+.clout { display: inline-flex; gap: 16px; flex-wrap: wrap; }
+.clout label { color: var(--text); }
+.clmsg { color: var(--accent); }
+.clrow .primary { border-color: var(--accent-line); color: var(--accent); padding: 6px 16px; }
+.clrow .primary:disabled { opacity: .45; cursor: default; }
+.clresults { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--dim); }
+.clres { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.clres.warn, .clres .clnote { color: var(--accent); }
+.clfile { font-family: var(--mono); font-size: 11px; }
+
+/* ---------- Songtext von Hand (ADR 0106): Ansicht über allen Ebenen ---------- */
+#lyedit {
+  position: fixed; inset: 0; z-index: 65;   /* wie der Ausschnitt: über Einzelansicht, unter Dialogen */
+  background: var(--bg); color: var(--text);
+  display: flex; flex-direction: column;
+}
+#lyedit[hidden] { display: none; }
+#lyedit .lphead { border-bottom: 1px solid var(--border-soft); }
+#lyedit .cltitle { font-weight: 600; }
+#lyedit #lyClose {
+  background: none; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); cursor: pointer; padding: 4px 10px;
+}
+#lyedit .pbtn {
+  width: 30px; height: 30px; padding: 0; border-radius: 50%; display: inline-flex;
+  align-items: center; justify-content: center; font-size: 11px; color: var(--text); background: var(--panel2);
+}
+#lyedit .lpfoot {
+  flex: none; display: flex; justify-content: center; gap: 16px;
+  padding: 8px 20px; color: var(--faint); font-size: 11px;
+  border-top: 1px solid var(--border-soft);
+}
+.lybody { flex: 1; min-height: 0; overflow: auto; padding: 12px 24px; }
+/* Liste mit Uhr links daneben (#286): die Abspielzeit steht groß und fest
+   in der senkrechten Mitte der Ansicht, auf Höhe der Liste links. Sie
+   wandert nicht mit der Zeile: Das ließ sie beim Anhalten aus dem Blick
+   springen. */
+.lystage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.lywrap { width: min(100%, 1060px); margin: 0 auto; padding-left: 230px; }
+.lylist { display: flex; flex-direction: column; }
+.lyclock {
+  position: absolute; top: 50%; left: max(24px, calc((100% - 1060px) / 2)); width: 210px; z-index: 1;
+  transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: flex-end; gap: 12px;
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-family: var(--mono); color: var(--dim);
+}
+.lyclock span { font-size: 40px; font-weight: 600; letter-spacing: -.5px; }
+.lyclock i { font-style: normal; font-size: 20px; line-height: 1; }
+.lyclock.playing { color: var(--accent); }
+@media (max-width: 900px) {
+  .lywrap { padding-left: 0; }
+  .lyclock { position: static; transform: none; width: 100%; justify-content: center; margin: 8px 0; }
+}
+
+.lyrow { display: grid; grid-template-columns: 22px 76px minmax(0, 1fr) 24px; gap: 6px; align-items: center; border-radius: 6px; }
+.lyrow.on { background: var(--accent-dim); }
+.lyplay { background: none; border: none; padding: 0; font-size: 10px; color: var(--faint); cursor: pointer; }
+.lyplay:disabled { visibility: hidden; }
+.lyplay:hover { color: var(--accent); }
+.lytime {
+  width: 100%; background: none; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px;
+  text-align: right; font-family: var(--mono); font-size: 11px; color: var(--dim); outline: none;
+}
+.lytime:hover:not(:disabled) { border-color: var(--border); }
+.lytime:focus { border-color: var(--accent-line); background: var(--panel2); color: var(--text); }
+.lytime:disabled { visibility: hidden; }
+.lytime::placeholder { color: var(--faint); }
+.lytime.est { font-style: italic; color: var(--faint); }
+.lytime.bad { color: var(--accent); font-weight: 600; font-style: normal; }
+.lytext {
+  width: 100%; background: none; border: 1px solid transparent; border-radius: 6px;
+  color: var(--text); font: inherit; font-size: 13.5px; padding: 4px 8px; outline: none;
+}
+.lytext:focus { border-color: var(--accent-line); background: var(--panel2); }
+.lyrow.sec .lytext { font-weight: 600; color: var(--accent); }
+.lydel { background: none; border: none; padding: 0; color: var(--faint); cursor: pointer; visibility: hidden; }
+.lyrow:hover .lydel, .lyrow:focus-within .lydel { visibility: visible; }
+.lydel:hover { color: var(--accent); }
+.lybar {
+  flex: none; display: flex; align-items: center; gap: 10px; font-size: 12px;
+  padding: 10px 24px; border-top: 1px solid var(--border-soft);
+}
+.lynote { color: var(--dim); }
+.lybar .primary { border-color: var(--accent-line); color: var(--accent); padding: 6px 16px; }
+.lybar .primary:disabled { opacity: .45; cursor: default; }
+#lyRestore[hidden] { display: none; }
+/* Nachfrage beim Schließen: dort, wo man geklickt hat (neben ✕). */
+.lyleave {
+  display: inline-flex; align-items: center; gap: 8px; padding: 3px 4px 3px 12px;
+  border: 1px solid var(--accent-line); border-radius: 8px; background: var(--accent-dim);
+  color: var(--accent); font-size: 13px; font-weight: 600;
+}
+.lyleave[hidden] { display: none; }
+.lyleave button { font-size: 12px; padding: 4px 10px; }
+.lyleave .primary { border-color: var(--accent-line); color: var(--accent); }

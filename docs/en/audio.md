@@ -7,8 +7,9 @@ you only manage images and videos, nothing changes for you.
 What the module does, in the order of this page: a dedicated **audio
 view** as a list with a three-colour waveform, a **player** with loudness
 matching, "Play all" and a playback bar, **time comments** at points in a
-song, **comparing** two to six versions, and **covers** that bring
-finished songs into the gallery. On top of that fml reads the metadata of
+song, **music details** and **lyrics by hand**, **comparing** two to six
+versions, and **covers** that bring finished songs into the gallery. The
+list can show a collection **by folder**. On top of that fml reads the metadata of
 Suno, ComfyUI music and your own recordings, measures loudness and
 waveform, and also searches the lyrics.
 
@@ -100,14 +101,24 @@ line up visibly. The part already played is bright, the red line is the
 row's **playhead**. A click into the waveform plays the row from that
 spot.
 
+The time axis reaches **7 minutes at most**. A longer song, such as a
+concert recording, fills its row **compressed** and carries a **»** at the
+right edge; the wave's tooltip gives the true length ("Compressed: 2:00:00
+on the width of 7:00"), as does the "Duration" column. The ruler then only
+applies to the other rows. A click into a compressed wave still jumps to
+the right spot of the song. This way a single recording does not make the
+other waves tiny.
+
 **Controls:**
 
 | Key / mouse | Effect |
 |---|---|
 | ↑ / ↓ | change row |
 | Alt+↑ / Alt+↓ | move the row one place (sort "Manual" only, see [Your own order](#your-own-order-of-a-saved-search)) |
-| Space, ▶, double-click | play / pause (Space also right after clicking a button such as ⏮ or ≈ Loudness) |
-| ← / → | move the row's playhead 5 seconds back / forward (with Shift 1 second) |
+| Space | pause / resume the song in the playback bar, whichever row is selected; with an empty bar, the selected row plays (also right after clicking a button such as ⏮ or ≈ Loudness; in input fields it stays a space) |
+| Enter | play / pause the selected row |
+| ▶, double-click | play / pause this row |
+| ← / → | move the song in the playback bar 5 seconds back / forward (with Shift 1 second); with an empty bar, the playhead of the selected row |
 | click into the waveform | play from that spot |
 | K | time comment at the row's playhead |
 | click on a comment pin ▲ | play from the comment |
@@ -120,8 +131,11 @@ spot.
 Always **exactly one** row plays, but **every row has its own playhead**.
 Starting another pauses the first; it remembers its position, the next ▶
 continues there. This way four versions can be heard chorus against
-chorus: set each one to its chorus once, then ▶ in turn. The arrow keys
-move the playhead of the selected row even while it is not playing.
+chorus: set each one to its chorus once, then ▶ in turn. With the
+keyboard: ↓ to the next version, Enter, ←/→ to the chorus. Space and ←/→
+always mean the song in the playback bar, like the media keys of the
+keyboard; only with an empty bar (and while comparing, where the rows are
+the player) do they mean the selected row.
 
 **Wave or details.** The control **☰ S M L** at the top of the header
 sets the style of the list. Exactly one button is lit:
@@ -149,6 +163,41 @@ comments. **C** compares from "Details" as well: comparing always shows
 waveforms, after Esc the list is flat again. When the middle gets narrow,
 genre, year and no. give way first, then the album. The browser remembers
 the choice.
+
+**Locations and folders.** When cataloguing, files stay in their folders,
+and the same song can lie in several places. In "Details", ☰ becomes the
+button **☰▾**; a click on it opens a menu that chooses how the list forms
+its rows:
+
+- **By folder** (default): one row per location, arranged by folder, with
+  a heading per folder: the library first as one folder, then the sources
+  (the path starts at the name of the source), external folders last with
+  their full path. Subfolders follow right below their folder; the part
+  shared with the heading before is dimmed. Inside each folder the chosen
+  sort order applies. If everything lies in a single folder (say, only in
+  the library), there is no heading.
+- **Per location:** a song appears once for every place it lies in, with
+  the folder in a column of its own, "Folder". Together with
+  **Duplicates** in the sidebar and sorting by title, every duplicate
+  appears with all of its folders one below the other.
+- **Per song:** one row per song, wherever it lies.
+
+In a folder heading, clicking a folder name opens that folder in the file
+manager, like the location line in the panel. **⌕** on the far right
+shows only this folder including its subfolders (the search criterion
+`folder: "<path>"`, in the library `location: library`); ⌕ again, or ✕
+on the criterion, shows everything again. While a `folder:` or
+`location:` criterion is set, the list shows only the locations that
+match it. If a song lies in further places too, **⧉** with the number of
+its locations appears next to the title.
+
+Selecting, rating, rejecting and playing still apply to the song: a click
+marks all of its rows, "Play all" plays every song once, ↑/↓ skip the
+headings. The hit count at the top counts songs, the locations in
+brackets. Reordering by dragging under "Manual" is not available here.
+In "Wave" and in the gallery the list shows one row per song; the
+browser remembers the choice at ☰▾. The list does not check whether a file still
+exists at its location; the panel shows that.
 
 **▶ Play all** (top right in the audio view) plays the whole list in the
 current sort order, every song from the start, like a CD. The order is
@@ -255,6 +304,9 @@ three places:
 - **In the detail panel** (GENERATION → Lyrics), the lines follow along
   during playback; clicking a line jumps there. If you do not need that,
   collapse the section.
+
+If the lyrics are wrong or missing, they can be corrected or added by
+hand, see [Lyrics by hand](#lyrics-by-hand).
 
 Songs that were already in the catalog before fml 2026.10 are fetched once
 automatically (task "Fetch timed lyrics" at the first start with the
@@ -403,7 +455,8 @@ way as the time comments (see
 
 **Export:** select songs or narrow down a search, open the **batch
 action**, tick **Music details** in the "Exchange" row (and **Time
-comments** too if wanted) and click **Export**. The file contains **only
+comments** and **Lyrics** too if wanted, see
+[Exchanging lyrics with another fml](#exchanging-lyrics-with-another-fml)) and click **Save exchange file**. The file contains **only
 details set by hand**, never values from the tags: those are in the music
 file anyway.
 
@@ -423,6 +476,102 @@ Imported details are marked **✎ by hand** in the panel, the tooltip names
 the origin. Running the same import twice changes nothing. Songs are
 found by the file itself as with the comments, Suno songs if need be by
 their Suno song ID (only with the checkbox).
+
+## Lyrics by hand
+
+Suno's lyrics are not always right, and your own songs often bring none.
+Under **CURATED**, a single selected song shows the row **Lyrics**: it
+says where the lyrics in effect come from (**from the file**, **✎ by
+hand** or **none**) and opens the view **Edit lyrics** with **edit** or
+**add**.
+
+The view shows the lyrics line by line, with ▶ and the time on the left:
+
+- **Change the wording:** click into the line and type.
+- **Insert a line:** Enter splits the line at the cursor. **Join:**
+  Backspace at the start of a line appends it to the line above, Delete at
+  the end pulls up the next one. **Delete:** the ✕ on the right. ↑ and ↓
+  move between lines.
+- **Sections:** a line consisting only of square brackets (`[Chorus]`,
+  `[Guitar Solo]`) is a section mark.
+- **Add your own lyrics:** paste the whole text; every line becomes a
+  line, empty lines separate verses.
+- **Times:** if the song has times, a new line gets the middle between its
+  neighbours. Such estimated times are shown in italics. ▶ in front of a
+  line plays from just before it, ▶ at the top plays and pauses. Songs without
+  times stay without; then the lines do not follow along during playback
+  (note at the bottom left). Setting times: see
+  [Setting times and tapping along](#setting-times-and-tapping-along).
+- **Save** with the button or ⌘/Ctrl+S. ✕ or Esc closes. If there are
+  unsaved changes, **Unsaved changes** appears next to it with **Save**
+  (saves and closes), **Discard** and **Cancel** (keep editing, the cursor
+  returns to where it was). Esc then means Cancel; only the button
+  discards.
+
+What is saved is the **whole version**: from then on it applies instead of
+the lyrics from the file; on the first save fml takes over all lines with
+their times. Estimated solo sections (see
+[timed lyrics](#what-fml-reads-from-music)) then stay fixed where they
+are. Everywhere, lyrics by hand count like lyrics from the file: in the
+player bar, in the panel, as sections on the waveform, in full-text search
+and in the filter "with lyrics". **Re-interpret** and a re-scan leave them
+in place; if the song is rejected, they go with it.
+
+**The file stays unchanged.** To go back to the lyrics from the file, use
+**Restore the file's lyrics** in the view; the button asks once
+("Really?") because it discards the version by hand.
+
+Up to 2000 lines of at most 500 characters each are allowed; the times run
+in order and lie within the song.
+
+### Setting times and tapping along
+
+Every line has a **time field** on the left. To the left of the list, the
+**playback time** is shown large, fixed in the middle of the view; clicking
+it plays or pauses. What a key does depends only on which field the cursor is in.
+
+- **Tap along:** click into the time field of the first line, **Space**
+  starts the song, then **Ctrl+Enter** (Mac: **⌘+Enter**) at every line.
+  That enters the current playback time and jumps to the next line; empty
+  lines are skipped. Section marks (`[Chorus]`) are tapped too, ideally
+  where the section begins.
+- **Correct a line:** go to the line with **↑** and **↓**, bring the song to
+  its start (paused or playing), **Ctrl/⌘+Enter**.
+- **Type:** write the time into the field, such as `1:23.4`, `83.4` or
+  `83`, then **Enter**: that applies it and moves to the next line, as in a
+  spreadsheet. Leaving the field (↑/↓, Tab, click) applies it too.
+- **Remove:** **Delete** in the time field.
+- **Listen:** **▶** in front of the line plays from 1 s before its start,
+  so you hear whether the entry is right. The playing line is
+  highlighted.
+
+An invalid entry stays after Enter so you can correct it, with a note;
+when you leave the field, it is discarded and the old time stays. If a line starts before the line above it, its time
+turns red and **Save** is locked until the order is right again.
+
+The lines only follow along during playback once **every** line with text
+has a time. If you stop halfway and save, the times you set are kept; the
+note at the bottom left says how many are still missing. End times are not
+set: a line stays as long as it takes to sing it, roughly.
+
+### Exchanging lyrics with another fml
+
+Lyrics by hand travel in the same exchange file as comments and music
+details (see
+[Exchanging details with another fml](#exchanging-details-with-another-fml)).
+When exporting, tick **Lyrics**; the file contains **only lyrics set by
+hand** with their times, never the lyrics from the music file.
+
+When importing, the preview counts per song: **new** (no lyrics by hand
+here, taken over), **same** (skipped) or **differing** (different lyrics by
+hand here; the preview shows the first line that differs). Your own
+differing lyrics stay, unless **"Overwrite my own differing details"** is
+ticked. Lyrics are always taken over as a whole, never mixed line by line.
+Lyrics taken over carry **✎ by hand**; the tooltip in the view names the
+origin.
+
+An fml version older than this one reads exchange files with lyrics but
+leaves the lyrics out.
 
 ## Your own order of a saved search
 
@@ -540,6 +689,10 @@ These filters work regardless of the module:
 - **Sort "Album"** (`sort: album`) and **"Manual"** exist only in the
   audio view, see [Music collection](#music-collection-artist-album-genre)
   and [Your own order](#your-own-order-of-a-saved-search).
+- **`folder:`** (German `ordner:`) — the folder a location lies in,
+  including subfolders: `folder: Kiss_Tribute` matches every folder of
+  that name, `folder: "D:/Music/Kiss_Tribute"` exactly that path (see
+  [Locations and folders](#audio-view) and [Using the interface](gui.md)).
 
 Example: `type: audio duration: >120 sort: duration`.
 
@@ -560,7 +713,8 @@ rankings let the music keep playing.
 detail panel can do more. "View node graph" in the detail panel opens the
 loupe with the workflow for ComfyUI songs. The 📂 button in front of the
 preferred location in the detail panel (section Locations) shows the file
-selected in Finder/Explorer. Enter opens nothing in the audio view.
+selected in Finder/Explorer. In the audio view Enter opens no single
+view; it plays the selected row.
 
 **Playback bar.** As soon as a song plays, the bar appears at the bottom:
 ⏮ (within the first three seconds: the previous song of "Play all";
@@ -616,8 +770,9 @@ layer like ratings and tags; nothing is written into the file.
 **Adding** always happens at the playhead:
 
 - **K** in the audio view: for the selected row, at its own playhead
-  (which stays put even when the row isn't playing: move it with ←/→,
-  then press K). In the gallery, K means the song in the playback bar.
+  (which stays put even when the row isn't playing: start it with Enter,
+  move it with ←/→, then press K; with an empty playback bar ←/→ move it
+  without playing). In the gallery, K means the song in the playback bar.
 - **💬** in the playback bar: for the song that is playing.
 - **＋ Comment at the playhead** in the detail panel.
 
@@ -646,7 +801,7 @@ Two people with their own fml each can send each other comments as a
 file (mail, USB stick, cloud folder).
 
 **Export:** in the audio view select the songs or narrow down a search,
-open the **batch action** and click **Export** in the "Exchange" row
+open the **batch action** and click **Save exchange file** in the "Exchange" row
 (with "Time comments" ticked). This creates a file
 `fml-exchange-YYYY-MM-DD.json` with all comments of these songs. Nothing
 changes here. The same file can also carry the music details set by
@@ -662,6 +817,9 @@ Import exchange file**, in three steps:
    how many are already there, and which songs don't exist here.
 3. **Take over.** Every imported comment carries its origin as a small
    label (in the panel, on the pin, when it fades in).
+
+The "Take over" button stays disabled as long as there is nothing to take
+over or the origin is missing. The reason is shown right below it.
 
 **How fml finds the songs:** by the file itself (its hash). A file that
 was copied, zipped or sent unchanged is found on any computer. If
@@ -680,12 +838,15 @@ sent back and forth don't double up.
 "fml-exchange"` and `"version": 1`; per song `file_hash`, `name`
 (only as a hint), `duration`, `suno_ids` if present, plus optionally the
 list `comments` with `at_ms` (position in milliseconds), `text`,
-`created_at`, `updated_at` and the section `fields` with the music
-details set by hand (`{"artist": ["…"], "album": ["…"]}`); at the very
+`created_at`, `updated_at`, the section `fields` with the music
+details set by hand (`{"artist": ["…"], "album": ["…"]}`) and the list
+`lyrics` with the lyrics set by hand (`[[start_ms, end_ms, "line"], …]`,
+timings may be `null`); at the very
 top there are also `exported_at` and the list `items` with the songs.
 fml accepts at most 20 MB, 50,000 songs and 200,000 comments per file,
 2,000 comments per song and comment texts up to 2,000 characters; the
-music details follow the same limits as entering them by hand.
+music details and the lyrics (2,000 lines of up to 500 characters each)
+follow the same limits as entering them by hand.
 
 Files in the older format `fml-time-comments` (comments only, up to fml
 2026.10) can still be imported. The other way round, an older fml does
@@ -697,8 +858,8 @@ For the shortlist: **mark 2 to 6 songs** (Shift or ⌘/Ctrl click) and press
 **C** or click **⇆ Compare** at the top right. The list **narrows down to
 these songs** and enlarges the rows: a taller waveform, and the **time
 comments stand as text** above the wave (two close together are stacked).
-The time axis is now the longest of the compared songs, so the waves use
-the full width. With more than six marked songs the button is disabled.
+The time axis is now the longest of the compared songs (7 minutes at
+most, as in the list), so the waves use the full width. With more than six marked songs the button is disabled.
 
 - **Match loudness** is **always on first** while comparing, so the louder
   version does not win. The switch at the top right toggles it for this
@@ -707,8 +868,8 @@ the full width. With more than six marked songs the button is disabled.
   while comparing, leaving more room for waves and comments. Set tempo and
   the A–B loop in the bar beforehand; the tempo keeps applying while
   comparing. After Esc the bar is back.
-- **Works like the list:** ↑/↓ changes the row, space plays, ←/→ moves the
-  playhead, 1 to 5 rates, **Delete rejects**, K adds a comment, tags and
+- **Works like the list:** ↑/↓ changes the row, space or Enter plays the
+  selected row, ←/→ moves its playhead (the bar is hidden, after all), 1 to 5 rates, **Delete rejects**, K adds a comment, tags and
   notes in the detail panel. Only the current row is selected: a rating
   hits only that row.
 - **Rejected songs** leave the comparison at once; the row below moves up.
@@ -742,6 +903,14 @@ and expressions like `model: flux` work too. Click an
 image, then **Set as cover** (or double-click the image). Tip: give the
 artwork the same tag as the song when you generate it.
 
+**One cover for several songs** (say a whole album, or every take of a
+song): select the songs with Ctrl/⌘ or Shift. The detail panel then shows
+**🖼 Set cover for selection …** and **Remove cover from selection**. The
+dialog reads “Cover for N songs”, starts with the tags all selected songs
+have in common, and says up front how many of them already have a cover:
+they get the new one. Images and videos in the selection are left alone.
+Removing works on all songs of the selection as well.
+
 From then on the cover is the song's face: it sits **at the top of the
 detail panel** like an image's preview, in every view, with **✓ Finalised**
 and **Change …** / **Remove** right below it. The playback bar shows it
@@ -767,6 +936,11 @@ left of the title, and so do the system's media keys.
   images in the gallery or click through duels. Songs from Suno, ComfyUI &
   Co. do not show their bundled default picture; they only get a picture
   once you choose a cover. A chosen cover always takes precedence.
+- **Songs exported from another fml**: if someone chose a cover there and
+  exported the copy [with manual details](export.md#manual-details-in-the-copy),
+  the embedded picture is that cover, not a default picture. fml recognises
+  it by a mark inside the picture and shows it as a display picture, also
+  for songs from Suno & Co.
 - With the audio module switched off, the gallery does not show songs
   with a cover either; the covers stay stored.
 

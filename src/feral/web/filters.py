@@ -20,7 +20,7 @@ Fehler sind ``UserError`` (ein ``ValueError``) mit übersetzbarer Meldung
 ``strings.<lang>.js`` unter ``server``.
 
 Englische Grammatik-Aliasse (Block M.3/ADR 0054): ``parse()`` nimmt
-``file:``/``location:``, die Formatwerte ``portrait``/``square``/
+``file:``/``location:``/``folder:``, die Formatwerte ``portrait``/``square``/
 ``landscape``, die Sortier-Suffixe ``-asc``/``-desc`` sowie die Werte
 ``unknown`` (year:) und ``external`` (fundort:) zusätzlich an;
 ``serialize()`` bleibt kanonisch (heutige Schreibweise) — gespeicherte
@@ -82,11 +82,6 @@ SORT_DEFAULT_DIRECTION = {
 }
 
 
-def split_sort_key(key: str) -> tuple[str, str]:
-    """Sortierschlüssel → (Basis, effektive Richtung ``"auf"``/``"ab"``)."""
-    base, _, richtung = key.partition("-")
-    return base, richtung or SORT_DEFAULT_DIRECTION.get(base, "ab")
-
 # Grobe Seitenverhältnis-Klassen (Block 4S, Feral Strawberrys Wunsch zur Fehlersuche nach
 # dem Import): bewusst nur vier Eimer statt exakter Verhältnisse. Grenzen als
 # Multiplikation (nie durch height teilen — 0/NULL-sicher); die vier Klassen
@@ -134,7 +129,8 @@ FUNDORTE = ("library", "extern")
 # ``generator:`` ist der sprechende Alias der Facette „Generator" (ADR 0066)
 # auf das kanonische Feld ``tool``; ``codec:`` der kurze auf ``video_codec``
 # (Issue #71).
-_KEY_ALIASES = {"file": "datei", "location": "fundort", "generator": "tool",
+_KEY_ALIASES = {"file": "datei", "location": "fundort", "folder": "ordner",
+                "generator": "tool",
                 "codec": "video_codec", "type": "typ", "duration": "dauer",
                 "albumartist": INTERPRET}
 _FORMAT_ALIASES = {"portrait": "hochformat", "square": "quadratisch",
@@ -234,7 +230,7 @@ _TOKEN = re.compile(
 
 @dataclass(frozen=True)
 class Predicate:
-    kind: str            # 'field' | 'tag' | 'container' | 'has' | 'rating' | 'metric' | 'format' | 'mp' | 'year' | 'month' | 'fundort' | 'datei' | 'typ' | 'dauer' | 'text' | 'raw' | 'sort' | 'view' (intern)
+    kind: str            # 'field' | 'tag' | 'container' | 'has' | 'rating' | 'metric' | 'format' | 'mp' | 'year' | 'month' | 'fundort' | 'datei' | 'ordner' | 'typ' | 'dauer' | 'text' | 'raw' | 'sort' | 'view' (intern)
     negated: bool
     field: str = ""      # bei kind='field'/'metric'
     # ODER-Liste (wert, exakt) — ADR 0035. Ein Eintrag = das klassische
@@ -386,6 +382,13 @@ def parse(expression: str) -> list[Predicate]:
             # Midjourney-Bestände, auch in Arena-Ausdrücken): Teilstring
             # bzw. exakt ("…") auf den Dateinamen der Fundorte.
             preds.append(Predicate(kind="datei", negated=negated, values=tuple(values)))
+        elif key == "ordner":
+            # Ordner des Fundorts (#268): Name eines Ordners im Pfad, in
+            # "…" ein genauer Pfad, jeweils samt Unterordnern. Der Wert
+            # bleibt, wie getippt; Trenner normalisiert erst build_where.
+            if any(not _folder_value(v) for v, _ in values):
+                raise UserError("filterNeedsValue", field=key)
+            preds.append(Predicate(kind="ordner", negated=negated, values=tuple(values)))
         elif key == "fundort":
             # Library vs. Extern (ADR 0041, I2): liegt mindestens ein Fundort
             # des Items unter library.root? Englisch: location: external (M.3).
@@ -516,6 +519,55 @@ def parse_for_api(expression: str) -> dict[str, Any]:
     }
 
 
+def _folder_value(value: str) -> str:
+    """Wert eines ``ordner:`` mit ``/`` als Trenner, ohne Rand-Trenner —
+    leer, wenn nur Trenner getippt wurden."""
+    return value.replace("\\", "/").strip("/")
+
+
+def _folder_match(values: tuple[tuple[str, bool], ...]) -> tuple[str, list[Any]]:
+    """Bedingung eines ``ordner:`` über eine ``file_locations``-Zeile
+    (Spalte ``path``): ein Name trifft jede ganze Ordner-Komponente, ein
+    genauer Pfad (``"…"``) den Ordner samt Unterordnern; Werte per ODER."""
+    ors, params = [], []
+    for v, exact in values:
+        if exact:   # führende Trenner gehören zum Pfad (/…, UNC)
+            ors.append(f"{NORM_PATH} LIKE ? ESCAPE '\\'")
+            folder = v.replace("\\", "/").rstrip("/")
+            params.append(f"{_escape_like(folder)}/%")
+        else:
+            ors.append(f"'/' || {NORM_PATH} LIKE ? ESCAPE '\\'")
+            params.append(f"%/{_escape_like(_folder_value(v))}/%")
+    return (ors[0] if len(ors) == 1 else f"({' OR '.join(ors)})"), params
+
+
+def location_where(predicates: list[Predicate]) -> tuple[str, list[Any]]:
+    """Zeilenfilter der Fundort-Darstellungen (ADR 0108 Punkt 7): die
+    POSITIVEN ``ordner:``- und ``fundort:``-Chips als Bedingung über eine
+    ``file_locations``-Zeile (Spalte ``path``), UND-verknüpft. Alle anderen
+    Prädikate wählen Songs, nicht Fundorte. Leer = jeder Fundort."""
+    where, params = [], []
+    for p in predicates:
+        if p.negated:
+            continue
+        if p.kind == "ordner":
+            match, mparams = _folder_match(p.values)
+            where.append(match)
+            params.extend(mparams)
+        elif p.kind == "fundort":
+            prefix = library_like_prefix()
+            subs = []
+            for v, _ in p.values:
+                if prefix is None:
+                    subs.append("1=0" if v == "library" else "1=1")
+                else:
+                    subs.append(f"{'' if v == 'library' else 'NOT '}"
+                                f"{NORM_PATH} LIKE ? ESCAPE '\\'")
+                    params.append(prefix)
+            where.append(subs[0] if len(subs) == 1 else f"({' OR '.join(subs)})")
+    return " AND ".join(where), params
+
+
 def _escape_like(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
@@ -534,13 +586,6 @@ FTS_DEFAULT_COLUMNS = "{interp names manuell}"
 # »auch in Rohdaten«, nicht »nur in Rohdaten«. Die negativ-Spalte bleibt
 # draußen (Roh-Blobs können den Negativ-Prompt trotzdem wörtlich enthalten).
 FTS_RAW_COLUMNS = "{interp names manuell raw}"
-
-
-def fts_default_match(terms: list[str]) -> str:
-    """MATCH-Ausdruck der Standard-Suche (ADR 0036): Token-Präfixe (UND),
-    beschränkt auf die kuratierten Spalten — »hund« trifft keine
-    Anti-Hund-Bilder (negative_prompt) und keine Roh-Blobs mehr."""
-    return f"{FTS_DEFAULT_COLUMNS}: ({fts_match_query(terms)})"
 
 
 def _value_match(column: str, values: tuple[tuple[str, bool], ...],
@@ -569,7 +614,7 @@ def build_where(
 
     ``memo`` (#99, ADR 0073): Haken für die TEUREN Mengen-Subselects —
     Volltext (``text:``/``raw:`` über FTS5) und die LIKE-Scans über die
-    Fundorte (``datei:``-Teilstring, ``fundort:``). Er bekommt
+    Fundorte (``datei:``-Teilstring, ``ordner:``, ``fundort:``). Er bekommt
     (Subselect-SQL, dessen Parameter) und liefert den Ersatz-Subselect
     (z. B. ``SELECT file_hash FROM facet_memo_0``); die Parameter gehören
     dann der Materialisierung, nicht mehr dieser Abfrage. Die Negation
@@ -690,6 +735,17 @@ def build_where(
             match = _value_match(BASENAME, p.values, file_params)
             sub = "i.file_hash IN (" + inner(
                 f"SELECT file_hash FROM file_locations WHERE {match}", file_params) + ")"
+        elif p.kind == "ordner":
+            # Ordner der Fundorte (#268): ein Name trifft jede ganze Ordner-
+            # Komponente des Pfads ('/' davor, damit auch die erste zählt;
+            # das '/' danach schließt den Dateinamen aus), ein genauer Pfad
+            # ("…") den Ordner samt Unterordnern. LIKE vergleicht ASCII ohne
+            # Groß-/Kleinschreibung. Scan über file_locations wie datei: —
+            # 250k: ~60 ms je Wert (gemessen, §0.6).
+            match, folder_params = _folder_match(p.values)
+            sub = "i.file_hash IN (" + inner(
+                f"SELECT file_hash FROM file_locations WHERE {match}",
+                folder_params) + ")"
         elif p.kind == "fundort":
             # Library vs. Extern (ADR 0041, I2): ein Item ist „library", wenn
             # MINDESTENS EIN Fundort unter library.root liegt (Dublette

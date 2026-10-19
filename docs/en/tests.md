@@ -1,6 +1,6 @@
 # The test suite — what it checks and how to tell everything is fine
 
-> What is this? The project ships an automated test suite: a good **1200
+> What is this? The project ships an automated test suite: around **1500
 > small test programs** that run in about a minute and check every central
 > promise of the software. The complete suite runs before every code change
 > that gets checked in. This page explains **how to start it**, **what a
@@ -30,14 +30,14 @@ pytest -q
 At the end there is a line like:
 
 ```
-1050 passed in 57s
+1225 passed in 75s
 ```
 
 - **passed** = passed. The exact number grows with the project; what
-  matters is: **0 failed, 0 errors**. The line counts a good 1000 Python
-  tests and each of the 44 test files of the interface (group 9) as
-  **one** test; together those files hold around 270 individual checks.
-  Hence "a good 1200" in the introduction and a smaller number here.
+  matters is: **0 failed, 0 errors**. The line counts almost 1200 Python
+  tests and each of the 50 test files of the interface (group 9) as
+  **one** test; together those files hold around 330 individual checks.
+  Hence "around 1500" in the introduction and a smaller number here.
 - **skipped** is fine: some tests need the tools `ffmpeg`/`ffprobe` and
   skip themselves if those are not installed on the machine. The app still
   works, just without video metadata, video thumbnails and audio
@@ -140,6 +140,9 @@ its state was.
 | `test_scan.py` | The complete flow detect → hash → read → interpret → store produces the right counts; an unreadable file is recorded as a "scan issue" instead of aborting the run. |
 | `test_importer.py` (27 tests) | The import workflow with all its safety guarantees (see [import.md](import.md)). |
 | `test_moveout.py` | Moving out of the library: only copies in the media library, never foreign locations; at the target in date structure, name collisions get a suffix; missing or meanwhile changed files are reported and not touched. |
+| `test_export.py` | Exporting copies: a bit-identical, verified copy with its modification date, the same content is skipped, different content gets `name (1).ext`, flat or by year/month/day, package name cleaned, Photo CD as PNG, too little space starts nothing, unreachable files with a reason; the export folder must not lie in the library, a watch folder or the cache and must not contain catalogued originals; allowed in read-only mode too. |
+| `test_tagwrite.py` | Details set by hand in the copy: the own ID3 writer sets details, lyrics (`USLT`, with times `SYLT`) and cover and keeps every other entry, M4A through ffmpeg without re-encoding, the audio provably stays the same, the original is never touched. |
+| `test_clip.py` | Clip: file name from source and time range, ffmpeg only gets local files, WAV and MP4 sit exactly at the marked spot, the same clip twice gives no second file; the interface rejects invalid ranges (including infinite times and songs without a known duration). |
 | `test_boot_backfill.py` | The date backfill at startup only runs when there are media it could date. |
 | `test_diagnose.py` | The diagnostic command `python -m feral.diagnose video-codecs` counts the codecs in the collection without changing the database. |
 
@@ -175,8 +178,9 @@ it stay visible which information has which origin.
 |---|---|
 | `test_manual_date.py` | A date set by hand (`1997`, `1997-05`, `12.05.1997`) always wins, clearing it brings back the derived date; the year from the music tags comes before the file timestamp in the date cascade. |
 | `test_manual_fields.py` | Music details by hand: input validation, the value by hand covers the tag and clearing brings it back, "Re-interpret" leaves the details in place, year by hand in the date, list row with title, no., year and genre, API and the task for large selections. |
+| `test_manual_lyrics.py` | Lyrics by hand: input validation (whitespace, empty lines, limits, order of times), times only when every line has one, template from the file with the solo estimate fixed, overlay of lyrics, lines and sections including full text, "Re-interpret" leaves them in place, restoring, rejecting, API. |
 | `test_time_comments.py` | Time comments on songs: create, change, delete, in the search, in the list row and in the detail panel. |
-| `test_exchange.py` | Exchanging time comments and music details by hand between two fml: export and import as a round trip, the same import twice changes nothing, matching by song ID only with confirmation, your own differing details stay unless told otherwise, the old comment format stays readable, broken and oversized files are rejected. |
+| `test_exchange.py` | Exchanging time comments, music details and lyrics by hand between two fml (lyrics per song new, same, differing with the first differing line, only on songs): export and import as a round trip, the same import twice changes nothing, matching by song ID only with confirmation, your own differing details stay unless told otherwise, the old comment format stays readable, broken and oversized files are rejected. |
 | `test_cover.py` | Cover of a song: a reference to a cataloged image, no upload; songs with a cover appear in the gallery, rejecting the image takes them out again. |
 | `test_folder_order.py` | Your own order of a saved search: moving, new songs at the end, deleting the search clears the order along with it. |
 
@@ -191,6 +195,7 @@ it stay visible which information has which origin.
 | `test_web_app_static.py` | The interface is served correctly, and the browser does not get a stale version from its cache after an update. |
 | `test_admin.py` | The admin reports correct key figures (incl. overview numbers: kind, years, growth, disk space); scan issues can be recorded and resolved; orphaned database entries (file no longer exists) are found and cleaned up. |
 | `test_bulk.py` | Bulk actions on the selection or the search result: rating (fills only unrated items), tagging, appending a note, setting the model and rejecting hit exactly the hits, never more; rejecting blocks the medium, deletes the thumbnail and leaves the file where it is. |
+| `test_location_rows.py` | Audio list by location: one row per location in hit order, folder groups with the library first and subfolders right below their folder, a single folder gets no header, the chosen sort order applies inside each folder, `folder:` and `location:` criteria filter the rows, without a row kind it stays one row per song. |
 | `test_rankings.py` | Ranking by pairwise comparison: pairing, scoring, dropping out and bringing back in, leaderboard, recomputing yields the same scores. |
 | `test_web_cache.py` | The cache for hit lists and counters: no hit without a current `data_version`, a write by any connection leads to recomputation, the cached result is the uncached one. |
 | `test_audio_library.py`, `test_audio_view.py`, `test_music_library.py` | Audio in the library: media type from the tracks, duration in search and sorting, gallery without audio and audio view with audio only, artist/album/genre in search, sidebar and album sorting. |
@@ -238,7 +243,7 @@ the suite runs as usual.
 | `tests/js/admin_overview_pending.test.mjs` | Overview in two stages: key figures/charts immediately, expensive numbers (locations, thumbnail cache) show "…" and a checking hint until `/api/admin/info` arrives; no fade-in animation. |
 | `tests/js/admin_logs.test.mjs` | Logs page: both files immediately (one call each with `?file=`), "WARNING and above only" as `?level=warning`, line count and refresh per file, coloring, honest empty message, wrap lines/stacked (remembered by the browser), refresh after a finished task. |
 | `tests/js/admin_issues.test.mjs` | Issues page (A3, #66): one card per error kind with counter and "latest n of N", all button with the true number, dismissing reports the number and reloads; block list loaded separately, paged (100) with back/next and range, search with "n matches of total", unblock single and all (only after confirmation). |
-| `tests/js/admin_maintenance.test.mjs` | Maintenance page (A3): four cards with action rows, state per row from the status poll (running with bar → queued with position → last ✓), enqueue and synchronous actions inline, move-out, import-rules and clean-up cards with two-step arming (clean-up: scope, preview only on click, scope change invalidates), DB breakdown only on click and honestly "not available" without dbstat. |
+| `tests/js/admin_maintenance.test.mjs` | Maintenance page (A3): four cards with action rows, state per row from the status poll (running with bar → queued with position → last ✓), enqueue and synchronous actions inline, move-out, import-rules and clean-up cards with two-step arming (clean-up: scope, preview only on click, scope change invalidates), DB breakdown only on click and honestly "not available" without dbstat; importing an exchange file with music details and lyrics in preview, lock and summary. |
 | `tests/js/admin_arenas.test.mjs` | Rankings page (A3): table with all columns, delete only after a confirmation dialog, recompute scores with inline result. |
 | `tests/js/context.test.mjs` | Edit mode for rankings (ADR 0081/#133): "Editing: 🏆 Name" up front, header `editing`, save only on deviation without `sort:`, rename stores only the name, ✕ back into the ranking; a saved search opens no mode. |
 | `tests/js/savedialog.test.mjs` | Save dialog (#133): without origin only Save; from a loaded search the origin is in the dialog, name prefilled, "Overwrite »Name«" (PUT) and "Save as new search" (POST), origin ends on clearing. |
@@ -252,6 +257,10 @@ the suite runs as usual.
 | `tests/js/media.test.mjs`, `tests/js/audioview.test.mjs`, `tests/js/artwork.test.mjs`, `tests/js/cover.test.mjs` | Audio in the interface: one switch decides image, video or sound; the toggle to the audio view keeps the chips, Space plays instead of opening the loupe; embedded picture as a miniature; setting and removing a cover. |
 | `tests/js/player.test.mjs`, `tests/js/listcompare.test.mjs` | fml's own player: playhead per row, loudness matching, loop, tempo, "Play all", media keys; Compare narrows the list to 2 to 6 songs and brings it back unchanged with Esc. |
 | `tests/js/liststyle.test.mjs`, `tests/js/musicfields.test.mjs` | List style of the audio view (control "☰ S M L", flat rows with columns, comparing still shows waveforms) and the music details by hand in the panel (prefilled, "(mixed)", setting and taking back for the selection). |
+| `tests/js/lyricsedit.test.mjs` | Lyrics by hand: splitting, joining and pasting lines, estimated times for new lines, the "Lyrics" row in the panel, opening the view, typing and saving, closing with unsaved changes, "Restore the file's lyrics" in two steps; time field: Ctrl/⌘+Enter enters the playback time and moves on (from time and text field, empty lines skipped), Enter applies typed times and moves down, ↑/↓ change the line, invalid input, Delete, AltGr stays free for typing, large clock, saving locked while times are out of order. |
+| `tests/js/clip.test.mjs`, `tests/js/exportdialog.test.mjs` | Clip (times in every notation, dragging and moving the range, I/O and arrows, a checkbox per output, locked with a reason) and the "Export copies" dialog (figures, target follows the package name, too little space, checkbox for details set by hand). |
+| `tests/js/locationrows.test.mjs`, `tests/js/timeaxis.test.mjs` | Audio list: row kinds at ☰▾ (default "By folder"), folder headers, selection per song, ↑/↓ skip headers, ⌕ sets `folder:`; time axis at most 7 minutes, compressed songs carry » and seek in their own scale. |
+| `tests/js/previewreason.test.mjs` | A computed view without an image names the server's reason (such as a PSD without composite) instead of just "No preview available". |
 | `tests/js/comments.test.mjs`, `tests/js/lyrics.test.mjs`, `tests/js/manualorder.test.mjs` | Time comments (K key, pins on the waveform, origin label), lyrics with timings (current line in the bar, section marks, panel that follows along) and the "Manual" sorting of a saved search. |
 
 **"Expected red":** some of these tests describe behaviour that is still to

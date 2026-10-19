@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from feral.db import connect
+from feral.web import library
 from feral.web.app import create_app
 
 
@@ -466,15 +467,17 @@ def test_changed_import_rules_recheck_filtered(tmp_path) -> None:
     try:
         ep = {r.path: r.endpoint for r in app.routes if hasattr(r, "endpoint")}
         queued = []
-        app.state.engine.enqueue_recheck_filtered = queued.append
+        app.state.engine.enqueue_recheck_filtered = (
+            lambda rules=None, auto=False: queued.append((rules, auto)))
 
         ep["/api/admin/config"](ConfigUpdate(thumbnail_size=320, instanz_name="X"))
         assert queued == []
         ep["/api/admin/config"](ConfigUpdate(thumbnail_size=320,
                                              import_min_date="1980-01-02"))
-        assert [r["min_date"] for r in queued] == ["1980-01-02"]
+        # Automatik (#277: ohne Arbeit still), der Knopf dagegen nicht.
+        assert [(r["min_date"], auto) for r, auto in queued] == [("1980-01-02", True)]
         ep["/api/admin/recheck-filtered"]()
-        assert len(queued) == 2
+        assert [auto for _, auto in queued] == [True, False]
     finally:
         app.state.engine.shutdown()
         app.state.thumb_pool.shutdown()
@@ -491,7 +494,8 @@ def test_rules_changed_outside_the_admin_recheck_on_start(tmp_path) -> None:
     db = tmp_path / "t.sqlite"
     queued: list = []
     orig = engine_mod.ScanEngine.enqueue_recheck_filtered
-    engine_mod.ScanEngine.enqueue_recheck_filtered = lambda self, rules=None: queued.append(rules)
+    engine_mod.ScanEngine.enqueue_recheck_filtered = (
+        lambda self, rules=None, auto=False: queued.append(rules))
     try:
         def start():
             app = create_app(db, config_path=cfg)
@@ -567,19 +571,6 @@ def test_folders_and_rankings_counts_cached_and_optional(tmp_path) -> None:
         full = ep["/api/rankings"](_req(), counts=True)["rankings"]
         assert (full[0]["population"], full[0]["error"]) == (0, None)
 
-        # Facetten/Bewertungen: ungefiltert gecacht (Boot-Schwung), gefiltert
-        # je Ausdruck gerechnet — keine Markierung.
-        for path, kwargs in (("/api/facets", {}), ("/api/ratings", {})):
-            req = _req()
-            cold = ep[path](req, filter=None)
-            assert req.scope[COLD_KEY] == "start"
-            req = _req()
-            assert ep[path](req, filter=None) == cold
-            assert COLD_KEY not in req.scope
-            req = _req()
-            ep[path](req, filter="container: png")
-            assert COLD_KEY not in req.scope
-
         # Stats: EIN gecachtes Ergebnis, Zusatzfelder je Aufruf frisch.
         req = _req()
         first = ep["/api/stats"](req)
@@ -610,18 +601,26 @@ def test_sidebar_endpoint_cached_per_filter_and_cold_marked(tmp_path) -> None:
         assert set(plain) == {"models", "facets", "ratings", "total"}   # total: je Ansicht (ADR 0085)
         assert req.scope[COLD_KEY] == "start"
         assert plain["facets"]["show_dupes"] is True
-        assert plain["ratings"] == ep["/api/ratings"](_req(), filter=None)
+        conn = connect(db_path)
+        try:   # Inhalt = die Bibliotheksfunktionen dahinter
+            assert plain["ratings"] == {"ratings": library.ratings_facet(conn)}
+            png = {"facets": {**library.facets_payload(conn, filter_expr="container: png",
+                                                       base=library.facets_payload(conn)),
+                              "show_dupes": True},
+                   "ratings": {"ratings": library.ratings_facet(
+                       conn, filter_expr="container: png", base=library.ratings_facet(conn))}}
+        finally:
+            conn.close()
         req = _req()
         assert sidebar(req, filter=None, view=None) == plain and COLD_KEY not in req.scope
 
         # Gefiltert: erste Anfrage rechnet (kalt), die zweite mit demselben
-        # Ausdruck ist ein Speichergriff; Inhalt = die drei Einzelendpunkte.
+        # Ausdruck ist ein Speichergriff; Inhalt = Modelle + Bibliotheksfunktionen.
         req = _req()
         first = sidebar(req, filter="container: png", view=None)
         assert req.scope[COLD_KEY] == "start"
         assert first["models"] == ep["/api/models"](_req(), filter="container: png")
-        assert first["facets"] == ep["/api/facets"](_req(), filter="container: png")
-        assert first["ratings"] == ep["/api/ratings"](_req(), filter="container: png")
+        assert first["facets"] == png["facets"] and first["ratings"] == png["ratings"]
         req = _req()
         assert sidebar(req, filter="container: png", view=None) == first
         assert COLD_KEY not in req.scope
@@ -637,7 +636,7 @@ def test_sidebar_endpoint_cached_per_filter_and_cold_marked(tmp_path) -> None:
         req = _req()
         again = sidebar(req, filter="container: png", view=None)
         assert req.scope[COLD_KEY] == "write"
-        assert again["facets"] == ep["/api/facets"](_req(), filter="container: png")
+        assert again["facets"] == png["facets"]      # ein neuer Tag ändert die Facetten nicht
 
         with pytest.raises(HTTPException) as exc:
             sidebar(_req(), filter="unbekannt:: (")

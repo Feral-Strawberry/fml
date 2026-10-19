@@ -34,6 +34,7 @@ _MEDIA_KIND = {
     "dng": "image",
     "psd": "image",
     "pcd": "image",
+    "jxr": "image",
     "pdf": "document",
     "matroska": "video",
     "isobmff": "video",

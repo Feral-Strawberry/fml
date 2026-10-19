@@ -45,6 +45,10 @@ never overwritten by them. The music details set by hand live in
 `feral/db/manual_fields.py` (`set_fields`, `fields_of`, `state`,
 `overlay`): `overlay` lays them over the values from the tags when the
 interpreted fields are written, so every query sees the value in effect.
+Lyrics by hand are one document per song in `feral/db/manual_lyrics.py`
+(`check_lines`, `set_lyrics`, `editable`, `projection`); the same overlay
+uses it to replace the lyrics, the timed lines and the sections from the
+file as a whole.
 
 ## Key properties
 

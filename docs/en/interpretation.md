@@ -38,9 +38,11 @@ is why it is fast even for 70,000 items. The run can be repeated any
 number of times.
 
 Music details set by hand (title, artist, album …, see
-[Audio module](audio.md#music-details-by-hand)) stay in place: they are
+[Audio module](audio.md#music-details-by-hand)) and lyrics set by hand
+(see [Lyrics by hand](audio.md#lyrics-by-hand)) stay in place: they are
 laid over the values from the tags after the parsers have run and show up
-among the fields under the parser name `manual`.
+among the fields under the parser name `manual` (for lyrics `lyrics`,
+`lyrics_synced` and `song_sections`).
 
 ## Searching over the fields
 

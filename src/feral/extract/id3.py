@@ -50,15 +50,51 @@ _USER_TEXT = frozenset({"TXXX", "TXX"})
 _USER_URL = frozenset({"WXXX", "WXX"})
 
 
+# Kennung eines Covers, das fml beim Kopie-Export selbst eingebettet hat
+# (ADR 0107, Nachtrag): ein JPEG-Kommentar (COM-Segment) mit genau diesem Text.
+FML_COVER = b"fml cover"
+
+
+def mark_fml_cover(jpeg: bytes) -> bytes:
+    """Das Cover-JPEG als von fml gesetzt kennzeichnen: COM-Segment direkt
+    hinter SOI. Bild und Bildbytes bleiben sonst gleich."""
+    if jpeg[:2] != b"\xff\xd8" or is_fml_cover(jpeg):
+        return jpeg
+    return (jpeg[:2] + b"\xff\xfe" + struct.pack(">H", len(FML_COVER) + 2)
+            + FML_COVER + jpeg[2:])
+
+
+def is_fml_cover(data: bytes) -> bool:
+    """Trägt das JPEG die fml-Kennung? Läuft die Segmente bis zum Bildbeginn
+    (SOS) ab; Kaputtes heißt einfach „nein"."""
+    if data[:2] != b"\xff\xd8":
+        return False
+    pos = 2
+    while pos + 4 <= len(data) and data[pos] == 0xFF:
+        marker = data[pos + 1]
+        if marker == 0xDA:                       # SOS: ab hier Bilddaten
+            return False
+        length = struct.unpack(">H", data[pos + 2:pos + 4])[0]
+        if marker == 0xFE and data[pos + 4:pos + 2 + length] == FML_COVER:
+            return True
+        pos += 2 + length
+    return False
+
+
 def picture_descriptor(mime: str, pic_type: int | None, desc: str,
                        data: bytes) -> str:
     """Deskriptor eines eingebetteten Bilds (ADR 0083): JSON mit MIME, Typ,
     Beschreibung, Größe und SHA-256 — die Bildbytes selbst bleiben in der
-    Datei (kein Blob-Ballast in der DB, Cover sind ohnehin informationsarm)."""
-    return json.dumps({
+    Datei (kein Blob-Ballast in der DB, Cover sind ohnehin informationsarm).
+    ``"fml": true`` nur bei einem Cover, das fml beim Export eingebettet hat
+    (ADR 0107); sonst bleibt der Deskriptor wie bisher."""
+    found = {
         "mime": mime, "type": pic_type, "description": desc,
         "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
-    }, ensure_ascii=False)
+    }
+    if is_fml_cover(data):
+        found["fml"] = True
+    return json.dumps(found, ensure_ascii=False)
 
 
 def _syncsafe(b: bytes) -> int:

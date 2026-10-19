@@ -29,6 +29,7 @@ import logging
 import multiprocessing as mp
 import os
 import queue
+import socket
 import sqlite3
 import threading
 import time
@@ -45,6 +46,7 @@ from ..processes import (
     HALT_PAUSE, HALT_SHUTDOWN, HALT_YIELD,
 )
 from ..scan import ScanReport, _iter_files
+from .admin import read_app_state, write_app_state
 from .tasks import RESUMABLE, Progress, report_dict  # noqa: F401 — Progress bleibt exportiert
 from .worker import run_worker
 
@@ -95,6 +97,7 @@ def _date_param(value: Any) -> str:
 # Übersichtsmodus sperrt die Route sie; aus der gesicherten Warteschlange
 # dürfen sie dann ebenso wenig zurückkommen.
 FILE_WRITING_TASKS = frozenset({"import_folder", "import_files", "moveout"})
+QUEUE_STAMP_KEY = "queue.stamp"    # app_state: Herkunft der gesicherten Schlange (#251)
 
 
 class ScanEngine:
@@ -131,6 +134,7 @@ class ScanEngine:
         self._closed = False
         self._stopping = False       # shutdown läuft: nichts mehr zustellen (ADR 0093)
         self._started_at: float | None = None
+        self._before_run: tuple[Any, Any] = (None, report_dict(ScanReport()))
         self._state: dict[str, Any] = {
             "running": False,
             "label": None,
@@ -301,6 +305,8 @@ class ScanEngine:
             kind = event.get("ev")
             if kind == "started":
                 self._started_at = float(event.get("at") or time.time())
+                # Für ein stilles Ende (#277): was vorher im Status stand.
+                self._before_run = (self._state["label"], self._state["report"])
                 self._state.update(
                     running=True, label=running.label, current_file=None,
                     report=report_dict(ScanReport()), started_at=_iso(self._started_at),
@@ -313,34 +319,60 @@ class ScanEngine:
                 self._on_paused_locked(running, event)
             elif kind == "finished":
                 result = event.get("result") or {}
-                if event.get("report") is not None:
-                    self._state["report"] = event["report"]
-                self._state.update(running=False, current_file=None,
-                                   last_finished=running.label, started_at=None,
-                                   finished_seq=self._state["finished_seq"] + 1)
-                # Jede Aufgabe hinterlässt IHRE Zusammenfassung (#233) — ohne
-                # eine bleibt das Feld leer, statt die der vorigen zu erben.
-                self._state["last_result"] = (
-                    result.get("summary") if isinstance(result, dict) else None)
-                # Fehlgeschlagen ist NUR eine Aufgabe, die mit sumFailed
-                # endete (Ausnahme im Worker); ein Scan-Report mit
-                # failed-Zähler ist ein erfolgreicher Lauf mit Befunden.
-                summary = self._state["last_result"]
-                ok = not (isinstance(summary, dict) and summary.get("key") == "sumFailed")
-                self._remember_locked(running.label, summary, ok=ok)
-                finished = (running.name, ok)
-                self._running = None
-                self._started_at = None
-                if self._control[CTRL_HALT] == HALT_YIELD:
-                    self._control[CTRL_HALT] = 0   # fertig geworden, bevor sie abgab
-                self._dirty.set()
-                self._wake.set()
+                if isinstance(result, dict) and result.get("quiet"):
+                    # Automatik-Nachläufer ohne Arbeit (#277): keine Spur in
+                    # „zuletzt", Ergebnis und Verlauf — sonst verdeckt der
+                    # Leerlauf die Aufgabe, die wirklich gearbeitet hat.
+                    self._finish_quiet_locked(running)
+                    finished = (running.name, True)
+                else:
+                    finished = (running.name, self._finish_locked(running, event, result))
         if finished is not None:
             for hook in list(self.on_finished):
                 try:
                     hook(*finished)
                 except Exception:
                     log.exception("on_finished hook %r failed", hook)
+
+    def _finish_locked(self, running: _Queued, event: dict[str, Any], result: Any) -> bool:
+        """Aufgabe fertig: „zuletzt", Ergebnis, Verlauf; liefert ok (unter
+        self._lock aufrufen)."""
+        if event.get("report") is not None:
+            self._state["report"] = event["report"]
+        self._state.update(running=False, current_file=None,
+                           last_finished=running.label, started_at=None,
+                           finished_seq=self._state["finished_seq"] + 1)
+        # Jede Aufgabe hinterlässt IHRE Zusammenfassung (#233) — ohne
+        # eine bleibt das Feld leer, statt die der vorigen zu erben.
+        self._state["last_result"] = (
+            result.get("summary") if isinstance(result, dict) else None)
+        # Fehlgeschlagen ist NUR eine Aufgabe, die mit sumFailed
+        # endete (Ausnahme im Worker); ein Scan-Report mit
+        # failed-Zähler ist ein erfolgreicher Lauf mit Befunden.
+        summary = self._state["last_result"]
+        ok = not (isinstance(summary, dict) and summary.get("key") == "sumFailed")
+        self._remember_locked(running.label, summary, ok=ok)
+        self._running = None
+        self._started_at = None
+        if self._control[CTRL_HALT] == HALT_YIELD:
+            self._control[CTRL_HALT] = 0   # fertig geworden, bevor sie abgab
+        self._dirty.set()
+        self._wake.set()
+        return ok
+
+    def _finish_quiet_locked(self, running: _Queued) -> None:
+        """Stilles Ende (#277): nur den Lauf abräumen; Label, Report,
+        „zuletzt", Ergebnis, Verlauf und ``finished_seq`` bleiben bei der
+        vorigen Aufgabe (unter self._lock aufrufen)."""
+        label, report = self._before_run
+        self._state.update(running=False, current_file=None, started_at=None,
+                           label=label, report=report)
+        self._running = None
+        self._started_at = None
+        if self._control[CTRL_HALT] == HALT_YIELD:
+            self._control[CTRL_HALT] = 0
+        self._dirty.set()
+        self._wake.set()
 
     def _on_paused_locked(self, running: _Queued, event: dict[str, Any]) -> None:
         """Halt an der Dateigrenze (ADR 0093): Fortsetzung zurück in die
@@ -562,14 +594,17 @@ class ScanEngine:
 
     def enqueue_thumb_warm(
         self, cache_dir: str | Path, size: int, *, retry_failed: bool = False,
-        auto: bool = False,
+        auto: bool = False, jxr: dict[str, float] | None = None,
+        preview_cache: str | Path | None = None,
     ) -> None:
         """„Thumbnails erstellen" (ADR 0013/0020). ``auto`` = Nachläufer nach
         Import/Watch-Schub: wartet schon einer, reicht das; läuft gerade einer,
         kommt der neue trotzdem dran (neue Dateien)."""
         self.enqueue("thumb_warm",
                      {"cache_dir": str(cache_dir), "size": int(size),
-                      "retry_failed": bool(retry_failed)},
+                      "retry_failed": bool(retry_failed),
+                      "jxr": jxr or {}, "auto": bool(auto),
+                      "preview_cache": str(preview_cache) if preview_cache else None},
                      msg("taskThumbWarm"), dedupe="pending" if auto else "all")
 
     def enqueue_audio_warm(
@@ -579,7 +614,7 @@ class ScanEngine:
         """„Audio analysieren" (A4 #161) — Dedupe wie ``enqueue_thumb_warm``."""
         self.enqueue("audio_warm",
                      {"cache_dir": str(cache_dir), "retry_failed": bool(retry_failed),
-                      "true_peak": bool(true_peak)},
+                      "true_peak": bool(true_peak), "auto": bool(auto)},
                      msg("taskAudioWarm"), dedupe="pending" if auto else "all")
 
     def enqueue_media_date_backfill(self, min_date: datetime | None = None) -> None:
@@ -607,14 +642,19 @@ class ScanEngine:
         """Songtext mit Zeiten einmal nachholen (#234)."""
         self.enqueue("audio_subtitles", {"rules": rules}, msg("taskAudioSubtitles"))
 
-    def enqueue_recheck_filtered(self, rules: dict[str, Any] | None = None) -> None:
+    def enqueue_recheck_filtered(self, rules: dict[str, Any] | None = None, *,
+                                 auto: bool = False) -> None:
         """Aussortierte neu prüfen (#230): alle Pfade, die das Stat-Gedächtnis
         als ``ausgefiltert`` kennt, mit den aktuellen Import-Regeln erneut
         durch den Scan schicken — Watcher überspringen sie sonst, solange
         die Datei unverändert bleibt (ADR 0042)."""
         # Schlüssel = Name + Regeln: gleiche Regeln doppelt ⇒ abgewiesen,
-        # erneut geänderte Regeln ⇒ eigener Lauf mit dem neuen Stand.
-        self.enqueue("recheck_filtered", {"rules": rules}, msg("taskRecheckFiltered"))
+        # erneut geänderte Regeln ⇒ eigener Lauf mit dem neuen Stand. ``auto``
+        # (Start/Config, #277) gehört nicht dazu: Knopf und Automatik mit
+        # denselben Regeln sind dieselbe Aufgabe.
+        self.enqueue("recheck_filtered", {"rules": rules, "auto": bool(auto)},
+                     msg("taskRecheckFiltered"),
+                     key=_dedupe_key("recheck_filtered", {"rules": rules}))
 
     def enqueue_integrity_check(self) -> None:
         self.enqueue("integrity", {}, msg("taskIntegrity"))
@@ -700,6 +740,7 @@ class ScanEngine:
                               by_id[i].key, int(by_id[i].priority)) for i in new])
                         conn.executemany("UPDATE task_queue SET ord = ? WHERE id = ?",
                                          [(current[i], i) for i in moved])
+                        write_app_state(conn, QUEUE_STAMP_KEY, self.queue_stamp())
                 finally:
                     conn.close()
             except sqlite3.Error as exc:
@@ -721,10 +762,24 @@ class ScanEngine:
                 self._dirty.set()
                 time.sleep(2.0)
 
-    def restore_queue(self, skip: frozenset[str] = frozenset()) -> int:
+    def queue_stamp(self) -> dict[str, str]:
+        """Herkunft der gesicherten Schlange: dieser Rechner, diese Datenbank
+        (#251, wie ``SlowCounts.stamp``)."""
+        return {"host": socket.gethostname(), "db": str(Path(self.db_path).resolve())}
+
+    def restore_queue(self, skip: frozenset[str] = frozenset(),
+                      refresh: dict[str, dict[str, Any]] | None = None,
+                      keep: Callable[[str, dict[str, Any]], bool] | None = None) -> int:
         """Beim Start: gesicherte Aufgaben wieder einreihen (vor den Watchern).
         Liefert die Anzahl. Aufgaben mit einem Namen aus ``skip`` werden
-        verworfen statt eingereiht (Übersichtsmodus: ``FILE_WRITING_TASKS``)."""
+        verworfen statt eingereiht (Übersichtsmodus: ``FILE_WRITING_TASKS``).
+
+        Stammt die Schlange von einem anderen Rechner oder aus einer anderen
+        Datenbank-Datei (kopierte DB, Backup an anderem Ort), wird sie ganz
+        verworfen: ihre Pfade gehören nicht hierher (#251). ``refresh`` setzt
+        je Aufgabenname Parameter aus der laufenden Config über die
+        gesicherten (z. B. die Cache-Ordner von ``cache_clear``); ``keep``
+        verwirft Aufgaben, deren Ziel nicht mehr gilt (Export-Ordner geändert)."""
         if not self._persist_enabled:
             return 0
         conn = connect(self.db_path)
@@ -732,18 +787,33 @@ class ScanEngine:
             rows = conn.execute(
                 "SELECT id, name, params, label, key, priority FROM task_queue ORDER BY ord"
             ).fetchall()
+            stamp = read_app_state(conn, QUEUE_STAMP_KEY)
         finally:
             conn.close()
         restored = []
         dropped = 0
-        for r in rows:
+        # Ohne Stempel (Schlange von vor #251) gilt sie als die eigene.
+        foreign = rows and stamp is not None and stamp != self.queue_stamp()
+        if foreign:
+            dropped = len(rows)
+            log.warning("Saved queue is from another installation (%s, %s) - %d tasks dropped",
+                        stamp.get("host") if isinstance(stamp, dict) else "?",
+                        stamp.get("db") if isinstance(stamp, dict) else "?", dropped)
+        for r in ([] if foreign else rows):
             if r["name"] in skip:
                 dropped += 1
                 log.warning("Saved task %s dropped: library management is off", r["name"])
                 continue
             try:
+                params = json.loads(r["params"])
+                if isinstance(params, dict) and refresh and r["name"] in refresh:
+                    params = {**params, **refresh[r["name"]]}
+                if keep is not None and not keep(r["name"], params):
+                    dropped += 1
+                    log.warning("Saved task %s dropped: its target no longer applies", r["name"])
+                    continue
                 restored.append(_Queued(id=r["id"], name=r["name"],
-                                        params=json.loads(r["params"]),
+                                        params=params,
                                         label=json.loads(r["label"]), key=r["key"],
                                         priority=bool(r["priority"])))
             except ValueError:

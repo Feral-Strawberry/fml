@@ -131,16 +131,16 @@ def _extract_stream(fh: BinaryIO) -> ContainerExtraction:
 
     header = fh.read(_HEADER.size)
     if len(header) < _HEADER.size:
-        result.warnings.append("Datei endet im PSD-Header (abgeschnitten?).")
+        result.warnings.append("File ends inside the PSD header (truncated?).")
         return result
     signature, version, _reserved, channels, height, width, depth, mode = (
         _HEADER.unpack(header)
     )
     if signature != PSD_SIGNATURE:
-        result.warnings.append("Keine PSD-Signatur ('8BPS') am Dateianfang.")
+        result.warnings.append("No PSD signature ('8BPS') at the start of the file.")
         return result
     if version not in (1, 2):  # 1 = PSD, 2 = PSB
-        result.warnings.append(f"Unbekannte PSD-Version {version}.")
+        result.warnings.append(f"Unknown PSD version {version}.")
         return result
     result.width, result.height = width, height
     result.items.append(
@@ -163,7 +163,7 @@ def _extract_stream(fh: BinaryIO) -> ContainerExtraction:
         fh.seek(cm_len, 1)
         (resources_len,) = struct.unpack(">I", fh.read(4))
     except struct.error:
-        result.warnings.append("Datei endet vor den Image Resources (abgeschnitten?).")
+        result.warnings.append("File ends before the image resources (truncated?).")
         return result
 
     _walk_resources(fh, resources_len, result)
@@ -176,14 +176,14 @@ def _walk_resources(fh: BinaryIO, total: int, result: ContainerExtraction) -> No
     while fh.tell() < end:
         block_head = fh.read(6)
         if len(block_head) < 6:
-            result.warnings.append("Image Resources enden mitten im Block (abgeschnitten?).")
+            result.warnings.append("Image resources end inside a block (truncated?).")
             return
         block_sig, resource_id = block_head[:4], struct.unpack(">H", block_head[4:6])[0]
         if block_sig != b"8BIM":
             # Fremd-Signaturen (z. B. 'MeSa' von ImageReady) haben dasselbe
             # Layout nicht garantiert — ab hier ist nichts mehr verlässlich.
             result.warnings.append(
-                f"Unbekannte Ressourcen-Signatur {block_sig!r} — Rest übersprungen."
+                f"Unknown resource signature {block_sig!r} - rest skipped."
             )
             return
         # Pascal-Name, auf gerade Gesamtlänge gepolstert.
@@ -191,7 +191,7 @@ def _walk_resources(fh: BinaryIO, total: int, result: ContainerExtraction) -> No
         fh.seek(name_len + (0 if name_len % 2 else 1), 1)
         size_raw = fh.read(4)
         if len(size_raw) < 4:
-            result.warnings.append("Image Resources enden mitten im Block (abgeschnitten?).")
+            result.warnings.append("Image resources end inside a block (truncated?).")
             return
         (size,) = struct.unpack(">I", size_raw)
 
@@ -203,7 +203,7 @@ def _walk_resources(fh: BinaryIO, total: int, result: ContainerExtraction) -> No
         data = fh.read(size)
         if len(data) < size:
             result.warnings.append(
-                f"Ressource 0x{resource_id:04x} ({keyword}) ist abgeschnitten."
+                f"Resource 0x{resource_id:04x} ({keyword}) is truncated."
             )
             return
         if size % 2:
@@ -219,8 +219,8 @@ def _walk_resources(fh: BinaryIO, total: int, result: ContainerExtraction) -> No
                 )
             except UnicodeDecodeError:
                 result.warnings.append(
-                    f"Ressource 0x{resource_id:04x} ({keyword}) ist kein gültiges "
-                    "UTF-8 — als Binär-Eintrag übernommen."
+                    f"Resource 0x{resource_id:04x} ({keyword}) is not valid "
+                    "UTF-8 - kept as a binary entry."
                 )
                 result.items.append(
                     RawMetadataItem(

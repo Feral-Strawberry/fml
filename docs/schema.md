@@ -109,6 +109,12 @@ erDiagram
     text source
     text updated_at
   }
+  manual_lyrics {
+    text file_hash PK, FK
+    text lines
+    text source
+    text updated_at
+  }
   covers {
     text file_hash PK, FK
     text cover_hash FK
@@ -213,6 +219,7 @@ erDiagram
   items ||--o{ item_tags : "file_hash"
   items ||--o{ time_comments : "file_hash"
   items ||--o{ manual_fields : "file_hash"
+  items ||--o| manual_lyrics : "file_hash"
   items ||--o{ covers : "cover_hash"
   items ||--o| covers : "file_hash"
   items ||--o{ folder_order : "file_hash"
@@ -358,6 +365,17 @@ Indexe: `idx_time_comments_item`
 | `field` | text | PK | ja |  |
 | `ordinal` | integer | PK | ja | `0` |
 | `value` | text |  | ja |  |
+| `source` | text |  |  |  |
+| `updated_at` | text |  | ja |  |
+
+Indexe: keine
+
+#### `manual_lyrics` · PK `file_hash`
+
+| Spalte | Typ | Schlüssel | Pflicht | Standard |
+| --- | --- | --- | --- | --- |
+| `file_hash` | text | PK · FK → `items.file_hash` | ja |  |
+| `lines` | text |  | ja |  |
 | `source` | text |  |  |  |
 | `updated_at` | text |  | ja |  |
 
@@ -553,8 +571,9 @@ Zeilen im kanonischen Feldvokabular (`prompt`, `model`, `seed`, `lora`,
 LoRAs, mehrere Sampler-Pässe, mehrere Interpreten). Der Covering-Index
 über `(field, value_text, file_hash)` bedient Facetten und Chip-Filter.
 Zeilen mit dem Parser `manual` sind keine Parser-Ergebnisse, sondern die
-Musik-Angaben von Hand aus `manual_fields`: Sie ersetzen beim Schreiben
-die Parser-Zeilen desselben Feldes, damit jede Abfrage den geltenden Wert
+Musik-Angaben von Hand aus `manual_fields` und der Songtext von Hand aus
+`manual_lyrics` (Felder `lyrics`, `lyrics_synced`, `song_sections`): Sie
+ersetzen beim Schreiben die Parser-Zeilen desselben Feldes, damit jede Abfrage den geltenden Wert
 sieht.
 
 **Manuelle Schicht.** Was der Mensch setzt, strikt getrennt vom
@@ -567,13 +586,15 @@ durchgeschrieben wird), `tags` und `item_tags` (Vokabular und Zuordnung;
 Sortierung steckt im Ausdruck) und `folder_order` (die eigene Reihenfolge
 einer gespeicherten Suche, Sortierung „Manuell").
 
-Zum Audio-Modul gehören drei weitere Tabellen der manuellen Schicht:
+Zum Audio-Modul gehören vier weitere Tabellen der manuellen Schicht:
 `time_comments` (Kommentare an einer Stelle im Song, `at_ms` in
 Millisekunden), `manual_fields` (Musik-Angaben von Hand: je Song und Feld
 ein Wert, bei Interpret und Genre mehrere über `ordinal`; sie überdecken
-die Tag-Werte in Schicht 2) und `covers` (das Bild der Bibliothek, das
-einem Song als Cover zugeordnet ist). In `time_comments` und
-`manual_fields` ist `source` das Herkunfts-Etikett eines Imports aus der
+die Tag-Werte in Schicht 2), `manual_lyrics` (der Songtext von Hand als
+ein Dokument je Song: `lines` ist JSON `[[start_ms, end_ms, "Zeile"], …]`,
+Zeiten dürfen fehlen) und `covers` (das Bild der Bibliothek, das
+einem Song als Cover zugeordnet ist). In `time_comments`, `manual_fields`
+und `manual_lyrics` ist `source` das Herkunfts-Etikett eines Imports aus der
 Austauschdatei, leer bei eigenen Eingaben.
 
 **Ranking-Modul.** `rankings` ist eine benannte Suche, über die Duelle

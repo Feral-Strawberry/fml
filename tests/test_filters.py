@@ -9,6 +9,7 @@ import pytest
 from feral.db import connect, folders, manual, store_extraction, store_interpretations
 from feral.extract import png
 from feral.interpret import interpret_items
+from feral.messages import UserError
 from feral.web import filters, library
 
 from .pngbuild import build_png, itxt_chunk, text_chunk
@@ -866,6 +867,60 @@ def test_datei_escapes_like_wildcards(db):
     assert _hashes(db, "datei: a_b") == {"a1" * 32}
 
 
+# -- ordner: — Ordner der Fundorte (#268) ----------------------------------------
+
+
+def test_ordner_parse_serialize_round_trip():
+    preds = filters.parse('ordner: Kiss_Tribute | \'Best Of\' -folder: "D:\\Musik\\Alt"')
+    assert [(p.kind, p.negated, p.values) for p in preds] == [
+        ("ordner", False, (("Kiss_Tribute", False), ("Best Of", False))),
+        ("ordner", True, (("D:\\Musik\\Alt", True),)),
+    ]
+    text = filters.serialize(preds)
+    assert text == 'ordner: Kiss_Tribute | \'Best Of\' -ordner: "D:\\Musik\\Alt"'
+    assert filters.parse(text) == preds
+
+
+def test_ordner_needs_a_folder_not_only_separators():
+    with pytest.raises(UserError):
+        filters.parse("ordner: /")
+
+
+def test_ordner_name_matches_whole_folder_with_subfolders(db):
+    _store(db, "a1" * 32, "/m/Kiss_Tribute/a.png", text_chunk("parameters", "eins"))
+    _store(db, "b2" * 32, r"D:\Musik\kiss_tribute\live\b.png", text_chunk("parameters", "zwei"))
+    _store(db, "c3" * 32, "/m/Kiss_Tribute_Alt/c.png", text_chunk("parameters", "drei"))
+    _store(db, "d4" * 32, "/m/x/Kiss_Tribute.png", text_chunk("parameters", "vier"))
+    _store(db, "e5" * 32, "Kiss_Tribute/e.png", text_chunk("parameters", "fünf"))
+    # ganzer Ordnername, ohne Groß-/Kleinschreibung, auch Unterordner und
+    # die erste Komponente; nicht Teil eines Namens, nicht der Dateiname.
+    assert _hashes(db, "ordner: kiss_tribute") == {"a1" * 32, "b2" * 32, "e5" * 32}
+    assert _hashes(db, "-ordner: Kiss_Tribute") == {"c3" * 32, "d4" * 32}
+    # mehrere Komponenten am Stück, Windows-Trenner im Wert
+    assert _hashes(db, r"ordner: Musik\Kiss_Tribute") == {"b2" * 32}
+    # ODER
+    assert _hashes(db, "ordner: Kiss_Tribute_Alt | x") == {"c3" * 32, "d4" * 32}
+
+
+def test_ordner_exact_path_with_subfolders(db):
+    _store(db, "a1" * 32, r"D:\Musik\Kiss_Tribute\a.png", text_chunk("parameters", "eins"))
+    _store(db, "b2" * 32, r"D:\Musik\Kiss_Tribute\live\b.png", text_chunk("parameters", "zwei"))
+    _store(db, "c3" * 32, r"E:\Musik\Kiss_Tribute\c.png", text_chunk("parameters", "drei"))
+    _store(db, "d4" * 32, r"D:\Musik\Kiss_Tribute2\d.png", text_chunk("parameters", "vier"))
+    _store(db, "e5" * 32, r"\\nas\share\e.png", text_chunk("parameters", "fünf"))
+    _store(db, "f6" * 32, "/Volumes/Musik/f.png", text_chunk("parameters", "sechs"))
+    assert _hashes(db, 'ordner: "D:/Musik/Kiss_Tribute"') == {"a1" * 32, "b2" * 32}
+    assert _hashes(db, r'ordner: "d:\musik\kiss_tribute\"') == {"a1" * 32, "b2" * 32}
+    assert _hashes(db, r'ordner: "\\nas\share"') == {"e5" * 32}
+    assert _hashes(db, 'ordner: "/Volumes/Musik"') == {"f6" * 32}
+
+
+def test_ordner_escapes_like_wildcards(db):
+    _store(db, "a1" * 32, "/m/a_b/x.png", text_chunk("parameters", "eins"))
+    _store(db, "b2" * 32, "/m/aXb/y.png", text_chunk("parameters", "zwei"))
+    assert _hashes(db, "ordner: a_b") == {"a1" * 32}
+
+
 # -- Memo-Haken für teure Subselects (#99, ADR 0073) --------------------------------
 
 
@@ -893,6 +948,21 @@ def test_build_where_memo_replaces_expensive_subselects_only():
     assert "NOT (i.file_hash IN (SELECT file_hash FROM memo_1))" in sql
     assert "search_index" not in sql and "file_locations" not in sql
     assert params == plain_params[3:] == [4, "sdxl", "sdxl"]   # model: = 2 Subselects
+
+
+def test_build_where_memo_takes_the_ordner_scan():
+    seen: list[tuple[str, list]] = []
+
+    def memo(sql, params):
+        seen.append((sql, params))
+        return "SELECT file_hash FROM memo_0"
+
+    sql, params = filters.build_where(filters.parse('-ordner: a | "D:/b"'), memo=memo)
+    assert seen == [(
+        "SELECT file_hash FROM file_locations WHERE "
+        f"('/' || {filters.NORM_PATH} LIKE ? ESCAPE '\\' OR {filters.NORM_PATH} LIKE ? ESCAPE '\\')",
+        ["%/a/%", "D:/b/%"])]
+    assert sql == "NOT (i.file_hash IN (SELECT file_hash FROM memo_0))" and params == []
 
 
 def test_build_where_memo_fundort_shares_one_set(monkeypatch):

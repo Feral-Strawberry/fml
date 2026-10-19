@@ -17,10 +17,12 @@ im Web-Prozess ``engine.enqueue("name", params, label)``.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
+from ..extract.jxr import Tone
 from ..messages import msg
 from ..scan import ScanReport, scan_files
 
@@ -58,7 +60,7 @@ class TaskPaused(Exception):
 # sie setzen nach dem Halt ohne Doppelarbeit fort (Dateiliste als
 # Fortsetzung bzw. Cache/DB zeigen, was fehlt).
 RESUMABLE = frozenset({"scan_files", "rescan", "recheck_filtered", "import_files",
-                       "thumb_warm", "audio_warm", "backfill_dates"})
+                       "thumb_warm", "audio_warm", "backfill_dates", "export"})
 
 
 TaskFn = Callable[[sqlite3.Connection, dict[str, Any], Progress, TaskContext], dict[str, Any]]
@@ -68,6 +70,20 @@ TASKS: dict[str, TaskFn] = {}
 def task(name: str) -> Callable[[TaskFn], TaskFn]:
     def register(fn: TaskFn) -> TaskFn:
         TASKS[name] = fn
+        return fn
+    return register
+
+
+# Testhilfen gibt es nur unter Test (#251): sonst wären sie über eine Zeile in
+# ``task_queue`` ausführbar. Die Testsuite setzt die Variable in
+# ``tests/conftest.py``; der Worker (spawn) erbt sie.
+TEST_TASKS_ENV = "FML_TEST_TASKS"
+
+
+def only_under_test(name: str) -> Callable[[TaskFn], TaskFn]:
+    def register(fn: TaskFn) -> TaskFn:
+        if os.environ.get(TEST_TASKS_ENV) == "1":
+            TASKS[name] = fn
         return fn
     return register
 
@@ -170,34 +186,47 @@ def recheck_filtered_task(conn, params, progress, ctx) -> dict[str, Any]:
 
     report = _scan_list(conn, [Path(p) for p in files], params, progress)
     return {"summary": msg("sumRecheckFiltered", taken=report.media_files,
-                           still=report.ausgefiltert, gone=len(gone))}
+                           still=report.ausgefiltert, gone=len(gone)),
+            # Automatik ohne Aussortiertes: Leerlauf ohne Spur (#277).
+            "quiet": bool(params.get("auto")) and not files and not gone}
+
+
+def _songs_missing_subtitles(conn) -> list[str]:
+    """Songs, deren Untertitel-Spur ffprobe kennt (``codec_type = subtitle``),
+    deren Text Schicht 1 aber noch nicht hat."""
+    return [h for (h,) in conn.execute(
+        """SELECT DISTINCT i.file_hash FROM items i
+             JOIN raw_metadata r ON r.file_hash = i.file_hash
+            WHERE i.media_kind = 'audio' AND r.keyword = 'codec_type'
+              AND r.value_text = 'subtitle'
+              AND NOT EXISTS (SELECT 1 FROM raw_metadata s
+                               WHERE s.file_hash = i.file_hash
+                                 AND s.source LIKE '%.subtitle')""")]
 
 
 @task("audio_subtitles")
 def audio_subtitles_task(conn, params, progress, ctx) -> dict[str, Any]:
-    """Songtext mit Zeiten nachholen (#234): Songs, deren Untertitel-Spur
-    ffprobe schon kannte (``codec_type = subtitle``), deren Text Schicht 1
-    aber noch nicht hat, einmal neu durch den Scan schicken. Nur diese
-    Handvoll, kein Voll-Scan. ``files`` = Fortsetzung nach einem Halt."""
+    """Songtext mit Zeiten nachholen (#234): Songs ohne gelesenen Untertitel-
+    Text (``_songs_missing_subtitles``) einmal neu durch den Scan schicken.
+    Nur diese Handvoll, kein Voll-Scan. ``files`` = Fortsetzung nach einem Halt."""
+    missing = _songs_missing_subtitles(conn)
     if "files" in params:
         files = list(params["files"])
     else:
-        rows = conn.execute(
-            """SELECT DISTINCT i.file_hash FROM items i
-                 JOIN raw_metadata r ON r.file_hash = i.file_hash
-                WHERE i.media_kind = 'audio' AND r.keyword = 'codec_type'
-                  AND r.value_text = 'subtitle'
-                  AND NOT EXISTS (SELECT 1 FROM raw_metadata s
-                                   WHERE s.file_hash = i.file_hash
-                                     AND s.source LIKE '%.subtitle')""").fetchall()
         files = []
-        for (file_hash,) in rows:
+        for file_hash in missing:
             paths = [p for (p,) in conn.execute(
                 "SELECT path FROM file_locations WHERE file_hash = ? ORDER BY id", (file_hash,))]
             path = next((p for p in paths if Path(p).is_file()), None)
             if path:
                 files.append(path)
-    return _scan(conn, [Path(p) for p in files], params, progress)
+    _scan_list(conn, [Path(p) for p in files], params, progress)
+    # Eigene Zeile statt der Scan-Zeile „0 neu · N bekannt“ (#251).
+    found = len(missing) - len(_songs_missing_subtitles(conn))
+    # Läuft nur automatisch (einmal je Installation): ohne Songs mit Spur
+    # ein Leerlauf ohne Spur im Admin (#277).
+    return {"summary": msg("sumAudioSubtitles", n=found, files=len(files)),
+            "quiet": not files}
 
 
 # -- Import / Rausverschieben ------------------------------------------------------
@@ -289,7 +318,83 @@ def moveout_task(conn, params, progress, ctx) -> dict[str, Any]:
     return {"summary": moveout_summary(report)}
 
 
+# -- Kopie-Export (ADR 0103) -----------------------------------------------------------
+
+@task("export")
+def export_task(conn, params, progress, ctx) -> dict[str, Any]:
+    """Medien als Kopie in den Export-Ordner legen. ``target`` ist der beim
+    Einreihen festgelegte Paketordner (das Datum bleibt der Tag des Exports,
+    auch nach einem Halt); ``done`` = Zähler des Teillaufs davor."""
+    from . import export as export_lib
+
+    hashes, target = params["hashes"], params["target"]
+    if not Path(params["root"]).is_dir():
+        # Ausgehängte Platte: nie den Ordner samt Eltern neu anlegen.
+        return {"summary": msg("sumExportNoRoot", root=params["root"])}
+    before = params.get("done")
+    report = export_lib.ExportReport(**(before or {}))
+    offset = report.done
+    index = 0
+
+    def on_file(i: int, total: int, name: str, rep) -> None:
+        nonlocal index
+        index = i
+        progress(current=msg("progressFile", index=offset + i, total=offset + total, name=name),
+                 report=_counters(scanned_files=offset + i - 1, media_files=offset + total,
+                                  new_items=rep.kopiert, known_items=rep.schon_da,
+                                  skipped_unknown=rep.nicht_erreichbar, failed=rep.fehler))
+
+    try:
+        export_lib.export_items(
+            conn, hashes, target=target, layout=params.get("layout", "flat"),
+            converted=params.get("converted", "png"),
+            preview_cache=params.get("preview_cache"),
+            tone=Tone.of(params.get("jxr")),
+            roots=(params.get("library_root"), params.get("watch_roots") or []),
+            tags=bool(params.get("tags", False)),
+            report=report, check_space=before is None, progress=on_file)
+    except TaskPaused:   # Halt VOR dieser Datei: sie und der Rest folgen (ADR 0093)
+        raise TaskPaused({**params, "hashes": hashes[index - 1:],
+                          "done": export_lib.counts(report)}) from None
+    except export_lib.NoSpace as exc:
+        return {"summary": msg("sumExportNoSpace", need=f"{exc.need / 1e9:.1f}",
+                               free=f"{exc.free / 1e9:.1f}")}
+    return {"summary": export_summary(report, target)}
+
+
+# -- Ausschnitt (ADR 0105) -------------------------------------------------------------
+
+@task("clip")
+def clip_task(conn, params, progress, ctx) -> dict[str, Any]:
+    """Einen Abschnitt aus einem Song oder Video in den Export-Ordner
+    schreiben. ``target`` ist der beim Einreihen festgelegte Tagesordner;
+    ``token`` reist ins Ergebnis, damit die Ansicht IHREN Lauf im Verlauf
+    wiederfindet. Die eine Fortschrittsmeldung kommt VOR der Arbeit: ein
+    Halt dort startet später sauber neu, mittendrin wird nicht angehalten."""
+    from . import clip as clip_lib
+
+    token, target = params.get("token"), params["target"]
+    if not Path(params["root"]).is_dir():
+        # Ausgehängte Platte: nie den Ordner samt Eltern neu anlegen.
+        return {"summary": msg("sumExportNoRoot", root=params["root"], token=token)}
+    progress(current=params.get("name") or params["hash"][:12])
+    report = clip_lib.export_clip(
+        conn, params["hash"], target=target, start=params["start"], end=params["end"],
+        outputs=params["outputs"],
+        roots=(params.get("library_root"), params.get("watch_roots") or []))
+    if report is None:
+        return {"summary": msg("sumClipOffline", name=params.get("name") or "", token=token)}
+    return {"summary": clip_summary(report, target, token)}
+
+
 # -- Wartung (Stufe 2A, ADR 0014) ---------------------------------------------------
+
+def _idle_followup(params: dict[str, Any], result: dict[str, int]) -> bool:
+    """Automatik-Nachläufer ohne Arbeit (#277): nichts neu, nichts
+    fehlgeschlagen. Die Engine führt ihn dann nicht als „zuletzt" und nicht
+    im Verlauf; Läufe über den Admin-Knopf (``auto`` aus) zählen immer."""
+    return bool(params.get("auto")) and not result["created"] and not result["failed"]
+
 
 @task("thumb_warm")
 def thumb_warm_task(conn, params, progress, ctx) -> dict[str, Any]:
@@ -305,13 +410,16 @@ def thumb_warm_task(conn, params, progress, ctx) -> dict[str, Any]:
     retry_failed = bool(params.get("retry_failed", False))
     result = warm_thumbnails(conn, params["cache_dir"], size=int(params["size"]),
                              progress=on_progress, pool=ctx.thumb_pool(),
-                             retry_failed=retry_failed)
+                             retry_failed=retry_failed,
+                             tone=Tone.of(params.get("jxr")),
+                             preview_cache=params.get("preview_cache"))
     parts = [msg("sumThumbsNew", n=result["created"]),
              msg("sumThumbsSkipped", n=result["skipped"])]
     if result["failed"]:
         parts.append(msg("sumThumbsFailedIssues" if retry_failed else "sumThumbsFailed",
                          n=result["failed"]))
-    return {"summary": msg("sumThumbs", parts=parts)}
+    return {"summary": msg("sumThumbs", parts=parts),
+            "quiet": _idle_followup(params, result)}
 
 
 @task("audio_warm")
@@ -335,7 +443,8 @@ def audio_warm_task(conn, params, progress, ctx) -> dict[str, Any]:
     if result["failed"]:
         parts.append(msg("sumThumbsFailedIssues" if retry_failed else "sumThumbsFailed",
                          n=result["failed"]))
-    return {"summary": msg("sumAudio", parts=parts)}
+    return {"summary": msg("sumAudio", parts=parts),
+            "quiet": _idle_followup(params, result)}
 
 
 @task("backfill_dates")
@@ -482,7 +591,7 @@ def issues_reject_task(conn, params, progress, ctx) -> dict[str, Any]:
 
 # -- Testhilfen (nur für die Testsuite: Prozess-Protokoll ehrlich prüfen) ----------
 
-@task("_sleep")
+@only_under_test("_sleep")
 def _sleep_task(conn, params, progress, ctx) -> dict[str, Any]:
     """Wartet ``seconds`` (Test: run_write neben einem Langläufer, Warteschlange)."""
     import time
@@ -495,13 +604,13 @@ def _sleep_task(conn, params, progress, ctx) -> dict[str, Any]:
     return {"summary": msg("sumTest", n=steps)}
 
 
-@task("_boom")
+@only_under_test("_boom")
 def _boom_task(conn, params, progress, ctx) -> dict[str, Any]:
     """Wirft (Test: Aufgabe kaputt ≠ Worker kaputt)."""
     raise RuntimeError(params.get("text", "kaputt"))
 
 
-@task("_die")
+@only_under_test("_die")
 def _die_task(conn, params, progress, ctx) -> dict[str, Any]:
     """Beendet den Worker-Prozess hart (Test: Aufsicht + Neustart)."""
     import os
@@ -559,3 +668,33 @@ def moveout_summary(report) -> dict[str, Any]:
     if report.fehler:
         parts.append(msg("sumMoveErrors", n=report.fehler))
     return msg("sumMoveout", parts=parts)
+
+
+def export_summary(report, target: str) -> dict[str, Any]:
+    """ExportReport → Meldungs-Dict (wie ``import_summary``)."""
+    parts = [msg("sumExportCopied", n=report.kopiert)]
+    if report.mit_angaben:
+        parts.append(msg("sumExportTagged", n=report.mit_angaben))
+    if report.ohne_angaben:
+        parts.append(msg("sumExportUntagged", n=report.ohne_angaben))
+    if report.schon_da:
+        parts.append(msg("sumExportPresent", n=report.schon_da))
+    if report.nicht_erreichbar:
+        parts.append(msg("sumExportOffline", n=report.nicht_erreichbar,
+                         first=report.erster_offline or ""))
+    if report.fehler:
+        parts.append(msg("sumExportErrors", n=report.fehler, first=report.erster_fehler))
+    return msg("sumExport", parts=parts, target=target)
+
+
+def clip_summary(report, target: str, token: str | None) -> dict[str, Any]:
+    """ClipReport → Meldungs-Dict. ``files`` (alle Dateien, neu oder schon
+    da) und ``token`` liest die Ausschnitt-Ansicht; der Satz nennt nur die
+    Zahlen und den Ordner."""
+    parts = [msg("sumClipWritten", n=len(report.geschrieben))]
+    if report.schon_da:
+        parts.append(msg("sumExportPresent", n=len(report.schon_da)))
+    if report.fehler:
+        parts.append(msg("sumExportErrors", n=report.fehler, first=report.erster_fehler))
+    return msg("sumClip", parts=parts, target=target, token=token,
+               files=[*report.geschrieben, *report.schon_da])

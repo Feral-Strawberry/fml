@@ -18,6 +18,23 @@ auf deinem Rechner: kein Cloud-Dienst, kein Konto, der Server ist nur unter
 > Hobby-Projekt in aktiver Entwicklung - mach Backups (siehe „Gut zu
 > wissen").
 
+## Neu in 2026.10.2
+
+Medien gehen jetzt auch hinaus, und die Originale bleiben, wo sie sind:
+
+- **Kopien exportieren:** Auswahl oder Suchergebnis per Sammel-Aktion als
+  geprüfte Kopie in einen Export-Ordner legen, für den Videoschnitt, eine
+  CD oder jemand anderen. Geht auch im Übersichtsmodus.
+- **Angaben reisen mit:** Musik-Angaben, Songtext und Cover von Hand
+  landen auf Wunsch in der Kopie von MP3 und M4A; ein anderes fml zeigt
+  das Cover dann auch an.
+- **Ausschnitt:** ein Stück aus einem Song oder Video markieren, in
+  Schleife anhören und als WAV oder MP4 schreiben (Modul, ab Werk aus).
+- **Songtext von Hand:** Text korrigieren oder eintragen und die Zeiten
+  per Tastendruck mitklopfen.
+- **Musiksammlung nach Ordnern:** die Audioliste gruppiert nach Ordnern,
+  zeigt Dubletten mit allen Fundorten, dazu das Suchwort `ordner:`.
+
 ## Neu in 2026.10.1
 
 Das Audio-Modul ist damit vollständig:
@@ -32,23 +49,6 @@ Das Audio-Modul ist damit vollständig:
 - **Audioliste zum Verwalten:** Der Regler **☰ S M L** schaltet zwischen
   Zeilen mit Wellenform und flachen Zeilen mit Titel, Interpret, Album,
   Nummer, Jahr und Genre.
-
-## Neu in 2026.10
-
-- **Leise arbeiten, anhalten, weitermachen:** zwei Knöpfe in der
-  Kopfzeile schalten Hintergrundaufgaben auf **Leise** (ein Prozess,
-  niedrigste Priorität) oder halten sie an. Was wartet, übersteht einen
-  Neustart.
-- **Musiksammlung:** Interpret, Album und Genre aus den Tags, als Gruppen
-  in der Seitenleiste, in der Suche und als Sortierung „Album".
-- **Songtext mit Zeiten:** Beim Abspielen steht die laufende Zeile unter
-  der Welle, die Abschnitte (`[Chorus]`, `[Verse]`) sind auf der Welle
-  markiert, im Panel läuft der Text mit.
-- **Zeitkommentare austauschen:** Kommentare als Datei exportieren und in
-  einem anderen fml importieren, mit Herkunfts-Etikett.
-- **Mehr Platz, mehr Ordnung:** rechtes Panel einklappen oder ganz
-  wegklappen (Taste **P**), **Datum von Hand** für Dateien mit falschem
-  Datum, **Finder-Tags** unter macOS als farbige Tags.
 
 Alles im Einzelnen: [`CHANGELOG.de.md`](CHANGELOG.de.md).
 
@@ -77,7 +77,9 @@ auf der Platte, und ich will **Überblick, Suche und Kuratierung** - aber
 niemand außer mir soll je eine Datei bewegen."
 
 - **Hände-weg-Garantie:** Im Übersichtsmodus (Auslieferungszustand)
-  **kopiert, verschiebt und löscht fml keine einzige Datei.** Die
+  **kopiert, verschiebt und löscht fml keine einzige Datei** an ihrem
+  Ort oder in eine Library. Einzige Schreibstelle ist ein Export-Ordner,
+  den du selbst einrichtest, für Kopien und Ausschnitte. Die
   Garantie ist serverseitig durchgesetzt - die entsprechenden Funktionen
   sind nicht versteckt, sondern gesperrt und erklären das auch so. Ein
   Badge „👁 Übersichtsmodus" in der Kopfzeile zeigt den Zustand.
@@ -86,8 +88,9 @@ niemand außer mir soll je eine Datei bewegen."
   Notizen schreiben, **ablehnen** (nimmt ein Medium nur aus dem Katalog -
   die Datei bleibt liegen) und per 📂-Knopf zur Datei in den
   Explorer/Finder springen.
-- **Was bewusst nicht geht:** kopieren, verschieben und das
-  Rausverschieben Abgelehnter - alles, was Dateien anlegt oder bewegt.
+- **Was bewusst nicht geht:** in die Library kopieren, verschieben und
+  das Rausverschieben Abgelehnter - alles, was Dateien bewegt oder in
+  der Library anlegt.
 
 Du kannst fml in diesem Modus gefahrlos auf einen fremden oder gewachsenen
 Bestand loslassen, um ihn erst einmal zu **verstehen**.
@@ -237,8 +240,19 @@ Größenangaben.
   bis zu sechs Fassungen, eine **eigene Reihenfolge** je gespeicherter
   Suche zum Probehören einer Playlist und **Cover** aus der eigenen
   Bibliothek, mit denen fertige Songs in die
-  Galerie kommen. Die Audiodateien selbst ändert fml nie. Alles dazu:
+  Galerie kommen. Titel, Interpret, Album und den **Songtext** (samt
+  Zeiten zum Mitklopfen) pflegst du bei Bedarf **von Hand** nach, und
+  eine Darstellung **nach Ordnern** zeigt die Sammlung so, wie sie auf der
+  Platte liegt. Die Audiodateien selbst ändert fml nie. Alles dazu:
   [`docs/audio.md`](docs/audio.md).
+- **Kopien und Ausschnitte exportieren:** Die Sammel-Aktion legt eine
+  Auswahl oder ein ganzes Suchergebnis als **Kopie** in einen
+  Export-Ordner: Bit für Bit das Original, nach dem Schreiben geprüft,
+  doppelte Dateien werden erkannt. Songs nehmen auf Wunsch ihre Angaben,
+  ihren Songtext und ihr Cover von Hand in die Kopie mit. Das optionale
+  Modul **Ausschnitt** schneidet ein Stück aus einem Song oder Video als
+  WAV oder MP4. Alles dazu: [`docs/export.md`](docs/export.md),
+  [`docs/ausschnitt.md`](docs/ausschnitt.md).
 - **Mehrere Instanzen:** fml kann mehrfach parallel laufen - jede Instanz
   mit eigener Datenbank, eigenem Port, eigenem Namen und eigener
   Akzentfarbe. Damit bildest du aus einer konsolidierten Gesamt-Library
@@ -255,20 +269,24 @@ Größenangaben.
 
 ## Was fml nicht tut
 
-- **Keine Bild- oder Audiobearbeitung, kein Export:** fml ist Katalog und
-  Sichtgerät.
-  Der Absprung zurück ins Erzeugen ist der Workflow-Download für ComfyUI.
+- **Keine Bild- oder Audiobearbeitung:** fml ist Katalog und
+  Sichtgerät. Hinaus gehen nur Kopien und Ausschnitte in einen
+  Export-Ordner. Die Kopien sind bitgleich, außer Kodak Photo CD (als
+  PNG) und Songs, in deren Kopie fml auf Wunsch die Angaben von Hand
+  schreibt. Der Absprung zurück ins Erzeugen ist der Workflow-Download für
+  ComfyUI.
 - **Kein Löschen von Dateien** - in keinem Modus. Die einzigen zwei
   Stellen, an denen fml Dateien überhaupt anfasst, sind der Import und
   „Abgelehnte rausverschieben", beide nur bei eingeschalteter
-  Library-Verwaltung, beide hash-verifiziert.
+  Library-Verwaltung, beide hash-verifiziert. Der Export liest die
+  Originale nur und schreibt allein in den Export-Ordner.
 - **Kein Netzwerkdienst:** bindet nur an `127.0.0.1`, keine
   Benutzerverwaltung, kein Fernzugriff. Die Datenbank gehört auf eine
   lokale Platte, nicht auf ein Netzlaufwerk.
 - **Kein Abgleich zwischen Instanzen oder Rechnern:** Bewertungen und
   Tags leben in der Datenbank der jeweiligen Instanz. Einzige Ausnahme:
-  Zeitkommentare an Songs lassen sich als Datei von einem fml in ein
-  anderes übernehmen.
+  Zeitkommentare, Musik-Angaben und Songtexte von Hand an Songs lassen
+  sich als Datei von einem fml in ein anderes übernehmen.
 - **Keine KI-Analyse der Bildinhalte** (noch nicht): fml liest, was in
   den Dateien steht - es errät keine Tags aus Pixeln. Eine lokale
   VLM-Anreicherung als klar getrennte Schicht ist geplant.
@@ -364,6 +382,8 @@ darauf hin, falls es fehlt.
 (Import & Watchordner) · [`docs/instanzen.md`](docs/instanzen.md) (mehrere
 Instanzen / Subgalerien) · [`docs/audio.md`](docs/audio.md) (Audio-Modul)
 · [`docs/rankings.md`](docs/rankings.md) (Rankings) ·
+[`docs/export.md`](docs/export.md) (Kopien exportieren) ·
+[`docs/ausschnitt.md`](docs/ausschnitt.md) (Ausschnitt) ·
 [`docs/admin.md`](docs/admin.md) (Admin & Wartung) · [`docs/architektur.md`](docs/architektur.md) (technisches
 Konzept) · [`docs/security.md`](docs/security.md) (Sicherheit und
 Abhängigkeiten) · [`docs/`](docs/) (alles Weitere)
@@ -425,3 +445,32 @@ venv um den `PATH`: `.venv/bin/python -m pytest` ist der robuste Ausweg
 
 Code in `src/feral/`, Tests in `tests/`, Doku in `docs/`. Daten (DB, Cache,
 Medien) liegen **außerhalb** des Repos (`.gitignore`).
+
+### Wo was dokumentiert ist
+
+Wer den Code verstehen will, fängt am besten bei den Diagrammen an, nicht
+bei den Quelltexten:
+
+- [`docs/architektur.md`](docs/architektur.md) - **der Einstieg.** Das
+  technische Konzept in vier Diagrammen: Prozesse und ihre Grenzen, der Weg
+  einer Datei in den Katalog mit den zwei Metadaten-Schichten, von der Suche
+  zur Galerie, Installation und Lieferkette. Dazu die Leitplanken, an die
+  sich der Code hält.
+- [`docs/schema.md`](docs/schema.md) - die Datenbank: ER-Diagramm und alle
+  Tabellen mit Spalten, Schlüsseln und Indexen, aus dem echten Schema
+  erzeugt.
+- [`docs/extraction.md`](docs/extraction.md) und
+  [`docs/interpretation.md`](docs/interpretation.md) - die beiden
+  Metadaten-Schichten im Einzelnen: Roh-Extraktion je Container, Parser je
+  Erzeuger.
+- [`docs/persistence.md`](docs/persistence.md) und
+  [`docs/scanning.md`](docs/scanning.md) - wie gespeichert, abgefragt und
+  aufgenommen wird.
+- [`docs/tests.md`](docs/tests.md) - was die Testsuite absichert und wie
+  man ihr Ergebnis liest.
+- [`docs/security.md`](docs/security.md) und
+  [`DEPENDENCIES.md`](DEPENDENCIES.md) - Umgang mit fremden Dateien, jede
+  Abhängigkeit mit Begründung.
+
+Alle Kapitel im Überblick: [`docs/README.md`](docs/README.md).
+

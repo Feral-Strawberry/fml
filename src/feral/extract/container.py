@@ -9,6 +9,7 @@ Container = ein neues Extraktor-Modul + ein Registry-Eintrag (ADR 0008/0011):
 - WEBM/MKV, MP4/MOV      → ffprobe-System-Binary (`video_ffprobe.py`)
 - PSD/PSB    → Stdlib-Eigenbau (`psd.py`, ADR 0052)
 - PCD        → Kodak Photo CD, Stdlib-Eigenbau inkl. 16Base-Decoder (`pcd.py`, #208)
+- JXR        → JPEG XR (HDR-Screenshots), Verzeichnis per Stdlib (`jxr.py`, ADR 0104)
 - PDF        → erkannt, kein Extraktor (gestrichen, ADR 0051)
 - MP3/FLAC/Ogg/WAV/AIFF/CAF → Stdlib-Walker + ffprobe-Fakten (`audio.py`,
   ADR 0083) — NUR bei eingeschaltetem Audio-Modul; aus = unbekanntes Format.
@@ -20,7 +21,7 @@ from functools import partial
 from pathlib import Path
 from typing import Callable
 
-from . import audio, image_pillow, pcd, png, psd, video_ffprobe
+from . import audio, image_pillow, jxr, pcd, png, psd, video_ffprobe
 from .types import ContainerExtraction
 
 
@@ -50,6 +51,7 @@ _EXTRACTORS: dict[str, Callable[[str | Path], ContainerExtraction]] = {
     "png": png.extract,
     "psd": psd.extract,
     "pcd": pcd.extract,
+    "jxr": jxr.extract,
     **{c: partial(image_pillow.extract, container=c) for c in image_pillow.CONTAINERS},
     **{c: partial(video_ffprobe.extract, container=c) for c in video_ffprobe.CONTAINERS},
     **{c: partial(audio.extract, container=c) for c in audio.CONTAINERS},
@@ -87,6 +89,8 @@ def sniff_container(head: bytes) -> str | None:
         return "gif"
     if head[:2] == b"BM":
         return "bmp"
+    if jxr.is_jxr(head):
+        return "jxr"   # TIFF-artig, aber eigene Kennung 0xBC statt 0x2A
     if head[:4] == b"II\x2a\x00" and head[8:10] == b"CR":
         return "cr2"   # Canon RAW v2: TIFF-Header + eigener Marker bei Byte 8
     if head[:4] in (b"II\x2a\x00", b"MM\x00\x2a"):

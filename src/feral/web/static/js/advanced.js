@@ -163,6 +163,9 @@ const CATS = [
   // Dateiname der Fundorte (Feral Strawberry, 2026-07-16): Freitext-Eingabe wie raw.
   { key: "datei", label: STRINGS.acCatDatei, input: true,
     placeholder: STRINGS.acDateiPlaceholder, hint: STRINGS.acDateiHint, kind: "datei" },
+  // Ordner der Fundorte (#268): Name samt Unterordnern, "…" = genauer Pfad.
+  { key: "ordner", label: STRINGS.acCatOrdner, input: true,
+    placeholder: STRINGS.acOrdnerPlaceholder, hint: STRINGS.acOrdnerHint, kind: "ordner" },
   { key: "sort", label: STRINGS.acCatSort, rows: () =>
     SORT_OPTIONS.map((o) => ({
       label: o.label, count: null, title: `sort: ${o.key}`, pred: pred("sort", o.key),
@@ -444,9 +447,14 @@ export function initAdvanced() {
       push(STRINGS.chipKindLabels.year, String(y.year), y.count, pred("year", y.year));
     }
     out.sort((a, b) => (b.prefix - a.prefix) || (b.count - a.count));
+    // Ordner (#268): immer als letzte Zeile vor „Volltext", ohne Zähler —
+    // Ordnernamen gibt es keine Facette, gezählt wird erst als Chip.
+    const folder = { catLabel: STRINGS.chipKindLabels.ordner, label: term, count: null,
+                     pred: pred("ordner", term) };
     if (!exact) exact = navSuggestion(term);
-    if (!exact) return { rows: out.slice(0, 8), sel: -1 };
-    return { rows: [exact, ...out.slice(0, 7), { fulltext: true, catLabel: STRINGS.taFulltext, label: term }],
+    if (!exact) return { rows: [...out.slice(0, 7), folder], sel: -1 };
+    return { rows: [exact, ...out.slice(0, 6), folder,
+                    { fulltext: true, catLabel: STRINGS.taFulltext, label: term }],
              sel: 0 };
   }
 
@@ -462,7 +470,7 @@ export function initAdvanced() {
       <div class="tarow${i === selIndex ? " active" : ""}${s.count === 0 ? " dim" : ""}${s.fulltext ? " tafull" : ""}" data-i="${i}">
         <span class="tacat">${esc(s.catLabel)}:</span>
         <span class="talabel">${esc(s.label)}</span>
-        ${s.fulltext || s.nav ? "" : `<span class="tacount">${s.count.toLocaleString(STRINGS.locale)}</span>`}
+        ${s.fulltext || s.nav || s.count == null ? "" : `<span class="tacount">${s.count.toLocaleString(STRINGS.locale)}</span>`}
       </div>`).join("")
       + `<div class="tahint">${STRINGS.taHint}</div>`;
     ta.hidden = false;

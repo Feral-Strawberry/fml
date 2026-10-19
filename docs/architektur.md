@@ -20,9 +20,10 @@ Jedes installierte Paket ist mit fester Version und Prüfsumme benannt.
 Zwei Prozesse, eine Datenbank. Der Web-Prozess beantwortet jede Anfrage
 und bleibt dabei flüssig, weil alles Langlaufende in einem zweiten Prozess
 passiert. **Rot sind die beiden Schreibwege:** kurze Griffe (Bewerten,
-Tags, Notizen, Musik-Angaben, Duelle) schreibt der Web-Prozess selbst unter einer Sperre,
+Tags, Notizen, Musik-Angaben, Songtext, Cover, Duelle) schreibt der Web-Prozess selbst unter einer Sperre,
 alles Langlaufende (Scan, Import, Neu interpretieren, Thumbnails) schreibt
-der Worker. Der Worker wird per `spawn` gestartet, bekommt eine Aufgabe
+der Worker. Kopie-Export und Ausschnitt laufen ebenfalls im Worker; sie
+lesen die Datenbank nur und schreiben Dateien allein in den Export-Ordner. Der Worker wird per `spawn` gestartet, bekommt eine Aufgabe
 auf einmal und meldet Fortschritt über eine zweite Queue; stirbt er,
 startet ihn der nächste Auftrag neu. Medien laufen über einen eigenen
 Thread-Pool, damit große Videos keine Galerie-Anfrage blockieren. Der
@@ -57,8 +58,9 @@ eine einzige Datei zu öffnen. Bewertungen, Tags, Notizen und
 Zeitkommentare liegen getrennt davon und werden nie von einem Parser
 überschrieben.
 
-In der Gegenrichtung gibt es genau eine Brücke: die **Musik-Angaben von
-Hand** (Titel, Interpret, Album, Nummer, Jahr, Genre). Sie liegen
+In der Gegenrichtung gibt es zwei Brücken: die **Musik-Angaben von
+Hand** (Titel, Interpret, Album, Nummer, Jahr, Genre) und den **Songtext
+von Hand** (samt Zeiten und Abschnitten). Beide liegen
 ebenfalls in der manuellen Schicht, werden aber beim Schreiben von
 Schicht 2 **über die Werte aus den Tags gelegt**. So sehen Suche,
 Seitenleiste, Sortierung und Volltext ohne Sonderfall den geltenden Wert.
@@ -66,6 +68,12 @@ Die Herkunft bleibt am Wert sichtbar, die Datei bleibt unverändert, und
 wer die Angabe leert, bekommt den Tag-Wert zurück. Details:
 [Extraktion](extraction.md), [Interpretation](interpretation.md),
 [Audio-Modul](audio.md#musik-angaben-von-hand).
+
+Nur in eine **Kopie** gelangen diese Angaben auch als Datei: Beim
+[Kopie-Export](export.md) schreibt `tagwrite.py` sie auf Wunsch in die
+Kopie eines Songs, bei MP3 über einen eigenen ID3-Schreiber, bei M4A über
+ffmpeg ohne Neukodierung. Das Original bleibt unberührt, die Kopie wird
+erst nach geprüftem Ton abgelegt.
 
 ## Von der Suche zur Galerie
 
@@ -105,8 +113,9 @@ Dependabot schlägt Sicherheits-Updates direkt auf dem Lock vor. Details:
 ## Leitplanken
 
 - **Original heilig:** fml fasst Dateien nur beim Import und beim
-  Rausverschieben an. Ab Werk läuft der Übersichtsmodus: nie kopieren,
-  verschieben oder löschen.
+  Rausverschieben an und schreibt Kopien und Ausschnitte nur in den
+  Export-Ordner. Ab Werk läuft der Übersichtsmodus: nie verschieben,
+  löschen oder in die Library kopieren.
 - **Alles Abgeleitete ist reproduzierbar:** Schicht 2, Thumbnails,
   Erstelldatum, Volltextindex und die Audio-Analyse (Lautheit,
   Wellenform) lassen sich aus Hash, Roh-Blobs und der manuellen Schicht

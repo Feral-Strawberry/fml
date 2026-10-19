@@ -2,7 +2,8 @@
 // Kachel zeigt das Vorschaubild des Coverbilds (kein Thumb-Auftrag für den
 // Song), ♪ + Dauer und ▶; Leertaste spielt statt Lupe; das Detailpanel setzt
 // und entfernt; der Auswahldialog sucht Bilder mit den Tags des Songs im
-// Galerie-Grundbereich und hält Tasten bei sich.
+// Galerie-Grundbereich und hält Tasten bei sich. Bei Mehrfachauswahl wirken
+// Setzen und Entfernen auf alle Songs der Auswahl (#281).
 
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
@@ -15,6 +16,7 @@ const { initGallery } = await import("../../src/feral/web/static/js/gallery.js")
 const { initLoupe } = await import("../../src/feral/web/static/js/loupe.js");
 const { initDetail } = await import("../../src/feral/web/static/js/detail.js");
 const { initCoverDialog, startExpression } = await import("../../src/feral/web/static/js/coverdialog.js");
+const { initCurate } = await import("../../src/feral/web/static/js/curate.js");
 
 const IMG = hashOf(1), SONG = hashOf(2), TAKE = hashOf(3);
 const img = item(1, { name: "regenzeit_cover_00001_.png" });
@@ -39,6 +41,7 @@ document.createElement = (tag) => {
 };
 
 let manual = { rating: null, tags: ["regenzeit"], notes: "", model: null, cover: IMG };
+let stateTags = ["regenzeit"];   // gemeinsame Tags der Auswahl (Startsuche des Dialogs)
 
 before(async () => {
   loadShell();
@@ -56,6 +59,8 @@ before(async () => {
   mockApi.get("/api/models", () => ({ models: [] }));
   mockApi.get(/^\/api\/audio\/analysis\//, () => mockApi.status(404, {}));
   mockApi.get(/^\/api\/item\/[0-9a-f]+\/comments$/, () => ({ comments: [] }));
+  mockApi.post("/api/batch/cover/state", ({ body }) => ({
+    songs: body.hashes.length, covered: manual.cover ? 1 : 0, cover: manual.cover, tags: stateTags }));
   const text = (p) => `${p.kind}: ${p.values.map((v) => v.value).join(" | ")}`;
   mockApi.get("/api/filter/parse", ({ params }) => {
     const expr = params.get("expr");
@@ -69,6 +74,7 @@ before(async () => {
   document.getElementById("gridwrap").clientHeight = 1000;
   initGallery();
   initLoupe();
+  initCurate();
   initDetail();
   initCoverDialog();
   emit("search-state-changed", { predicates: [], expression: "" });
@@ -108,9 +114,10 @@ test("Panel: Cover oben, Zeile Finalisiert direkt darunter, eingebettetes Bild u
   assert.ok(panel().querySelector(".filerows .cvemb"), "eingebettetes Suno-Bild klein unter Datei");
   assert.ok(panel().querySelector(".ppreview .audiocover"), "Cover über dem Player");
   const changed = record("cover-changed");
-  mockApi.on("DELETE", `/api/item/${SONG}/cover`, () => {
+  mockApi.post("/api/batch/cover/remove", ({ body }) => {
+    assert.deepEqual(body.hashes, [SONG]);
     manual = { ...manual, cover: null };
-    return { manual };
+    return { songs: [SONG], manual };
   });
   click(sec.querySelector('[data-cover="remove"]'));
   await flush();
@@ -132,7 +139,7 @@ test("Dialog: sucht im Galerie-Grundbereich, setzt das gewählte Bild, Tasten bl
   const picks = record("cover-pick");
   click(panel().querySelector('#pCover [data-cover="pick"]'));
   await flush();
-  assert.deepEqual(picks[0].tags, ["regenzeit"]);
+  assert.deepEqual(picks[0].hashes, [SONG]);
   picks.stop();
   assert.equal(dlg().hidden, false);
   const q = mockApi.callsTo("/api/items").at(-1).params;
@@ -148,10 +155,10 @@ test("Dialog: sucht im Galerie-Grundbereich, setzt das gewählte Bild, Tasten bl
   assert.deepEqual(seen, []);
   // Wählen + setzen.
   let posted = null;
-  mockApi.post(`/api/item/${SONG}/cover`, ({ body }) => {
+  mockApi.post("/api/batch/cover", ({ body }) => {
     posted = body;
     manual = { ...manual, cover: body.cover };
-    return { manual };
+    return { songs: [SONG], manual };
   });
   const changed = record("cover-changed");
   assert.equal(dlg().querySelector(".cvok").disabled, true);
@@ -159,14 +166,14 @@ test("Dialog: sucht im Galerie-Grundbereich, setzt das gewählte Bild, Tasten bl
   assert.equal(dlg().querySelector(".cvok").disabled, false);
   click(dlg().querySelector(".cvok"));
   await flush();
-  assert.deepEqual(posted, { cover: IMG });
+  assert.deepEqual(posted, { hashes: [SONG], cover: IMG });
   assert.equal(changed.length, 1);
   assert.equal(dlg().hidden, true);
   changed.stop();
 });
 
 test("Chip ✕ im Dialog baut den Ausdruck über /api/filter/build neu", async () => {
-  emit("cover-pick", { hash: SONG, name: "Regenzeit final", tags: ["regenzeit"], cover: IMG });
+  emit("cover-pick", { hashes: [SONG], name: "Regenzeit final" });
   await flush();
   click(dlg().querySelectorAll(".cvchips .chipx")[1]);   // tag-Chip weg
   await flush();
@@ -176,7 +183,8 @@ test("Chip ✕ im Dialog baut den Ausdruck über /api/filter/build neu", async (
 });
 
 test("Dialog: ein nacktes Wort ist Text — live beim Tippen und als Chip mit Enter", async () => {
-  emit("cover-pick", { hash: SONG, name: "Regenzeit final", tags: [], cover: null });
+  stateTags = [];
+  emit("cover-pick", { hashes: [SONG], name: "Regenzeit final" });
   await flush();
   const input = dlg().querySelector(".cvinput");
   input.value = "festival";
@@ -190,6 +198,46 @@ test("Dialog: ein nacktes Wort ist Text — live beim Tippen und als Chip mit En
   assert.equal(dlg().querySelectorAll(".cvchips .chip").length, 2);
   assert.equal(input.value, "");
   keydown("Escape");
+  stateTags = ["regenzeit"];
+});
+
+test("Mehrfachauswahl (#281): Setzen und Entfernen wirken auf alle Songs, der Dialog nennt die Zahl", async () => {
+  emit("selection-changed", { hash: SONG, index: 1, hashes: [TAKE, SONG] });
+  await flush();
+  const bar = panel().querySelector("#pCover");
+  assert.ok(bar.textContent.includes("Cover für Auswahl setzen"));
+  click(bar.querySelector('[data-cover="pick"]'));
+  await flush();
+  assert.deepEqual(mockApi.callsTo("/api/batch/cover/state").at(-1).body.hashes, [SONG, TAKE],
+    "Primär-Song zuerst, dann der Rest der Auswahl");
+  assert.ok(dlg().querySelector(".pickhead").textContent.includes("Cover für 2 Songs"));
+  assert.ok(dlg().querySelector(".cvreplace").textContent.includes("1 davon"));
+  let posted = null;
+  mockApi.post("/api/batch/cover", ({ body }) => {
+    posted = body;
+    manual = { ...manual, cover: body.cover };
+    return { songs: body.hashes, manual };
+  });
+  const changed = record("cover-changed");
+  click(dlg().querySelector(`.cvtile[data-hash="${IMG}"]`));
+  click(dlg().querySelector(".cvok"));
+  await flush();
+  assert.deepEqual(posted, { hashes: [SONG, TAKE], cover: IMG });
+  assert.deepEqual(changed[0].hashes, [SONG, TAKE]);
+  mockApi.post("/api/batch/cover/remove", ({ body }) => {
+    posted = body;
+    manual = { ...manual, cover: null };
+    return { songs: body.hashes, manual };
+  });
+  click(panel().querySelector('#pCover [data-cover="remove"]'));
+  await flush();
+  assert.deepEqual(posted, { hashes: [SONG, TAKE] });
+  assert.equal(changed.length, 2);
+  changed.stop();
+  manual = { ...manual, cover: IMG };   // Ausgangsstand für die Abspielleiste
+  emit("cover-changed", { hash: SONG, hashes: [SONG], manual });
+  emit("selection-changed", { hash: SONG, index: 1 });
+  await flush();
 });
 
 test("Abspielleiste zeigt das Cover des laufenden Songs", async () => {

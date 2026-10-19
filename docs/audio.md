@@ -8,8 +8,10 @@ davon nichts.
 Was das Modul kann, in der Reihenfolge dieser Seite: eine eigene
 **Audioansicht** als Liste mit dreifarbiger Wellenform, ein **Player** mit
 Lautheitsangleich, „Alle abspielen" und Abspielleiste, **Zeitkommentare**
-an Stellen im Song, das **Vergleichen** von zwei bis sechs Fassungen und
-**Cover**, mit denen fertige Songs in die Galerie kommen. Dazu liest fml
+an Stellen im Song, **Musik-Angaben** und **Songtext von Hand**, das
+**Vergleichen** von zwei bis sechs Fassungen und **Cover**, mit denen
+fertige Songs in die Galerie kommen. Die Liste zeigt eine Sammlung auf
+Wunsch **nach Ordnern**. Dazu liest fml
 die Metadaten von Suno, ComfyUI-Musik und eigenen Aufnahmen, misst
 Lautheit und Wellenform und sucht auch im Songtext.
 
@@ -104,14 +106,24 @@ verschiedener Fassungen sichtbar untereinander. Der schon gespielte Teil
 ist hell, der rote Strich ist der **Abspielkopf** der Zeile. Ein Klick in
 die Wellenform spielt die Zeile ab dieser Stelle.
 
+Die Zeitachse reicht **höchstens 7 Minuten**. Ein längerer Song, etwa ein
+Konzert-Mitschnitt, füllt seine Zeile **gestaucht** und trägt am rechten
+Rand ein **»**; der Tooltip der Welle nennt die wahre Länge („Gestaucht:
+2:00:00 auf die Breite von 7:00"), ebenso die Spalte „Dauer". Das Lineal
+gilt dann nur für die übrigen Zeilen. Ein Klick in eine gestauchte Welle
+springt trotzdem an die richtige Stelle des Songs. So macht ein einziger
+Mitschnitt die anderen Wellen nicht winzig.
+
 **Bedienen:**
 
 | Taste / Maus | Wirkung |
 |---|---|
 | ↑ / ↓ | Zeile wechseln |
 | Alt+↑ / Alt+↓ | Zeile eine Stelle verschieben (nur Sortierung „Manuell", siehe [Eigene Reihenfolge](#eigene-reihenfolge-einer-gespeicherten-suche)) |
-| Leertaste, ▶, Doppelklick | Abspielen / Pause (die Leertaste auch direkt nach einem Klick auf einen Knopf wie ⏮ oder ≈ Lautheit) |
-| ← / → | Abspielkopf der Zeile 5 Sekunden zurück / vor (mit Shift 1 Sekunde) |
+| Leertaste | Song der Abspielleiste anhalten / weiterspielen, egal welche Zeile ausgewählt ist; ist die Leiste leer, spielt die ausgewählte Zeile (auch direkt nach einem Klick auf einen Knopf wie ⏮ oder ≈ Lautheit; in Eingabefeldern bleibt sie ein Leerzeichen) |
+| Enter | ausgewählte Zeile abspielen / anhalten |
+| ▶, Doppelklick | diese Zeile abspielen / anhalten |
+| ← / → | Song der Abspielleiste 5 Sekunden zurück / vor (mit Shift 1 Sekunde); ist die Leiste leer, der Abspielkopf der ausgewählten Zeile |
 | Klick in die Wellenform | ab dieser Stelle abspielen |
 | 1 bis 5, 0 | Sterne setzen / entfernen (auch Klick auf die Punkte der Zeile) |
 | K | Zeitkommentar an der Stelle des Abspielkopfs der Zeile |
@@ -125,8 +137,10 @@ Es spielt immer **genau eine** Zeile, aber **jede Zeile hat ihren eigenen
 Abspielkopf**. Wer eine andere startet, pausiert die erste; sie merkt
 sich ihre Stelle, beim nächsten ▶ geht es dort weiter. So lassen sich vier
 Fassungen Refrain gegen Refrain anhören: jede einmal an den Refrain
-setzen, dann reihum ▶. Die Pfeiltasten verschieben den Abspielkopf der
-ausgewählten Zeile auch, wenn sie gerade nicht spielt.
+setzen, dann reihum ▶. Mit der Tastatur: ↓ zur nächsten Fassung, Enter,
+mit ←/→ an den Refrain. Leertaste und ←/→ meinen immer den Song in der
+Abspielleiste, wie die Medientasten der Tastatur; nur bei leerer Leiste
+(und im Vergleich, wo die Zeilen der Player sind) die ausgewählte Zeile.
 
 **Welle oder Angaben.** Der Regler **☰ S M L** oben in der Kopfzeile
 bestimmt die Darstellung der Liste. Es leuchtet immer genau ein Knopf:
@@ -155,6 +169,41 @@ die Wellenform der Abspielleiste, dort stehen auch die Zeitkommentare.
 Wellenformen, nach Esc ist die Liste wieder flach. Wird die Mitte eng,
 weichen zuerst Genre, Jahr und Nr., dann das Album. Die Wahl merkt sich
 der Browser.
+
+**Fundorte und Ordner.** Beim Katalogisieren bleiben die Dateien in ihren
+Ordnern liegen, und derselbe Song kann an mehreren Stellen liegen. In
+„Angaben" wird aus ☰ der Knopf **☰▾**; ein Klick darauf öffnet ein Menü,
+das wählt, wie die Liste ihre Zeilen bildet:
+
+- **Nach Ordnern** (Standard): je Fundort eine Zeile, nach Ordnern
+  geordnet, mit einem Kopf je Ordner: zuerst die Library als ein Ordner,
+  dann die Quellen (der Pfad beginnt beim Namen der Quelle), zuletzt
+  externe Ordner mit vollem Pfad. Unterordner folgen direkt unter ihrem
+  Ordner, der gleiche Anfang wie im Kopf davor ist abgedunkelt. In jedem
+  Ordner gilt die gewählte Sortierung. Liegt alles in einem einzigen
+  Ordner (etwa nur in der Library), gibt es keinen Kopf.
+- **Je Fundort:** Ein Song steht für jeden Ort, an dem er liegt, einmal in
+  der Liste, mit dem Ordner in einer eigenen Spalte „Ordner". Zusammen
+  mit **Dubletten** in der Seitenleiste und der Sortierung nach Titel
+  steht so jede Dublette mit allen ihren Ordnern untereinander.
+- **Je Song:** eine Zeile je Song, egal wo er liegt.
+
+Im Kopf eines Ordners öffnet ein Klick auf einen Ordnernamen diesen
+Ordner im Dateimanager, wie die Fundort-Zeile im Panel. **⌕** ganz rechts
+zeigt nur noch diesen Ordner samt Unterordnern (das Suchkriterium
+`ordner: "<Pfad>"`, in der Library `fundort: library`); noch einmal ⌕
+oder ✕ am Kriterium zeigt wieder alle. Solange ein `ordner:`- oder
+`fundort:`-Kriterium steht, zeigt die Liste nur die Fundorte, die dazu
+passen. Liegt ein Song noch an weiteren Stellen, steht **⧉** mit der
+Zahl seiner Fundorte neben dem Titel.
+
+Ausgewählt, bewertet, abgelehnt und abgespielt wird weiter der Song:
+Ein Klick markiert alle seine Zeilen, „Alle abspielen" spielt jeden Song
+einmal, ↑/↓ überspringen die Köpfe. Die Trefferzahl oben zählt Songs, in
+Klammern die Fundorte. Umsortieren per Ziehen bei „Manuell" geht hier
+nicht. In „Welle" und in der Galerie zeigt die Liste je Song eine Zeile;
+die Wahl an ☰▾ merkt sich der Browser. Ob eine Datei an ihrem
+Fundort noch existiert, prüft die Liste nicht, das zeigt das Panel.
 
 **▶ Alle abspielen** (oben rechts in der Audioansicht) spielt die ganze
 Liste in der aktuellen Sortierung, jeden Song von vorn, wie eine CD. Die
@@ -263,6 +312,9 @@ Zu sehen ist das an drei Stellen:
 - **Im Detailpanel** (GENERATION → Songtext) laufen die Zeilen beim
   Abspielen mit; ein Klick auf eine Zeile springt dorthin. Wer das nicht
   braucht, klappt den Abschnitt zu.
+
+Stimmt der Songtext nicht oder fehlt er, lässt er sich von Hand
+korrigieren oder eintragen, siehe [Songtext von Hand](#songtext-von-hand).
 
 Songs, die schon vor fml 2026.10 im Katalog waren, holt fml einmal von
 selbst nach (Aufgabe „Songtexte mit Zeiten nachholen“ beim ersten Start mit
@@ -414,8 +466,9 @@ demselben Weg wie die Zeitkommentare (siehe
 
 **Exportieren:** Songs auswählen oder eine Suche eingrenzen, die
 **Sammel-Aktion** öffnen, in der Zeile „Austausch" das Häkchen
-**Musik-Angaben** setzen (auf Wunsch zusätzlich **Zeitkommentare**) und
-auf **Exportieren** klicken. In der Datei stehen **nur Angaben von
+**Musik-Angaben** setzen (auf Wunsch zusätzlich **Zeitkommentare** und
+**Songtext**, siehe [Songtext mit einem anderen fml austauschen](#songtext-mit-einem-anderen-fml-austauschen)) und
+auf **Austauschdatei speichern** klicken. In der Datei stehen **nur Angaben von
 Hand**, nie Werte aus den Tags: Die stecken ohnehin in der Musikdatei.
 
 **Importieren:** auf der anderen Seite **Admin → Wartung → Austausch
@@ -434,6 +487,104 @@ importieren**. Die Vorschau zählt je Song und Feld:
 Herkunft. Derselbe Import zweimal ändert nichts. Die Songs werden wie bei
 den Kommentaren über die Datei selbst gefunden, Suno-Songs notfalls über
 die Suno-Song-ID (nur mit Häkchen).
+
+## Songtext von Hand
+
+Sunos Songtext stimmt nicht immer, und eigene Songs bringen oft gar keinen
+mit. Unter **KURATIERT** steht bei einem einzelnen ausgewählten Song die
+Zeile **Songtext**: Sie sagt, woher der geltende Text kommt (**aus der
+Datei**, **✎ von Hand** oder **keiner**), und öffnet mit **bearbeiten**
+bzw. **eintragen** die Ansicht **Songtext bearbeiten**.
+
+Die Ansicht zeigt den Songtext Zeile für Zeile, links ▶ und die Zeit:
+
+- **Wortlaut ändern:** in die Zeile klicken und tippen.
+- **Zeile einfügen:** Enter teilt die Zeile an der Schreibmarke.
+  **Verbinden:** Rückschritt am Zeilenanfang hängt die Zeile an die davor,
+  Entf am Zeilenende holt die nächste heran. **Löschen:** das ✕ rechts.
+  ↑ und ↓ wechseln die Zeile.
+- **Abschnitte:** Eine Zeile nur in eckigen Klammern (`[Chorus]`,
+  `[Guitar Solo]`) ist eine Abschnittsmarke.
+- **Eigenen Text eintragen:** den ganzen Text einfügen; jede Zeile wird
+  eine Zeile, Leerzeilen trennen Strophen.
+- **Zeiten:** Hat der Song Zeiten, bekommt eine neue Zeile die Mitte
+  zwischen ihren Nachbarn. Solche geschätzten Zeiten stehen kursiv. ▶ vor
+  einer Zeile spielt ab kurz vor ihr, ▶ oben spielt und hält an. Songs
+  ohne Zeiten bleiben ohne; dann laufen die Zeilen beim Abspielen nicht
+  mit (Hinweis unten links). Zeiten setzen: siehe
+  [Zeiten setzen und mitklopfen](#zeiten-setzen-und-mitklopfen).
+- **Speichern** mit dem Knopf oder ⌘/Strg+S. ✕ oder Esc schließt. Gibt es
+  ungespeicherte Änderungen, erscheint daneben **Ungespeicherte Änderungen**
+  mit **Speichern** (speichert und schließt), **Verwerfen** und
+  **Abbrechen** (weiter bearbeiten, der Cursor steht wieder, wo er war).
+  Esc heißt dann Abbrechen; verworfen wird nur mit dem Knopf.
+
+Gespeichert wird die **ganze Fassung**: Ab dann gilt sie statt des
+Songtexts aus der Datei, beim ersten Speichern übernimmt fml dafür alle
+Zeilen samt Zeiten. Geschätzte Solo-Abschnitte (siehe
+[Songtext mit Zeiten](#was-fml-aus-musik-liest)) stehen danach fest an
+ihrer Stelle. Überall gilt der Songtext von Hand wie einer aus der Datei:
+in der Abspielleiste, im Panel, als Abschnitte auf der Welle, in der
+Volltextsuche und im Filter „mit Songtext". **Neu interpretieren** und ein
+Re-Scan lassen ihn stehen; wird der Song abgelehnt, geht er mit.
+
+**Die Datei bleibt unverändert.** Zurück zum Songtext aus der Datei geht es
+in der Ansicht mit **Stand der Datei wiederherstellen**; der Knopf fragt
+einmal nach („Wirklich?"), weil er die Fassung von Hand verwirft.
+
+Erlaubt sind bis zu 2000 Zeilen mit je höchstens 500 Zeichen; die Zeiten
+laufen der Reihe nach und liegen innerhalb des Songs.
+
+### Zeiten setzen und mitklopfen
+
+Jede Zeile hat links ein **Zeitfeld**. Links neben der Liste steht groß die
+**Abspielzeit**, fest in der Mitte der Ansicht; ein Klick darauf spielt oder
+hält an.
+Was eine Taste tut, hängt nur davon ab, in welchem Feld der Cursor steht.
+
+- **Mitklopfen:** ins Zeitfeld der ersten Zeile klicken,
+  **Leertaste** startet den Song, dann bei jeder Zeile **Strg+Enter** (Mac:
+  **⌘+Enter**). Das trägt die aktuelle Abspielzeit ein und springt zur
+  nächsten Zeile; Leerzeilen werden übersprungen. Abschnittsmarken
+  (`[Chorus]`) klopft man mit, am besten dort, wo der Abschnitt beginnt.
+- **Eine Zeile korrigieren:** mit **↑** und **↓** zur Zeile gehen, den Song
+  an ihren Anfang bringen (anhalten oder laufen lassen), **Strg/⌘+Enter**.
+- **Eintippen:** die Zeit ins Feld schreiben, etwa `1:23.4`, `83,4` oder
+  `83`, dann **Enter**: Das übernimmt sie und geht zur nächsten Zeile, wie
+  in einer Tabelle. Verlassen des Felds (↑/↓, Tab, Klick) übernimmt auch.
+- **Entfernen:** **Entf** im Zeitfeld.
+- **Anhören:** **▶** vor der Zeile spielt ab 1 s vor ihrem Anfang. So hört
+  man, ob der Einsatz stimmt. Die laufende Zeile ist hervorgehoben.
+
+Eine ungültige Eingabe bleibt nach Enter zum Korrigieren stehen, mit
+Hinweis; verlässt man das Feld, wird sie verworfen und die alte Zeit bleibt. Beginnt eine Zeile vor der Zeile davor, steht ihre Zeit rot,
+und **Speichern** ist gesperrt, bis die Reihenfolge wieder stimmt.
+
+Die Zeilen laufen beim Abspielen erst mit, wenn **jede** Zeile mit Text eine
+Zeit hat. Wer mittendrin aufhört und speichert, behält die gesetzten
+Zeiten; der Hinweis unten links nennt, wie viele noch fehlen. Endzeiten
+setzt man nicht: Eine Zeile steht so lange da, wie man sie ungefähr singt.
+
+### Songtext mit einem anderen fml austauschen
+
+Songtexte von Hand reisen in derselben Austauschdatei wie Kommentare und
+Musik-Angaben (siehe
+[Angaben mit einem anderen fml austauschen](#angaben-mit-einem-anderen-fml-austauschen)).
+Beim Exportieren das Häkchen **Songtext** setzen; in der Datei stehen
+**nur Songtexte von Hand** samt Zeiten, nie der Songtext aus der
+Musikdatei.
+
+Beim Importieren zählt die Vorschau je Song: **neu** (hier kein Songtext von
+Hand, wird übernommen), **gleich** (wird übersprungen) oder **abweichend**
+(hier steht ein anderer Songtext von Hand; die Vorschau zeigt die erste
+Zeile, die sich unterscheidet). Ein abweichender eigener Songtext bleibt
+stehen, außer mit dem Häkchen **„Abweichende eigene Angaben
+überschreiben"**. Der Songtext wird immer als Ganzes übernommen, nie
+zeilenweise gemischt. Übernommene Songtexte tragen **✎ von Hand**, der
+Tooltip in der Ansicht nennt die Herkunft.
+
+Eine fml-Version vor dieser liest Austauschdateien mit Songtext, lässt den
+Songtext aber weg.
 
 ## Eigene Reihenfolge einer gespeicherten Suche
 
@@ -556,6 +707,10 @@ Diese Filter gelten unabhängig vom Modul:
 - **Sortierung „Album"** (`sort: album`) und **„Manuell"** gibt es nur in
   der Audioansicht, siehe [Musiksammlung](#musiksammlung-interpret-album-genre)
   und [Eigene Reihenfolge](#eigene-reihenfolge-einer-gespeicherten-suche).
+- **`ordner:`** (englisch `folder:`) — der Ordner, in dem ein Fundort
+  liegt, samt Unterordnern: `ordner: Kiss_Tribute` trifft jeden Ordner
+  dieses Namens, `ordner: "D:/Musik/Kiss_Tribute"` genau diesen Pfad
+  (siehe [Fundorte und Ordner](#audioansicht) und [Bedienung](gui.md)).
 
 Beispiel: `typ: audio dauer: >120 sort: duration`.
 
@@ -576,7 +731,8 @@ Musik laufen.
 und Detailpanel kann mehr. „Node-Graph ansehen" im Detailpanel öffnet für
 ComfyUI-Songs die Lupe mit dem Workflow. Die Datei markiert im
 Finder/Explorer zeigt der 📂-Knopf vor dem bevorzugten Fundort im
-Detailpanel (Abschnitt Fundorte). Enter öffnet in der Audioansicht nichts.
+Detailpanel (Abschnitt Fundorte). Enter öffnet in der Audioansicht keine
+Einzelansicht, sondern spielt die ausgewählte Zeile.
 
 **Abspielleiste.** Sobald ein Song läuft, erscheint unten die Leiste: ⏮
 (in den ersten drei Sekunden: der vorige Song von „Alle abspielen";
@@ -635,8 +791,9 @@ geschrieben.
 **Anlegen** geht immer an der Stelle des Abspielkopfs:
 
 - **K** in der Audioansicht: für die ausgewählte Zeile, an ihrem eigenen
-  Abspielkopf (der auch steht, wenn sie nicht spielt: mit ←/→ an die
-  Stelle schieben, dann K). In der Galerie meint K den Song der
+  Abspielkopf (der auch steht, wenn sie nicht spielt: mit Enter starten,
+  mit ←/→ an die Stelle schieben, dann K; bei leerer Abspielleiste
+  schieben ←/→ ihn auch ohne Abspielen). In der Galerie meint K den Song der
   Abspielleiste.
 - **💬** in der Abspielleiste: für den laufenden Song.
 - **＋ Kommentar an der Abspielstelle** im Detailpanel.
@@ -669,8 +826,8 @@ Zwei Leute mit je eigenem fml können sich Kommentare schicken, als Datei
 
 **Exportieren:** In der Audioansicht die Songs auswählen oder eine Suche
 eingrenzen, dann die **Sammel-Aktion** öffnen und in der Zeile
-„Austausch" auf **Exportieren** klicken (Häkchen „Zeitkommentare"
-gesetzt). Es entsteht eine Datei `fml-austausch-JJJJ-MM-TT.json` mit allen
+„Austausch" auf **Austauschdatei speichern** klicken (Häkchen
+„Zeitkommentare" gesetzt). Es entsteht eine Datei `fml-austausch-JJJJ-MM-TT.json` mit allen
 Kommentaren dieser Songs. Hier ändert sich dabei nichts. Dieselbe Datei
 kann auch die Musik-Angaben von Hand mitnehmen, siehe
 [Angaben mit einem anderen fml austauschen](#angaben-mit-einem-anderen-fml-austauschen).
@@ -684,6 +841,9 @@ Austausch importieren**, in drei Schritten:
    und wie viele schon da sind, und welche Songs es hier nicht gibt.
 3. **Übernehmen.** Jeder übernommene Kommentar trägt die Herkunft als
    kleines Etikett (im Panel, am Pin, beim Einblenden).
+
+Der Knopf „Übernehmen" ist gesperrt, solange es nichts zu übernehmen gibt
+oder die Herkunft fehlt. Der Grund steht dann direkt darunter.
 
 **Wie fml die Songs findet:** über die Datei selbst (ihren Hash). Eine
 Datei, die unverändert kopiert, gezippt oder verschickt wurde, wird auf
@@ -703,12 +863,15 @@ nicht.
 "fml-exchange"` und `"version": 1`; je Song `file_hash`, `name`
 (nur als Hinweis), `duration`, gegebenenfalls `suno_ids`, dazu wahlweise
 die Liste `comments` mit `at_ms` (Stelle in Millisekunden), `text`,
-`created_at`, `updated_at` und der Abschnitt `fields` mit den
-Musik-Angaben von Hand (`{"artist": ["…"], "album": ["…"]}`); ganz oben
+`created_at`, `updated_at`, der Abschnitt `fields` mit den
+Musik-Angaben von Hand (`{"artist": ["…"], "album": ["…"]}`) und die
+Liste `lyrics` mit dem Songtext von Hand (`[[start_ms, end_ms, "Zeile"],
+…]`, Zeiten dürfen `null` sein); ganz oben
 stehen außerdem `exported_at` und die Liste `items` mit den Songs. fml
 nimmt höchstens 20 MB, 50.000 Songs und 200.000 Kommentare je Datei, 2.000
 Kommentare je Song und Kommentartexte bis 2.000 Zeichen; für die
-Musik-Angaben gelten dieselben Grenzen wie bei der Eingabe von Hand.
+Musik-Angaben und den Songtext (2.000 Zeilen zu je 500 Zeichen) gelten
+dieselben Grenzen wie bei der Eingabe von Hand.
 
 Dateien im älteren Format `fml-time-comments` (nur Kommentare, bis fml
 2026.10) lassen sich weiterhin importieren. Umgekehrt liest ein älteres
@@ -721,8 +884,8 @@ und **C** drücken oder oben rechts **⇆ Vergleichen** klicken. Die Liste
 **engt sich auf diese Songs ein** und vergrößert die Zeilen: höhere
 Wellenform, und die **Zeitkommentare stehen als Text** über der Welle
 (liegen zwei dicht beieinander, stehen sie übereinander). Die Zeitachse
-ist jetzt der längste der verglichenen Songs, damit die Wellen die volle
-Breite nutzen. Bei mehr als sechs markierten Songs ist der Knopf gesperrt.
+ist jetzt der längste der verglichenen Songs (höchstens 7 Minuten, wie in
+der Liste), damit die Wellen die volle Breite nutzen. Bei mehr als sechs markierten Songs ist der Knopf gesperrt.
 
 - **Lautheit angleichen** ist im Vergleich **immer zuerst an**, damit nicht
   die lautere Fassung gewinnt. Der Schalter oben rechts schaltet ihn für
@@ -732,8 +895,9 @@ Breite nutzen. Bei mehr als sechs markierten Songs ist der Knopf gesperrt.
   ausgeblendet, damit mehr Platz für Wellen und Kommentare bleibt. Tempo
   und A–B-Loop stellt man vorher in der Leiste ein; das Tempo gilt im
   Vergleich weiter. Nach Esc ist die Leiste wieder da.
-- **Bedienen wie in der Liste:** ↑/↓ wechselt die Zeile, Leertaste spielt,
-  ←/→ schiebt den Abspielkopf, 1 bis 5 bewertet, **Entf lehnt ab**, K legt
+- **Bedienen wie in der Liste:** ↑/↓ wechselt die Zeile, Leertaste oder
+  Enter spielt die ausgewählte Zeile, ←/→ schiebt ihren Abspielkopf (die
+  Leiste ist ja aus), 1 bis 5 bewertet, **Entf lehnt ab**, K legt
   einen Kommentar an, Tags und Notizen im Detailpanel. Ausgewählt ist
   dabei immer nur die aktuelle Zeile: eine Bewertung trifft nur sie.
 - **Abgelehnte Songs** verschwinden sofort aus dem Vergleich, die Zeile
@@ -769,6 +933,15 @@ Ausdrücke wie `model: flux` gehen auch. Bild anklicken,
 **Als Cover setzen** (oder Doppelklick aufs Bild). Tipp: dem Artwork
 gleich beim Erzeugen denselben Tag geben wie dem Song.
 
+**Ein Cover für mehrere Songs** (etwa ein ganzes Album oder alle Fassungen
+eines Songs): Songs mit Strg/⌘ oder Umschalt auswählen. Das Detailpanel
+zeigt dann **🖼 Cover für Auswahl setzen …** und **Cover der Auswahl
+entfernen**. Der Dialog heißt „Cover für N Songs“, startet mit den Tags,
+die alle ausgewählten Songs gemeinsam haben, und sagt vorher an, wie viele
+davon schon ein Cover haben: Sie bekommen das neue. Bilder und Videos in
+der Auswahl bleiben unberührt. Entfernen gilt ebenso für alle Songs der
+Auswahl.
+
 Danach ist das Cover das Gesicht des Songs: Es steht **oben im
 Detailpanel** wie das Vorschaubild eines Bildes, in allen Ansichten,
 direkt darunter **✓ Finalisiert** mit **Ändern …** und **Entfernen**.
@@ -795,6 +968,11 @@ des Systems.
   Galerie Bilder sichtet oder Duelle klickt. Songs von Suno, ComfyUI & Co.
   zeigen ihr mitgeliefertes Standardbild nicht; sie bekommen erst mit einem
   gewählten Cover ein Bild. Ein gesetztes Cover geht immer vor.
+- **Songs aus dem Export eines anderen fml**: Hat dort jemand ein Cover
+  gesetzt und die Kopie [mit Angaben von Hand](export.md#angaben-von-hand-in-der-kopie)
+  exportiert, ist das eingebettete Bild dieses Cover und kein Standardbild.
+  fml erkennt es an einer Kennung im Bild und zeigt es als Anzeigebild,
+  auch bei Songs von Suno & Co.
 - Mit ausgeschaltetem Audio-Modul zeigt die Galerie auch Songs mit Cover
   nicht; die Cover bleiben gespeichert.
 

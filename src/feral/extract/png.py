@@ -92,23 +92,23 @@ def _extract_from_stream(stream: BinaryIO) -> ContainerExtraction:
 
     signature = stream.read(8)
     if signature != PNG_SIGNATURE:
-        result.warnings.append("Keine gültige PNG-Signatur — Datei ist kein PNG?")
+        result.warnings.append("No valid PNG signature - not a PNG file?")
         return result
 
     while True:
         header = stream.read(8)
         if len(header) == 0:
-            result.warnings.append("Datei endet ohne IEND-Chunk.")
+            result.warnings.append("File ends without an IEND chunk.")
             break
         if len(header) < 8:
-            result.warnings.append("Abgeschnittener Chunk-Header — Datei unvollständig.")
+            result.warnings.append("Truncated chunk header - file incomplete.")
             break
 
         length, ctype = struct.unpack(">I4s", header)
 
         if length > _MAX_REASONABLE_CHUNK:
             result.warnings.append(
-                f"Chunk {_label(ctype)} meldet unplausible Länge {length} — Abbruch."
+                f"Chunk {_label(ctype)} reports an implausible length {length} - stopped."
             )
             break
 
@@ -121,7 +121,7 @@ def _extract_from_stream(stream: BinaryIO) -> ContainerExtraction:
             data = stream.read(length)
             if len(data) < length:
                 result.warnings.append(
-                    f"Chunk {_label(ctype)} abgeschnitten ({len(data)}/{length} Bytes)."
+                    f"Chunk {_label(ctype)} truncated ({len(data)}/{length} bytes)."
                 )
                 break
             crc_bytes = stream.read(4)
@@ -133,7 +133,7 @@ def _extract_from_stream(stream: BinaryIO) -> ContainerExtraction:
             try:
                 stream.seek(length + 4, 1)
             except OSError:
-                result.warnings.append(f"Konnte Chunk {_label(ctype)} nicht überspringen.")
+                result.warnings.append(f"Could not skip chunk {_label(ctype)}.")
                 break
 
         if ctype == _END_CHUNK:
@@ -147,14 +147,14 @@ def _verify_crc(
 ) -> None:
     """Prüfe die Chunk-CRC; bei Abweichung nur warnen (Daten trotzdem nutzen)."""
     if len(crc_bytes) < 4:
-        result.warnings.append(f"Chunk {_label(ctype)} ohne vollständige CRC.")
+        result.warnings.append(f"Chunk {_label(ctype)} without a complete CRC.")
         return
     expected = struct.unpack(">I", crc_bytes)[0]
     actual = zlib.crc32(ctype + data) & 0xFFFFFFFF
     if actual != expected:
         result.warnings.append(
-            f"CRC-Fehler in Chunk {_label(ctype)} (erwartet {expected:#010x}, "
-            f"berechnet {actual:#010x}) — Inhalt dennoch übernommen."
+            f"CRC error in chunk {_label(ctype)} (expected {expected:#010x}, "
+            f"computed {actual:#010x}) - content kept anyway."
         )
 
 
@@ -212,22 +212,22 @@ def _decode_ztxt(data: bytes, result: ContainerExtraction) -> RawMetadataItem:
     """``zTXt``: Keyword + Methode(1) + zlib-komprimierter Latin-1-Text."""
     keyword, rest = _split_keyword(data)
     if not rest:
-        result.warnings.append("zTXt-Chunk ohne Kompressionsmethode/Daten.")
+        result.warnings.append("zTXt chunk without compression method/data.")
         return _raw_fallback("png:zTXt", keyword, rest)
     method, compressed = rest[0], rest[1:]
     if method != 0:
-        result.warnings.append(f"zTXt: unbekannte Kompressionsmethode {method}.")
+        result.warnings.append(f"zTXt: unknown compression method {method}.")
         return _raw_fallback("png:zTXt", keyword, compressed)
     try:
         text = _decompress_bounded(compressed).decode("latin-1")
     except _DecompressionBomb:
         result.warnings.append(
-            f"zTXt: dekomprimiert über {_MAX_DECOMPRESSED >> 20} MiB — "
-            f"mögliche Dekompressionsbombe, Chunk verworfen."
+            f"zTXt: decompresses to more than {_MAX_DECOMPRESSED >> 20} MiB - "
+            f"possible decompression bomb, chunk dropped."
         )
         return _raw_fallback("png:zTXt", keyword, compressed)
     except (zlib.error, UnicodeDecodeError) as exc:
-        result.warnings.append(f"zTXt: Dekompression/Dekodierung fehlgeschlagen ({exc}).")
+        result.warnings.append(f"zTXt: decompression/decoding failed ({exc}).")
         return _raw_fallback("png:zTXt", keyword, compressed)
     return RawMetadataItem(
         source="png:zTXt",
@@ -243,7 +243,7 @@ def _decode_itxt(data: bytes, result: ContainerExtraction) -> RawMetadataItem:
     """``iTXt``: Keyword + Flag(1) + Methode(1) + Sprache \\0 Übersetzt \\0 UTF-8-Text."""
     keyword, rest = _split_keyword(data)
     if len(rest) < 2:
-        result.warnings.append("iTXt-Chunk zu kurz (Flag/Methode fehlen).")
+        result.warnings.append("iTXt chunk too short (flag/method missing).")
         return _raw_fallback("png:iTXt", keyword, rest)
 
     compression_flag, compression_method = rest[0], rest[1]
@@ -253,12 +253,12 @@ def _decode_itxt(data: bytes, result: ContainerExtraction) -> RawMetadataItem:
     # aber strukturell vorhanden): zwei nullterminierte Felder.
     lang_sep = rest.find(b"\x00")
     if lang_sep == -1:
-        result.warnings.append("iTXt-Chunk ohne Sprach-Trenner.")
+        result.warnings.append("iTXt chunk without language separator.")
         return _raw_fallback("png:iTXt", keyword, rest)
     rest = rest[lang_sep + 1 :]
     trans_sep = rest.find(b"\x00")
     if trans_sep == -1:
-        result.warnings.append("iTXt-Chunk ohne Trenner für übersetztes Keyword.")
+        result.warnings.append("iTXt chunk without separator for the translated keyword.")
         return _raw_fallback("png:iTXt", keyword, rest)
     text_bytes = rest[trans_sep + 1 :]
 
@@ -266,19 +266,19 @@ def _decode_itxt(data: bytes, result: ContainerExtraction) -> RawMetadataItem:
     if compressed:
         if compression_method != 0:
             result.warnings.append(
-                f"iTXt: unbekannte Kompressionsmethode {compression_method}."
+                f"iTXt: unknown compression method {compression_method}."
             )
             return _raw_fallback("png:iTXt", keyword, text_bytes)
         try:
             text_bytes = _decompress_bounded(text_bytes)
         except _DecompressionBomb:
             result.warnings.append(
-                f"iTXt: dekomprimiert über {_MAX_DECOMPRESSED >> 20} MiB — "
-                f"mögliche Dekompressionsbombe, Chunk verworfen."
+                f"iTXt: decompresses to more than {_MAX_DECOMPRESSED >> 20} MiB - "
+                f"possible decompression bomb, chunk dropped."
             )
             return _raw_fallback("png:iTXt", keyword, text_bytes)
         except zlib.error as exc:
-            result.warnings.append(f"iTXt: Dekompression fehlgeschlagen ({exc}).")
+            result.warnings.append(f"iTXt: decompression failed ({exc}).")
             return _raw_fallback("png:iTXt", keyword, text_bytes)
 
     try:
@@ -286,7 +286,7 @@ def _decode_itxt(data: bytes, result: ContainerExtraction) -> RawMetadataItem:
     except UnicodeDecodeError as exc:
         # UTF-8 laut Spezifikation erwartet, real-world aber gelegentlich kaputt:
         # dann verlustfrei als Roh-Bytes behalten statt zu raten.
-        result.warnings.append(f"iTXt: kein gültiges UTF-8 ({exc}) — als Roh-Bytes behalten.")
+        result.warnings.append(f"iTXt: not valid UTF-8 ({exc}) - kept as raw bytes.")
         return _raw_fallback("png:iTXt", keyword, text_bytes, compressed=compressed)
 
     return RawMetadataItem(

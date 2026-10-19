@@ -7,6 +7,133 @@ What changed between snapshot releases, from the user's point of view.
 Versions are date versions (`YYYY.MM` or `YYYY.MM.N`); a running
 instance shows its version under Admin → Overview.
 
+## 2026.10.2 (2026-10-20)
+
+Until now fml was a one-way street: media came in and stayed there. Now
+they can go **out** as well. A stack of images for video editing, the
+songs for a CD, ten seconds of a song as the template for your next
+workflow: fml puts **copies** and **clips** into an export folder, and
+songs take along the **details, lyrics and cover** you maintain in fml.
+On top of that there is a **lyrics editor for tapping along** the
+timings, and an audio list that shows a music collection **by folder**.
+
+### After the update
+
+1. **Start with `start.sh` or `start.bat` as usual.** The dependencies
+   are unchanged.
+2. **Database:** migrated automatically to schema 35 on first start (one
+   new migration). Back up `feral.sqlite` first, as with every update.
+3. **For copies and clips, set an export folder once:** Admin →
+   Configuration → Media Library → **Export folder**. The **Clip** module
+   is off by default (Admin → Configuration → Modules).
+4. **Audio list:** the "Details" layout now arranges songs by folder. If
+   you want the familiar list with one row per song: ☰▾ → **Per song**;
+   the browser remembers the choice.
+5. **Exchange with another fml:** an older version reads exchange files
+   with lyrics but leaves the lyrics out. A cover inside an exported copy
+   is only shown as display image from 2026.10.2 on. For both, both sides
+   need this version.
+6. A re-scan or "Re-interpret" is not needed.
+
+### New: export copies
+
+- **⚡ Bulk action → Export → Export copies …** puts the selection or all
+  hits as copies into a folder like `2026-10-20 Music video/`: flat or by
+  year/month/day, with an optional package name.
+- **Always the original, bit for bit**, with its modification date, and
+  verified against the original after writing. If the same file is
+  already there, it is skipped; a different file with the same name gets
+  `name (1).ext`, as in a file manager.
+- The dialog shows count, size and free space beforehand; if the space is
+  not enough, nothing starts. The result lists copied, already there and
+  not reachable, with the reason.
+- Works in **read-only mode** too: the export only reads the originals and
+  writes nowhere but the export folder. That folder may not lie in the
+  library, a watch folder or the cache, nor contain catalogued media; fml
+  checks this as soon as you save it.
+- Kodak Photo CD goes out as PNG, or as the raw file if you prefer.
+
+### New: details set by hand travel in the copy
+
+- With the checkbox **"Manual details: write into the copy"**, MP3 and
+  M4A files get the music details set by hand, the lyrics set by hand
+  (with a timing per line) and the chosen cover in the **copy**. The
+  original stays untouched.
+- **MP3:** all other entries in the tag are kept, including the Suno
+  marker and provenance data. **M4A:** fml repackages the file with
+  ffmpeg without touching the audio. In both cases fml then checks that
+  the audio is unchanged.
+- **The cover arrives:** another fml recognises the cover that came along
+  and shows it as display image, even for songs from Suno.
+
+### New: Clip module
+
+- **✂ Clip** in the panel for songs and videos opens a timeline over the
+  whole length, with the waveform for songs. Drag or move the range, or
+  type start, end and length; **I** and **O** set the edges to the
+  playback position. The range plays in a loop while you listen.
+- **Export** writes the audio as WAV, for videos optionally also MP4
+  (H.264) with or without sound, cut exactly at the marked spot. Usually
+  in seconds; afterwards 📂 shows the file in the file manager.
+- The view stays open so the next piece of the same file can follow
+  right away.
+
+### New: lyrics by hand
+
+- Under **CURATED → Lyrics**, wrong lyrics can be corrected or missing
+  ones added: type, split, join and delete lines, paste a whole text,
+  mark sections such as `[Chorus]`.
+- **Tap along the timings:** the space bar starts the song, then
+  **Ctrl+Enter** (Mac: **⌘+Enter**) on every line. Afterwards fix single
+  lines, type timings, check with ▶ from one second before the line.
+- Lyrics set by hand apply everywhere like lyrics from the file: in the
+  player bar, as sections on the waveform, in the full-text search. The
+  file stays unchanged; **Restore the file's lyrics** brings the old text
+  back.
+- They travel in the **exchange file** (checkbox "Lyrics"), with the
+  preview new, same and differing as for music details.
+
+### Audio list and playback
+
+- **Locations and folders:** in "Details", ☰ becomes the menu **☰▾**:
+  **By folder** (default, with a header per folder), **Per location**
+  (every duplicate with all its folders one below the other) or **Per
+  song**. A click on a folder name opens it in the file manager, **⌕**
+  shows only that folder.
+- **New search term `folder:`** (German `ordner:`): `folder: Kiss_Tribute`
+  finds every folder of that name, in quotes an exact path. The typing
+  aid suggests it.
+- **Time axis at most 7 minutes:** a concert recording no longer makes
+  the other waveforms tiny; it fills its row compressed and carries **»**.
+- **Space bar and ←/→** mean the song in the player bar, like the media
+  keys of the keyboard, whichever row is selected. **Enter** plays the
+  selected row.
+- **Cover for several songs:** a whole album gets its cover in one go,
+  and it can be removed for the selection just as well.
+
+### Smaller improvements
+
+- The bulk action has two sections: **Change the hits** and **Export**, which
+  changes nothing in the library.
+- Automatic follow-up runs without work (thumbnails, analyse audio, runs
+  at start) no longer hide the result of the last task in the background
+  widget.
+- A locked "Import exchange file" button says why.
+- Long comment labels in the panel are shortened, the full name is in the
+  tooltip.
+- Extractor warnings under Admin → Issues are technical and in English;
+  a re-scan acknowledges what it no longer finds.
+
+### More robust
+
+- A **copied database** starts without the saved tasks of the other
+  machine; their paths do not belong there.
+- An oversized subtitle track in a music file no longer holds up the
+  scan, nor does a crafted file with tens of thousands of warnings: at
+  most 50 of them plus one summary line end up under Issues.
+- "Clear cache" from a saved task uses the cache folders of the current
+  configuration.
+
 ## 2026.10.1 (2026-10-02)
 
 This completes the audio module: **music details set by hand** (title,

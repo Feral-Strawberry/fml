@@ -23,6 +23,8 @@ import { initDetail } from "./detail.js";
 import { initLoupe } from "./loupe.js";
 import { initSingleView } from "./singleview.js";
 import { initCompare } from "./compare.js";
+import { initClip } from "./clip.js";
+import { initLyricsEdit } from "./lyricsedit.js";
 import { initCurate } from "./curate.js";
 import { initRankings } from "./rankings.js";
 import { initOverlays } from "./overlays.js";
@@ -62,11 +64,11 @@ import { initPanelFold } from "./panelfold.js";
 //   'compare-open'      {hashes: [a, b]}
 //                       — A/B-Vergleichsansicht für genau zwei Medien
 //                         (Galerie-Knopf ⇆ / Taste C → compare.js, Issue #38)
-//   'items-reloaded'    {total, reset}
+//   'items-reloaded'    {total, reset, locations?} — Fundort-Zeilen (ADR 0108): total = Songs
 //                       — Grid hat neue Daten geladen (z. B. für Zähler);
 //                         Konsumenten setzen ihren Zustand zurück;
 //                         reset: true nach „Alle Medien" (Issue #33)
-//   'items-refreshed'   {total}
+//   'items-refreshed'   {total, locations?}
 //                       — schonender Refresh (ADR 0057): nur Daten frisch,
 //                         Scroll/Auswahl blieben — KEINE Zustands-Resets
 //   'arena-open'        {id, name, expression}
@@ -77,6 +79,12 @@ import { initPanelFold } from "./panelfold.js";
 //   'rankings-enabled'  {enabled} — Modul-Schalter (Sidebar → search.js)
 //   'audio-enabled'     {enabled} — Modul-Schalter Audio (Sidebar →
 //                         advanced.js: Medienart „Audio" nur mit Modul, ADR 0084)
+//   'clip-enabled'      {enabled} — Modul-Schalter Ausschnitt (Sidebar →
+//                         detail.js: Knopf ✂ im Panel, ADR 0105)
+//   'clip-open'         {item}   — Ausschnitt-Ansicht für ein Video oder
+//                         einen Song öffnen (Detailpanel → clip.js)
+//   'lyrics-edit-open'  {item}   — Ansicht „Songtext bearbeiten" für einen
+//                         Song öffnen (Detailpanel → lyricsedit.js, ADR 0106)
 //   'chips-rendered'    {}       — Chip-Leiste neu gezeichnet (search.js →
 //                         context.js hängt das Kontext-Segment ein)
 //   'folder-origin'     {id, name, expression}
@@ -94,9 +102,10 @@ import { initPanelFold } from "./panelfold.js";
 //                         mit viewChanged: true, darauf wird geladen
 //   'library-view-set'  {view}   — Wunsch nach Ansichtswechsel (Leer-
 //                         Hinweis, Tipphilfe → libview.js)
-//   'cover-pick'        {hash, name, tags, cover} — Cover-Dialog für einen
-//                         Song öffnen (Detailpanel → coverdialog.js, #165)
-//   'cover-changed'     {hash, manual} — Cover gesetzt/entfernt: Galerie
+//   'cover-pick'        {hashes, name} — Cover-Dialog für die Songs einer
+//                         Auswahl öffnen (Detailpanel → coverdialog.js, #165, #281)
+//   'cover-changed'     {hash, hashes, manual} — Cover gesetzt/entfernt (alle
+//                         `hashes` haben danach dasselbe `manual.cover`): Galerie
 //                         frischt auf (Song kommt/geht), Panel zeichnet neu
 //   'view-changed'      {view, open}
 //                       — eine Ansicht (loupe|single|compare|rankings)
@@ -239,6 +248,8 @@ initDetail();  // Detail-Panel rechts: alle Schichten sichtbar (Task 9)
 initLoupe();   // Vollbild-Lupe: Blättern mit Vorladen + Workflow-Modus (Task 10)
 initSingleView();  // Einzelbildansicht: Zoom + breites Panel (Feral Strawberry, 2026-07-08)
 initCompare();     // A/B-Vergleich zweier markierter Bilder mit Wischkante (Issue #38)
+initClip();        // Ausschnitt aus Song oder Video exportieren (Modul, ADR 0105)
+initLyricsEdit();  // Songtext von Hand korrigieren oder eintragen (ADR 0106)
 initCurate();  // Kuratieren: Rating-Tastatur + Schreibstelle manuelle Schicht (3.2)
 initRankings(); // Ranking-Modul: Arenen mit Duell + Bestenliste (ADR 0045)
 initPlayer();    // eigener Audio-Player + Abspielleiste (A5 #162, ADR 0087)

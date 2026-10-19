@@ -27,8 +27,6 @@ export function slugFromPath(path) {
   return pagesById.has(slug) ? slug : DEFAULT_PAGE;
 }
 
-export const currentPage = () => current;
-
 export async function show(slug, { push = false } = {}) {
   const page = pagesById.get(slug) || pagesById.get(DEFAULT_PAGE);
   const url = `/admin/${page.id}`;

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from feral.config import DEFAULT_DB_PATH, database_path, load_config, scan_locations
+from feral.config import DEFAULT_DB_PATH, database_path, load_config
 from feral.web import library
 
 CONFIG_TOML = """
@@ -35,20 +35,6 @@ def test_database_path_default_and_override(tmp_path):
     assert database_path({}) == DEFAULT_DB_PATH
     cfg = load_config(_write(tmp_path, CONFIG_TOML))
     assert database_path(cfg) == "/data/feral.sqlite"
-
-
-def test_scan_locations_parsing(tmp_path):
-    cfg = load_config(_write(tmp_path, CONFIG_TOML))
-    locs = scan_locations(cfg)
-    # Der Eintrag ohne 'path' wird übersprungen; fehlender Name aus Pfad abgeleitet.
-    assert locs == [
-        {"name": "Hotfolder", "path": "/media/hotfolder"},
-        {"name": "ohne-name", "path": "/media/ohne-name"},
-    ]
-
-
-def test_scan_locations_empty_when_no_section():
-    assert scan_locations({}) == []
 
 
 def test_list_roots_always_offers_entry_points():
@@ -84,14 +70,10 @@ def test_update_config_file_preserves_unknown_sections(tmp_path):
     from feral.config import load_config, update_config_file
 
     p = _write(tmp_path, CONFIG_TOML + '\n[library]\nroot = "/media/lib"\n')
-    update_config_file(
-        p,
-        locations=[{"name": "Neu", "path": "/media/neu"}],
-        thumbnail_size=256,
-    )
+    update_config_file(p, thumbnail_size=256)
 
     cfg = load_config(p)
-    assert cfg["scan"]["locations"] == [{"name": "Neu", "path": "/media/neu"}]
+    assert cfg["scan"]["locations"][0]["path"] == "/media/hotfolder"   # alte Sektion überlebt
     assert cfg["cache"]["thumbnail_size"] == 256
     assert cfg["library"]["root"] == "/media/lib"       # unbekannte Sektion überlebt
     assert cfg["database"]["path"] == "/data/feral.sqlite"
@@ -102,9 +84,9 @@ def test_update_config_file_creates_missing_file(tmp_path):
     from feral.config import load_config, update_config_file
 
     p = tmp_path / "config.toml"
-    update_config_file(p, locations=[{"name": "A", "path": "/a"}], thumbnail_size=320)
+    update_config_file(p, thumbnail_size=320)
     assert p.is_file()
-    assert load_config(p)["scan"]["locations"][0]["path"] == "/a"
+    assert load_config(p)["cache"]["thumbnail_size"] == 320
     assert not (tmp_path / "config.toml.bak").exists()  # nichts zu sichern
 
 

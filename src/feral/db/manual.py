@@ -383,39 +383,76 @@ def cover_of(conn: sqlite3.Connection, file_hash: str) -> str | None:
     return row[0] if row else None
 
 
-def set_cover(
-    conn: sqlite3.Connection, file_hash: str, cover_hash: str, *, now: str | None = None
-) -> None:
-    """Bild ``cover_hash`` als Cover des Songs ``file_hash`` setzen (ersetzt ein
-    vorhandenes). Nur ein Verweis in der DB, keine Datei wird angefasst.
-    Song muss Audio sein, das Cover ein Bild der Bibliothek."""
-    kinds = dict(conn.execute(
-        "SELECT file_hash, media_kind FROM items WHERE file_hash IN (?, ?)",
-        (file_hash, cover_hash),
-    ).fetchall())
-    for h in (file_hash, cover_hash):
-        if h not in kinds:
-            raise UserError("itemUnknown", hash=h)
-    if kinds[file_hash] != "audio":
-        raise UserError("coverNotSong")
-    if kinds[cover_hash] != "image":
+# Cover für eine Auswahl (#281): alle Songs eines Albums bekommen dasselbe
+# Bild bzw. verlieren es, in EINER Transaktion: ganz oder gar nicht.
+# Nicht-Songs in der Auswahl werden übergangen, nicht gemeldet.
+
+def _songs_in(conn: sqlite3.Connection, hashes: list[str]) -> list[str]:
+    """Die Songs (Audio) unter ``hashes``, in deren Reihenfolge."""
+    songs: set[str] = set()
+    for i in range(0, len(hashes), 500):
+        part = hashes[i:i + 500]
+        songs.update(r[0] for r in conn.execute(
+            f"""SELECT file_hash FROM items WHERE media_kind = 'audio'
+                 AND file_hash IN ({','.join('?' * len(part))})""", part))
+    return [h for h in dict.fromkeys(hashes) if h in songs]
+
+
+def set_covers(
+    conn: sqlite3.Connection, hashes: list[str], cover_hash: str, *, now: str | None = None
+) -> list[str]:
+    """Bild ``cover_hash`` als Cover aller Songs unter ``hashes`` setzen
+    (ersetzt vorhandene). Rückgabe: die Songs, die es bekommen haben."""
+    row = conn.execute(
+        "SELECT media_kind FROM items WHERE file_hash = ?", (cover_hash,)
+    ).fetchone()
+    if row is None:
+        raise UserError("itemUnknown", hash=cover_hash)
+    if row[0] != "image":
         raise UserError("coverNotImage")
+    songs = _songs_in(conn, hashes)
+    if not songs:
+        raise UserError("coverNotSong")
     ts = now or now_iso()
     with conn:
-        conn.execute(
+        conn.executemany(
             """INSERT INTO covers (file_hash, cover_hash, created_at, updated_at)
                VALUES (?, ?, ?, ?)
                ON CONFLICT(file_hash) DO UPDATE
                   SET cover_hash = excluded.cover_hash, updated_at = excluded.updated_at""",
-            (file_hash, cover_hash, ts, ts),
+            [(h, cover_hash, ts, ts) for h in songs],
         )
+    return songs
 
 
-def remove_cover(conn: sqlite3.Connection, file_hash: str) -> bool:
-    """Cover entfernen; ``False``, wenn der Song keins hatte."""
+def remove_covers(conn: sqlite3.Connection, hashes: list[str]) -> list[str]:
+    """Cover aller Songs unter ``hashes`` entfernen. Rückgabe: die Songs der
+    Auswahl (auch die ohne Cover, sie sind danach ebenso ohne)."""
+    songs = _songs_in(conn, hashes)
     with conn:
-        cur = conn.execute("DELETE FROM covers WHERE file_hash = ?", (file_hash,))
-    return bool(cur.rowcount)
+        conn.executemany("DELETE FROM covers WHERE file_hash = ?", [(h,) for h in songs])
+    return songs
+
+
+def cover_state(conn: sqlite3.Connection, hashes: list[str]) -> dict[str, Any]:
+    """Stand für den Cover-Dialog einer Auswahl: ``songs`` (Anzahl),
+    ``covered`` (davon mit Cover), ``cover`` (das gemeinsame Cover, wenn alle
+    dasselbe haben, sonst ``None``) und ``tags`` (die allen Songs gemeinsamen
+    Tags, für die Startsuche)."""
+    songs = _songs_in(conn, hashes)
+    covers = [cover_of(conn, h) for h in songs]
+    common: set[str] | None = None
+    for h in songs:
+        tags = {r[0] for r in conn.execute(
+            """SELECT t.name FROM item_tags it JOIN tags t ON t.id = it.tag_id
+                WHERE it.file_hash = ?""", (h,))}
+        common = tags if common is None else common & tags
+    return {
+        "songs": len(songs),
+        "covered": sum(1 for c in covers if c),
+        "cover": covers[0] if covers and covers[0] and len(set(covers)) == 1 else None,
+        "tags": sorted(common or (), key=str.casefold),
+    }
 
 
 def has_embedded_picture(conn: sqlite3.Connection, file_hash: str) -> bool:

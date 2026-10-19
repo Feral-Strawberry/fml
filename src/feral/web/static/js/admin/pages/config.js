@@ -80,6 +80,12 @@ const select = (key, value, options) =>
   `<select data-key="${key}">${options.map(([v, l]) =>
     `<option value="${esc(String(v))}" ${String(v) === String(value) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
 
+/** Was dem ffmpeg dieser Installation für das Modul Ausschnitt fehlt
+ *  (ADR 0105 Punkt 7): steht am Schalter, damit es beim Einschalten klar ist. */
+export const clipEncoderNote = (state) =>
+  state === "no-ffmpeg" ? ` <b>${STRINGS.cfgClipNoFfmpeg}</b>`
+    : state === "no-h264" ? ` <b>${STRINGS.cfgClipNoH264}</b>` : "";
+
 function markup(c) {
   const rules = c.import_rules || {};
   const slow = c.slow_request_ms ?? 250;
@@ -94,6 +100,11 @@ function markup(c) {
     line(STRINGS.cfgMinKante, true, `${number("import_min_kante", rules.min_kante || 0, 0, 1000000)} px`, STRINGS.cfgMinKanteHint),
     line(STRINGS.cfgMaxKante, true, `${number("import_max_kante", rules.max_kante || 0, 0, 1000000)} px`, STRINGS.cfgMaxKanteHint),
     line(STRINGS.cfgFormate, true, text("import_formate", (rules.formate || []).join(", "), 'placeholder="psd, arw"'), STRINGS.cfgFormateHint),
+    // Export-Ordner des Kopie-Exports (ADR 0103): leer = Export gesperrt.
+    line(STRINGS.cfgExport, true,
+      `${text("export_root", c.export_root, `placeholder="${STRINGS.cfgExportPlaceholder}"`)}
+       <button type="button" class="pick" id="cfgExportPick" title="${STRINGS.cfgPick}">📁</button>`,
+      STRINGS.cfgExportHint),
   ].join(""));
   const perf = card(STRINGS.cfgPerf, "", [
     line(STRINGS.cfgThumbSize, false, `${number("thumbnail_size", c.thumbnail_size, 16, 2048)} px`, STRINGS.cfgThumbHint),
@@ -135,6 +146,8 @@ function markup(c) {
   const modules = card(STRINGS.cfgModule, "", [
     line(STRINGS.cfgRankings, true, check("rankings_enabled", c.rankings_enabled, STRINGS.cfgRankingsOn), STRINGS.cfgRankingsHint),
     line(STRINGS.cfgAudio, true, check("audio_enabled", c.audio_enabled, STRINGS.cfgAudioOn), STRINGS.cfgAudioHint),
+    line(STRINGS.cfgClip, true, check("clip_enabled", c.clip_enabled, STRINGS.cfgClipOn),
+      STRINGS.cfgClipHint + clipEncoderNote(c.clip_encoder)),
   ].join(""));
   return `
     <div class="row c2">${library}${perf}</div>
@@ -198,6 +211,7 @@ function payload(v) {
   return {
     thumbnail_size: parseInt(v.thumbnail_size, 10) || 320,
     library_root: v.library_root,
+    export_root: v.export_root,
     verwaltung: v.verwaltung,
     import_min_date: v.import_min_date,
     // Import-Regeln (ADR 0046): 0/leer = Regel aus.
@@ -218,6 +232,8 @@ function payload(v) {
     // Modul-Schalter Audio (ADR 0083): wirkt ab dem nächsten Scan/Import;
     // Einschalten lässt die Watcher übersprungene Audiodateien neu prüfen.
     audio_enabled: v.audio_enabled,
+    // Modul-Schalter Ausschnitt (ADR 0105): wirkt sofort im Panel.
+    clip_enabled: v.clip_enabled,
     // Langsam-Schwelle (#110): wirkt sofort, 0 = nie warnen.
     slow_request_ms: Math.max(0, parseInt(v.slow_request_ms, 10) || 0),
   };
@@ -234,11 +250,13 @@ function wire() {
   el("#cfgLang").addEventListener("change", (e) => setLang(e.target.value));
   el("#cfgTheme").addEventListener("change", (e) => setTheme(e.target.value));
 
-  el("#cfgLibPick").addEventListener("click", async () => {
-    const input = el('[data-key="library_root"]');
-    const chosen = await pickFolder(input.value.trim() || null);
-    if (chosen) { input.value = chosen; updateBar(); }
-  });
+  for (const [button, key] of [["#cfgLibPick", "library_root"], ["#cfgExportPick", "export_root"]]) {
+    el(button).addEventListener("click", async () => {
+      const input = el(`[data-key="${key}"]`);
+      const chosen = await pickFolder(input.value.trim() || null);
+      if (chosen) { input.value = chosen; updateBar(); }
+    });
+  }
   el("#cfgSlowProfile").addEventListener("change", (e) => {
     const num = el('[data-key="slow_request_ms"]');
     const custom = e.target.value === "x";

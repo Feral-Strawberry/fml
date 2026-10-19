@@ -6,6 +6,7 @@ werden mitgeprüft."""
 
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
@@ -265,6 +266,42 @@ def test_history_marks_failed_tasks_and_is_capped(engine):
             break
         time.sleep(0.02)
     assert s["history"][0]["ok"] is False and s["history"][0]["result"]["key"] == "sumFailed"
+
+
+def test_idle_auto_followup_does_not_hide_the_real_task(engine, media, tmp_path):
+    """#277: Nach einem Schub reiht die App die Nachläufer Thumbnails/Audio
+    ein. Ein Audio-Nachläufer ohne Audio-Items (Leerlauf) darf die Aufgabe,
+    die wirklich gearbeitet hat, nicht als „zuletzt" verdecken."""
+    engine.enqueue_folder(media)
+    engine.enqueue_audio_warm(tmp_path / "audio-cache", auto=True)
+    # Startläufe ohne Arbeit gelten genauso: Untertitel nachholen (nur
+    # Automatik) und Aussortierte neu prüfen nach geänderten Regeln.
+    engine.enqueue_audio_subtitles()
+    engine.enqueue_recheck_filtered(auto=True)
+    s = _wait_idle(engine)
+    assert s["last_finished"]["key"] == "taskScan"
+    assert [h["label"]["key"] for h in s["history"]] == ["taskScan"]
+    assert s["report"]["new_items"] == 2 and s["finished_seq"] == 1   # Report des Scans
+
+    # Der Admin-Knopf (ohne auto) zeigt sein Ergebnis, auch „0 neu".
+    engine.enqueue_audio_warm(tmp_path / "audio-cache")
+    s = _wait_idle(engine, until_label="taskAudioWarm")
+    assert [h["label"]["key"] for h in s["history"]] == ["taskAudioWarm", "taskScan"]
+    engine.enqueue_recheck_filtered()
+    s = _wait_idle(engine, until_label="taskRecheckFiltered")
+    assert s["history"][0]["label"]["key"] == "taskRecheckFiltered"
+
+
+def test_recheck_filtered_auto_and_button_are_one_task(engine):
+    """Knopf und Automatik mit denselben Regeln bleiben EINE Aufgabe (#277:
+    ``auto`` gehört nicht zum Dedupe-Schlüssel)."""
+    engine.enqueue("_sleep", {"seconds": 0.5, "steps": 5}, {"key": "sleepA"})
+    _wait_running(engine)
+    engine.enqueue_recheck_filtered({"min_date": "2020-01-01"}, auto=True)
+    with pytest.raises(AlreadyQueued):
+        engine.enqueue_recheck_filtered({"min_date": "2020-01-01"})
+    _wait_idle(engine, timeout=10)
+    assert engine.status()["history"][0]["label"]["key"] == "sleepA"   # still: nichts aussortiert
 
 
 def test_failing_task_does_not_kill_worker(engine, media):
@@ -537,3 +574,18 @@ def test_status_never_waits_for_worker_start(tmp_path, monkeypatch):
         _wait_idle(eng, until_label="sleep", timeout=10)
     finally:
         eng.shutdown()
+
+
+def test_test_tasks_only_registered_under_test():
+    """#251: ``_sleep``/``_boom``/``_die`` gibt es nur mit FML_TEST_TASKS=1
+    (gesetzt in tests/conftest.py), sonst nicht über task_queue ausführbar."""
+    import subprocess
+    import sys
+
+    code = "from feral.web.tasks import TASKS; print(sorted(n for n in TASKS if n.startswith('_')))"
+    env = {k: v for k, v in os.environ.items() if k != "FML_TEST_TASKS"}
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
+                         text=True, check=True).stdout.strip()
+    assert out == "[]"
+    from feral.web.tasks import TASKS
+    assert {"_sleep", "_boom", "_die"} <= set(TASKS)

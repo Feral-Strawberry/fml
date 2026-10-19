@@ -20,6 +20,16 @@ root = "/path/to/library"
 # configured ⇒ on.
 verwaltung = false
 
+[export]
+# Export folder (ADR 0103): the bulk action "Export copies" puts copies of
+# media here, one folder YYYY-MM-DD[ package name] per export. Originals
+# are only read; nothing changes in the library. Also works in read-only
+# mode. The folder must NOT be inside the library, a watch folder or the
+# cache, and none of those may be inside it (fml would read its own
+# exports back in). Without this entry the export is locked.
+# Can also be set via Admin → Configuration → Media library.
+#root = "/path/to/export"
+
 [web]
 # Instance conveniences (ADR 0041/I5) — handy when several fml instances
 # run in parallel (each with its own config file + database + port; start
@@ -74,6 +84,15 @@ path = "./feral.sqlite"
 # Ranking module (ADR 0045): pairwise rating ("arenas" like LMArena) —
 # two images for a filter expression, one wins, Elo leaderboard.
 # Default off: no sidebar group, no queries, no cost.
+# Can also be toggled via Admin → Configuration → Modules.
+enabled = false
+
+[clip]
+# Clip module (ADR 0105): button "Clip" in the detail panel of videos and
+# songs. Mark a section and write it as a new file (WAV, or MP4 with
+# H.264) to the export folder; the original is only read. Needs
+# [export] root and ffmpeg (with libx264 for video clips).
+# Default off: no button, no cost.
 # Can also be toggled via Admin → Configuration → Modules.
 enabled = false
 

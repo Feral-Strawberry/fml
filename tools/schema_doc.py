@@ -42,7 +42,7 @@ GROUPS = [
     ("layer2", {"de": "Schicht 2: Interpretation", "en": "Layer 2: interpretation"},
      ["interpreted_metadata"]),
     ("manual", {"de": "Manuelle Schicht", "en": "Manual layer"},
-     ["annotations", "tags", "item_tags", "time_comments", "manual_fields", "covers",
+     ["annotations", "tags", "item_tags", "time_comments", "manual_fields", "manual_lyrics", "covers",
       "smart_folders", "folder_order"]),
     ("rankings", {"de": "Ranking-Modul", "en": "Ranking module"},
      ["rankings", "ranking_duels", "ranking_scores"]),

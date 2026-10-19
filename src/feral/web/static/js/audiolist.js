@@ -17,10 +17,11 @@ import { colorDotsHtml, dotsHtml } from "./curate.js";
 import { galleryItemAt, galleryTotal, listComparing } from "./gallery.js";
 import { emit, on } from "./main.js";
 import {
-  analysisOf, btnState, currentHash, matchOn, nudge, onRepaint, overrideMatch, paintWave, playAll,
-  playingHash, seek, setText, toggle, toggleMatch,
+  analysisOf, btnState, currentHash, currentSong, matchOn, nudge, onRepaint, overrideMatch, paintWave,
+  playAll, playingHash, seek, setText, toggle, toggleMatch,
 } from "./player.js";
 import { rulerTicks } from "./waveform.js";
+import { dialogsOpen } from "./overlays.js";
 import { commentsOf, seedComments } from "./comments.js";
 import { seedSections } from "./lyrics.js";
 
@@ -70,8 +71,88 @@ export const infoRows = () => style === "info" && !listComparing();
 
 /** Was eine Zeile außer Hash und Bewertung zeigt, für die Zeilen-Signatur. */
 export const rowFacts = (item) =>
-  [infoRows() ? "i" : "w", item.title, item.artist, item.album, item.track, item.year, item.genre]
+  [infoRows() ? "i" : "w", listRows(), item.loc?.id, item.loc?.count, item.title, item.artist, item.album, item.track, item.year, item.genre]
     .map((v) => v || "").join("\u0001");
+
+// -- Fundort-Zeilen und Ordnergruppen (ADR 0108) -----------------------------------------
+//
+// Nur in „Angaben": eine von drei Zeilen-Arten, gewählt über ▾ an ☰
+// (Nachtrag ADR 0108). „ordner" = je Fundort eine Zeile, nach Ordnern mit
+// Köpfen dazwischen (Standard), „fundorte" = je Fundort eine Zeile in der
+// gewählten Sortierung, „songs" = je Song eine Zeile wie zuvor. Gemerkt im
+// Browser; kein Suchzustand.
+
+export const ROWS = ["ordner", "fundorte", "songs"];
+const ROWS_KEY = "feral-listrows";
+let rowsChoice = "ordner";
+try {
+  const v = localStorage.getItem(ROWS_KEY);
+  if (ROWS.includes(v)) rowsChoice = v;
+} catch { /* privat */ }
+
+/** Gewählte Zeilen-Art (auch, wenn gerade „Welle" gilt). */
+export const rowsKind = () => rowsChoice;
+export function setRowsKind(v) {
+  rowsChoice = ROWS.includes(v) ? v : "ordner";
+  try { localStorage.setItem(ROWS_KEY, rowsChoice); } catch { /* privat */ }
+}
+/** Gilt gerade eine Fundort-Darstellung? "ordner" | "fundorte" | "" — nur in
+ *  „Angaben", nie im Vergleich (der zeigt Wellen und arbeitet mit Songs). */
+export const listRows = () => (infoRows() && rowsChoice !== "songs" ? rowsChoice : "");
+
+/** Ordner-Segmente eines Pfads ab `skip`: [{text, path}], `path` = der Ordner
+ *  bis einschließlich dieses Segments (Laufwerk „D:" als „D:\"). */
+export function folderSegments(path, skip = 0) {
+  const out = [];
+  let i = skip;
+  while (i < path.length) {
+    let j = i;
+    while (j < path.length && path[j] !== "/" && path[j] !== "\\") j++;
+    if (j > i) {
+      const upto = path.slice(0, j);
+      out.push({ text: path.slice(i, j), path: /^[A-Za-z]:$/.test(upto) ? `${upto}\\` : upto });
+    }
+    i = j + 1;
+  }
+  return out;
+}
+
+const kindLabels = () => ({ library: STRINGS.locKindLibrary, watch: STRINGS.locKindWatch, extern: STRINGS.locKindExtern });
+
+/** Kopf einer Ordnergruppe: Herkunft, Pfad (Segmente öffnen den Ordner wie im
+ *  Panel, #37), Zahl der Zeilen, ⌕ setzt den Chip. Der mit dem vorigen Kopf
+ *  gemeinsame Anfang ist abgedunkelt; das letzte Segment nie. */
+export function groupRowHtml(group, prev) {
+  const library = group.kind === "library";
+  const segs = library ? [] : folderSegments(group.path, group.skip);
+  let same = 0;
+  if (prev && prev.kind === group.kind && !library) {
+    const ps = folderSegments(prev.path, prev.skip);
+    while (same < segs.length - 1 && same < ps.length
+           && ps[same].path.toLowerCase() === segs[same].path.toLowerCase()) same++;
+  }
+  // Library (ADR 0108 Punkt 3): ein Ordner, ihr Pfad nur als Hinweis (die
+  // Datumsordner gehören fml); das Badge sagt schon „Library".
+  const path = library ? `<span class="glib">${esc(group.path)}</span>`
+    : segs.map((sg, k) => `<a href="#" class="seg${k < same ? " pre" : ""}" data-path="${esc(sg.path)}"
+        title="${esc(STRINGS.locOpenFolderTitle)}">${esc(sg.text)}</a>`).join(`<span class="gsep">›</span>`);
+  return `
+    <div class="rtop gtop">
+      <span class="lockind">${esc(kindLabels()[group.kind] || "")}</span>
+      <span class="gpath" title="${esc(group.path)}">${path}</span>
+      <span class="gerr"></span>
+      <span class="gcount">${group.count.toLocaleString(STRINGS.locale)}</span>
+      <button type="button" class="gfilter"
+              title="${esc(library ? STRINGS.groupFilterLibraryTitle : STRINGS.groupFilterTitle)}">⌕</button>
+    </div>`;
+}
+
+/** Ordner eines Fundorts für die Spalte „Ordner" (ohne Gruppierung). */
+function locFolder(loc) {
+  if (loc.kind === "library") return STRINGS.locKindLibrary;
+  const cut = Math.max(loc.path.lastIndexOf("/"), loc.path.lastIndexOf("\\"));
+  return folderSegments(loc.path.slice(0, Math.max(cut, 0)), loc.skip).map((sg) => sg.text).join(" › ");
+}
 
 /** Zeile der Darstellung „Angaben": Titel aus der Datei, sonst der Dateiname;
  *  ohne Interpret stehen Modell oder Tool in der Spalte. */
@@ -84,7 +165,8 @@ function infoRowHtml(item) {
     <div class="rtop">
       <button type="button" class="pbtn"${playable ? "" : " disabled"}
               title="${esc(playable ? STRINGS.audioPlay : STRINGS.audioUnplayable)}">▶</button>
-      <div class="rname" title="${esc(name)}">${colorDotsHtml(item.colors)}${item.cover || item.artwork ? `<img class="rcov" alt="" title="${esc(item.cover ? STRINGS.coverFinalTitle : STRINGS.artworkTitle)}">` : ""}<b>${esc(item.title || splitName(name).stem)}</b></div>
+      <div class="rname" title="${esc(name)}">${colorDotsHtml(item.colors)}${item.cover || item.artwork ? `<img class="rcov" alt="" title="${esc(item.cover ? STRINGS.coverFinalTitle : STRINGS.artworkTitle)}">` : ""}<b>${esc(item.title || splitName(name).stem)}</b>${item.loc?.count > 1 ? `<span class="rlocs" title="${esc(STRINGS.rowLocsTitle.replace("{n}", item.loc.count))}">⧉${item.loc.count}</span>` : ""}</div>
+      ${listRows() === "fundorte" && item.loc ? `<span class="rcell c-folder" title="${esc(item.loc.path)}">${esc(locFolder(item.loc))}</span>` : ""}
       ${cell(item.artist ? "rcell" : "rcell rgen", who)}
       ${cell("rcell c-album", item.album)}
       <span class="rnum c-track">${esc(item.track || "")}</span>
@@ -121,12 +203,19 @@ export function rowHtml(item, prev) {
       <span class="rdots">${dotsHtml(item.rating)}</span>
       <span class="rcom" title="${esc(STRINGS.listColCommentsTitle)}"></span>
     </div>
-    <div class="wv" title="${esc(STRINGS.audioSeek)}"><canvas></canvas><span class="loopr" hidden></span><span class="ph" hidden></span></div>`;
+    <div class="wv" title="${esc(STRINGS.audioSeek)}"><canvas></canvas><span class="loopr" hidden></span><span class="ph" hidden></span><span class="sqz" hidden>»</span></div>`;
 }
 
 // -- Gemeinsame Zeitachse + Listenkopf ------------------------------------------------
 
 let axis = 0;   // Sekunden der vollen Wellenbreite (0 = unbekannt: je Zeile die eigene Dauer)
+
+/** Höchstens so weit reicht die gemeinsame Zeitachse (ADR 0109, #265): ein
+ *  Konzert-Mitschnitt macht die übrigen Wellen nicht mehr winzig. Längere
+ *  Songs füllen ihre Zeile gestaucht (paintWave: eigene Dauer als Breite)
+ *  und tragen ». Gilt auch im Vergleich, der setTimeAxis mit dem längsten
+ *  Verglichenen aufruft. */
+export const AXIS_CAP = 7 * 60;
 
 /** Spaltenköpfe der Liste mit Lineal der gemeinsamen Zeitachse. */
 export function listHeadHtml() {
@@ -134,6 +223,7 @@ export function listHeadHtml() {
   if (infoRows()) {
     return `<div class="cmpnote" hidden></div><div class="manualnote" hidden></div><span></span>
     <span class="mlabel" title="${esc(STRINGS.listColTitleTitle)}">${STRINGS.listColTitle}</span>
+    ${listRows() === "fundorte" ? `<span class="mlabel c-folder">${STRINGS.listColFolder}</span>` : ""}
     <span class="mlabel">${STRINGS.listColArtist}</span>
     <span class="mlabel c-album">${STRINGS.listColAlbum}</span>
     <span class="mlabel num c-track">${STRINGS.listColTrack}</span>
@@ -166,9 +256,10 @@ function rulerHtml() {
 export const timeAxis = () => axis;
 
 /** Gemeinsame Zeitachse setzen (gallery.js mit der ersten Seite:
- *  max_duration der Treffermenge) — Lineal und alle Wellen folgen. */
+ *  max_duration der Treffermenge, gedeckelt auf AXIS_CAP) — Lineal und alle
+ *  Wellen folgen. */
 export function setTimeAxis(sec) {
-  const next = sec > 0 ? sec : 0;
+  const next = sec > 0 ? Math.min(sec, AXIS_CAP) : 0;
   if (next === axis) return;
   axis = next;
   const r = document.querySelector("#listhead .ruler");
@@ -187,7 +278,9 @@ export function paintRow(el) {
   el.classList.toggle("current", currentHash() === hash);
   btnState(el.querySelector(".pbtn"), hash);   // nur bei Änderung (#211)
   const dur = parseFloat(el.dataset.dur) || 0;
-  paintWave(el.querySelector(".wv"), hash, { axis, duration: dur });
+  const wv = el.querySelector(".wv");
+  paintWave(wv, hash, { axis, duration: dur });
+  paintSqueeze(wv, dur);
   const rc = el.querySelector(".rcom");
   if (rc) {
     const n = commentsOf(hash).length;
@@ -203,6 +296,19 @@ export function paintRow(el) {
     setText(l, v == null ? (a === false ? "–" : "") : v.toLocaleString(STRINGS.locale,
       { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
   }
+}
+
+/** Gestauchte Zeile (ADR 0109): länger als die Achse → » am rechten Rand und
+ *  wahre Länge im Tooltip. Schreibt nur bei Änderung (Neumalen ~10×/s). */
+function paintSqueeze(wv, dur) {
+  const mark = wv?.querySelector(".sqz");
+  if (!mark) return;
+  const on = axis > 0 && dur > axis;
+  mark.hidden = !on;
+  const title = on
+    ? `${STRINGS.waveSqueezed.replace("{dur}", fmtDuration(dur)).replace("{axis}", fmtDuration(axis))}\n${STRINGS.audioSeek}`
+    : STRINGS.audioSeek;
+  if (wv.getAttribute("title") !== title) wv.setAttribute("title", title);
 }
 
 /** Zeile(n) eines Songs bzw. alle sichtbaren neu malen (player.onRepaint). */
@@ -235,16 +341,20 @@ export function seekAt(item, sec) {
   if (item && canPlay(item)) seek(item, sec);
 }
 
-/** Alle abspielen: Reihenfolge der Liste JETZT (eingefroren), bis PLAY_ALL_CAP. */
+/** Alle abspielen: Reihenfolge der Liste JETZT (eingefroren), bis PLAY_ALL_CAP.
+ *  In den Fundort-Darstellungen jeder Song einmal, an seiner ersten Zeile. */
 async function startPlayAll(btn) {
   const n = Math.min(galleryTotal(), PLAY_ALL_CAP);
   if (!n) return;
   btn.disabled = true;
   const items = [];
+  const seen = new Set();
   try {
     for (let i = 0; i < n; i++) {
       const it = await galleryItemAt(i);
-      if (it && canPlay(it)) items.push(it);
+      if (!it?.file_hash || seen.has(it.file_hash)) continue;   // Ordnerkopf, zweiter Fundort
+      seen.add(it.file_hash);
+      if (canPlay(it)) items.push(it);
     }
   } finally { btn.disabled = false; }
   playAll(items);
@@ -267,28 +377,40 @@ export function initAudioList() {
 
   initListCompare(allBtn);
 
-  // Tasten der Liste: Leertaste = Play/Pause der ausgewählten Zeile (statt
-  // Lupe, loupe.js), ←/→ = ±5 s ihres Abspielkopfs (Shift ±1 s).
-  let sel = null;
-  on("selection-changed", (d) => { sel = d.index ?? null; });
+  // Tasten der Liste (#260, Nachtrag ADR 0087): Leertaste = Play/Pause,
+  // ←/→ = ±5 s (Shift ±1 s) für den Song der Abspielleiste, egal welche Zeile
+  // ausgewählt ist. Ist die Leiste leer, oder aus (Vergleich: die Zeilen sind
+  // der Player), gelten sie der ausgewählten Zeile. Enter startet die
+  // ausgewählte Zeile. Statt Lupe (loupe.js); in Eingabefeldern ist die
+  // Leertaste ein Leerzeichen.
+  let sel = null;   // {hash, index} — der Index allein zeigt nach Umsortieren woandershin
+  on("selection-changed", (d) => {
+    sel = d.hash && d.index != null ? { hash: d.hash, index: d.index } : null;
+  });
   on("items-reloaded", () => { sel = null; });
+  async function selected() {
+    if (!sel) return null;
+    const item = await galleryItemAt(sel.index);
+    return item?.file_hash === sel.hash && canPlay(item) ? item : null;
+  }
   document.addEventListener("keydown", async (e) => {
     const key = e.key;
-    if ((key !== " " && key !== "ArrowLeft" && key !== "ArrowRight") || libraryView() !== "audio") return;
-    if (e.altKey || e.ctrlKey || e.metaKey) return;
-    if (e.target instanceof Element && e.target.matches("input, textarea, select")) return;
-    // Ein geklickter Knopf behält den Fokus — die Leertaste löste ihn sonst
-    // erneut aus (⏮, ≈ Lautheit, Sortierung …) statt Play/Pause. Sie gehört
-    // hier immer der Wiedergabe; Knöpfe per Tastatur löst Enter aus.
-    if (e.target instanceof Element && e.target.localName === "button") e.target.blur();
-    for (const id of ["loupe", "single", "rankings", "compare"]) {
-      if (!document.getElementById(id)?.hidden) return;
-    }
+    if (key !== " " && key !== "Enter" && key !== "ArrowLeft" && key !== "ArrowRight") return;
+    if (libraryView() !== "audio" || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (overlayOpen() || dialogsOpen()) return;   // Lupe, Einzelansicht, Dialoge: deren Tasten
+    const t = e.target instanceof Element ? e.target : null;
+    // Ein geklickter Knopf (⏮, ≈ Lautheit, Sortierung …) oder ein geklicktes
+    // Häkchen behält den Fokus; Leertaste und Enter lösten ihn sonst erneut
+    // aus. Nur wer per Tab auf einen Knopf geht, löst ihn mit Enter aus.
+    if (t?.matches('button, input[type="checkbox"], input[type="radio"]')) {
+      if (key === "Enter" && t.matches(":focus-visible")) return;
+      t.blur();
+    } else if (typing(e)) return;
     e.preventDefault();
-    if (sel === null) return;
-    const item = await galleryItemAt(sel);
-    if (!item || !canPlay(item)) return;
-    if (key === " ") togglePlay(item);
+    const bar = listComparing() ? null : currentSong();
+    const item = key === "Enter" || !bar ? await selected() : bar;
+    if (!item) return;
+    if (key === " " || key === "Enter") togglePlay(item);
     else nudge(item, (e.shiftKey ? 1 : 5) * (key === "ArrowRight" ? 1 : -1));
   });
 }
@@ -304,7 +426,7 @@ const OVERLAYS = ["loupe", "single", "rankings", "compare"];
 const overlayOpen = () => OVERLAYS.some((id) => document.getElementById(id)?.hidden === false);
 const typing = (e) => e.target instanceof Element && e.target.matches("input, textarea, select, [contenteditable]");
 // Popover mit eigenem Esc (Sortierung, + Kriterium, Tipphilfe) schließen zuerst.
-const popoverOpen = () => ["sortmenu", "addcrit", "typeahead"]
+const popoverOpen = () => ["sortmenu", "rowsmenu", "addcrit", "typeahead"]
   .some((id) => document.getElementById(id)?.hidden === false);
 
 function initListCompare(allBtn) {

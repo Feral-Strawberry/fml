@@ -51,7 +51,8 @@ Konfiguration ein
 Favicon-Farbpunkt - unterscheidet parallel laufende Instanzen). Läuft fml im
 **Übersichtsmodus** (Standardzustand, ADR 0041), steht hier außerdem das
 Badge **„👁 Übersichtsmodus"**: fml katalogisiert und kuratiert nur -
-Dateien werden nie kopiert, verschoben oder gelöscht. Freischalten der
+Dateien werden nie verschoben, gelöscht oder in die Library kopiert;
+geschrieben wird allein in den Export-Ordner (Kopien, Ausschnitte). Freischalten der
 dateischreibenden Wege: Admin → Konfiguration → **Library-Verwaltung**
 (siehe [admin.md](admin.md)).
 
@@ -63,8 +64,8 @@ und übersteuert die Browser-Sprache; der Wechsel lädt die Seite neu. Die
 Sprache gehört zum Betrachter (Browser), nicht zur Instanz - zwei Rechner
 können dieselbe Instanz in verschiedenen Sprachen ansehen (ADR 0054).
 Die Such-Grammatik versteht zusätzlich **englische
-Aliasse** für ihre deutschen Reste: `file:` = `datei:`, `location:` =
-`fundort:`, `portrait`/`square`/`landscape` = `hochformat`/`quadratisch`/
+Aliasse** für ihre deutschen Reste: `file:` = `datei:`, `folder:` =
+`ordner:`, `location:` = `fundort:`, `portrait`/`square`/`landscape` = `hochformat`/`quadratisch`/
 `querformat`, `-asc`/`-desc` = `-auf`/`-ab`, `external` = `extern`,
 `unknown` = `unbekannt`, `type:` = `typ:` (mit `image` = `bild`),
 `duration:` = `dauer:`, `generator:` = `tool:`, `codec:` = `video_codec:`
@@ -393,7 +394,7 @@ Dateien extrahiert wurde.
 
 - **Mehrere auswählen:** **Shift-Klick** markiert einen Bereich,
   **Strg/Cmd-Klick** nimmt einzelne Kacheln dazu oder heraus. Bewertung,
-  Tags und Modell-Zuweisung wirken dann auf die **ganze Auswahl** (das
+  Tags, Modell-Zuweisung, Musik-Angaben und Cover wirken dann auf die **ganze Auswahl** (das
   Panel zeigt einen Hinweis mit der Anzahl).
 - **Bewerten:** Tasten `1`–`5` auf das ausgewählte Medium (in Übersicht und
   Lupe), `0` löscht, dieselbe Zahl nochmal ebenfalls (Toggle). Oder die
@@ -449,9 +450,13 @@ Für „diese Suche eingrenzen, dann ALLE Treffer taggen/bewerten" gibt es den
 Knopf **⚡ Sammel-Aktion** rechts in der Kopfzeile über der Galerie (neben
 „Filter zurücksetzen"). Er öffnet einen Dialog, der
 zeigt, was getroffen wird (die Chips + Trefferzahl), und sechs Aktionen
-anbietet - egal ob 50 oder 20.000 Treffer (in der Audioansicht kommt
-„Austausch → Exportieren" dazu, siehe
-[Audio](audio.md#kommentare-mit-einem-anderen-fml-austauschen)):
+anbietet - egal ob 50 oder 20.000 Treffer. Der Dialog hat zwei Abschnitte:
+oben **Treffer ändern** mit den sechs Aktionen und dem Knopf „Anwenden",
+darunter **Export**, der hier nichts ändert: „Kopien exportieren …" (siehe
+[Kopien exportieren](export.md)) und in der Audioansicht
+„Austauschdatei speichern" (siehe
+[Audio](audio.md#kommentare-mit-einem-anderen-fml-austauschen)). Die
+sechs Aktionen:
 
 - **Basisbewertung** (1-5 ★): füllt **nur Unbewertete** - bereits vergebene
   Bewertungen bleiben unangetastet. Nichts wird zerstört.
@@ -559,7 +564,8 @@ Monitore bleiben aufgeräumt. Im Bearbeiten-Modus eines Rankings (siehe
   Generator, Modell, LoRA, Jahr, Dateityp, Format, Auflösung,
   Eingangsbild, Fundort), danach, was es nur hier gibt (Tags, Text,
   **Dauer** - Eingabe wie `dauer:`, z. B. `>120` oder `1:00-3:00`, gilt für
-  Audio und Video -, Eckwerte, Rohdaten-Suche, Dateiname, Sortierung) mit
+  Audio und Video -, Eckwerte, Rohdaten-Suche, Dateiname, Ordner,
+  Sortierung) mit
   Wertelisten und **Zählern im aktuellen Kontext**. Mehrere Werte anklicken
   = ODER-Chip; „ausschließen" macht Negativ-Kriterien; die Rohdaten-Suche
   ist das Opt-in für Treffer in Workflow-JSONs (`raw:`).
@@ -572,7 +578,10 @@ Monitore bleiben aufgeräumt. Im Bearbeiten-Modus eines Rankings (siehe
   steht dann die Zeile **„Volltext: video"** - ein Pfeil dorthin, und Enter
   sucht wie gewohnt im Volltext. Liegt die Medienart in der anderen Ansicht
   („audio" in der Galerie), steht dort statt eines Chips **„Ansicht: →
-  Audioansicht"**: Enter wechselt die Ansicht, die Suche bleibt.
+  Audioansicht"**: Enter wechselt die Ansicht, die Suche bleibt. Als
+  letzter Vorschlag (vor „Volltext") steht immer **„Ordner: …"** ohne
+  Zähler: Enter darauf sucht nach Dateien in Ordnern dieses Namens
+  (`ordner:`).
 
 Gesucht wird **kuratiert**: über die interpretierten Felder (Prompt,
 Modell, Seed, Sampler, …), den **Dateinamen** (bei metadatenarmen Quellen
@@ -650,7 +659,11 @@ Roh-Metadaten** - findet z. B. Node-Namen im Workflow-JSON: `raw: ipadapter`),
 `datei:` (englisch `file:`; gezielt der **Dateiname** der Fundorte, ohne
 Verzeichnis - Teilstring, mit `"…"` exakt; praktisch für metadatenlose
 Bestände wie Midjourney-Exporte und natürlich auch in Ranking-Ausdrücken
-nutzbar), `typ:` (englisch `type:`; Medienart `bild`/`video`/`audio`),
+nutzbar), `ordner:` (englisch `folder:`; der **Ordner**, in dem ein Fundort
+liegt, samt Unterordnern: `ordner: Kiss_Tribute` trifft jeden Ordner
+dieses Namens irgendwo im Pfad - ganzer Ordnername, ohne Groß-/
+Kleinschreibung -, in Anführungszeichen ein genauer Pfad:
+`ordner: "D:/Musik/Kiss_Tribute"`; `\` und `/` gelten gleich), `typ:` (englisch `type:`; Medienart `bild`/`video`/`audio`),
 `dauer:` (englisch `duration:`; Sekunden oder m:ss mit Vergleich oder als
 Bereich: `dauer: >120`, `dauer: 60-180`, siehe [Audio-Modul](audio.md))
 und die Medien-Eckwerte `width`/`height`/`fps` mit Vergleich (z. B.
@@ -804,8 +817,8 @@ Einzelbild; `codec: prores` im Suchfeld findet alle Betroffenen
   Einzelbildansicht rendern dafür serverseitig ein JPEG (das Original bleibt
   unangetastet). Photo CD in der größten Stufe (3072×2048). PSD nutzt das eingebettete Composite. PSDs, die **ohne
   „Maximale Kompatibilität"** gespeichert wurden, tragen keinen Composite (nur
-  die Ebenen) — sie zeigen ehrlich „Keine Vorschau verfügbar" statt eines
-  falschen weißen Bildes. Wer sie sehen will, speichert sie in Photoshop einmal
+  die Ebenen) — sie sagen ehrlich, dass kein Composite eingebettet ist,
+  statt ein falsches weißes Bild zu zeigen. Wer sie sehen will, speichert sie in Photoshop einmal
   mit „Maximale Kompatibilität" neu. **PDF** wird nur katalogisiert (kein
   Extraktor, ADR 0051).
 - **Nur für dich gedacht:** Der Server bindet standardmäßig nur an `localhost` und

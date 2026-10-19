@@ -53,6 +53,12 @@ Strawberry** (zugleich der Name der GitHub-Organisation).
   allen eingebetteten Metadaten, eigene Audioansicht mit Wellenform, Player
   mit Lautheitsangleich, Zeitkommentare, Vergleichen und Cover für fertige
   Songs in der Galerie.
+- [Kopien exportieren](export.md) — Medien als Kopie in einen
+  Export-Ordner legen, als Auswahl oder ganzes Suchergebnis über die
+  Sammel-Aktion; die Library bleibt, wie sie ist.
+- [Ausschnitt](ausschnitt.md) — optional: einen Abschnitt aus einem Song
+  oder Video markieren und als WAV oder MP4 in den Export-Ordner
+  schreiben.
 - [Mehrere Instanzen](instanzen.md) — parallele, unabhängige Galerien aus
   einem Programmordner (eigene DB + Port je Instanz): **Subgalerien einer
   Gesamt-Library**, ohne Dateien zu berühren. Start per
