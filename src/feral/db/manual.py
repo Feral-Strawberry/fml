@@ -17,6 +17,7 @@ Konventionen:
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from datetime import date, datetime
@@ -271,6 +272,23 @@ def annotations_for(conn: sqlite3.Connection, file_hash: str) -> dict[str, Any]:
         # Cover eines Songs (#165, ADR 0090): Hash des Bildes oder None.
         "cover": cover_of(conn, file_hash),
     }
+
+
+def tags_of_selection(conn: sqlite3.Connection, hashes: list[str]) -> list[dict[str, Any]]:
+    """Alle Tags einer Auswahl (#303) mit ihrer Zahl: ``[{name, count, color,
+    finder}]``, nach Name. ``count`` = wie viele der Hashes den Tag tragen;
+    ``finder`` = mindestens eine Zuordnung kam aus dem Finder (ADR 0097).
+    Die Hashes gehen als EIN JSON-Parameter hinein (kein Variablenlimit)."""
+    rows = conn.execute(
+        """SELECT t.name, t.color, COUNT(DISTINCT it.file_hash) AS n,
+                  MAX(it.source = 'finder') AS finder
+             FROM item_tags it JOIN tags t ON t.id = it.tag_id
+            WHERE it.file_hash IN (SELECT value FROM json_each(?))
+            GROUP BY t.id ORDER BY t.name COLLATE NOCASE""",
+        (json.dumps(list(dict.fromkeys(hashes))),),
+    ).fetchall()
+    return [{"name": r["name"], "count": r["n"], "color": r["color"],
+             "finder": bool(r["finder"])} for r in rows]
 
 
 def list_tags(conn: sqlite3.Connection) -> list[dict[str, Any]]:

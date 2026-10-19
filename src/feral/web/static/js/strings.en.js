@@ -505,6 +505,8 @@ export const STRINGS = {
   curateRateTitle: "Rate: click or keys 1–5 (0 clears)",
   curateTagPlaceholder: "Add tag … (Enter)",
   curateTagRemove: "Remove tag",
+  curateTagRemoveAll: "Remove tag from all selected",
+  curateTagPartial: "on {n} of {total} selected",
   curateTagFinder: "Taken over from Finder (macOS tag)",
   curateTagFinderShort: "Finder",
   curateNoTags: "No tags yet.",

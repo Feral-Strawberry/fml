@@ -255,6 +255,9 @@ export const batchAnnotate = (hashes, fields) =>
  *  ({fields: {feld: {value, mixed, manual, source}}}) und Setzen; "" entfernt
  *  die Angabe von Hand. Antwort {updated, fields} oder {queued, count}. */
 export const getMusicFields = (hashes) => postJSON("/api/fields/state", { hashes });
+
+/** Tags einer Mehrfachauswahl (#303): {tags: [{name, count, color, finder}], count}. */
+export const getSelectionTags = (hashes) => postJSON("/api/batch/tags", { hashes });
 export const setMusicFields = (hashes, fields) => postJSON("/api/fields", { hashes, fields });
 
 /** Sammel-Aktion aufs Suchergebnis (ADR 0040): hashes ODER filter als Scope.

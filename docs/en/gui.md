@@ -378,7 +378,9 @@ extracted from the files.
 - **Selecting several:** **Shift-click** marks a range, **Ctrl/Cmd-click**
   adds or removes individual tiles. Rating, tags, model assignment,
   music details and cover then apply to the **whole selection** (the panel shows a note with the
-  count).
+  count). The tags list then shows **all tags of the selection**; one that
+  not all of them carry has a dashed border and a count such as `3/5`. ✕
+  removes the tag from all selected media, a new tag goes onto all of them.
 - **Rating:** keys `1`–`5` on the selected medium (in overview and
   loupe), `0` clears, the same number again clears too (toggle). Or click
   the dots in the panel header / at the bottom of the loupe. Tiles show

@@ -6,6 +6,26 @@ Was sich zwischen den Snapshot-Releases geändert hat, aus Sicht der
 Nutzer. Versionen sind Datums-Versionen (`JJJJ.MM` oder `JJJJ.MM.N`);
 die laufende Instanz zeigt ihre Version in Admin → Übersicht.
 
+## 2026.10.3 (2026-10-20)
+
+Ein Fix, der nicht warten sollte: **Tags bei Mehrfachauswahl.**
+
+### Nach dem Update
+
+Wie gewohnt starten. Keine neue Migration, keine neuen Abhängigkeiten,
+kein Re-Scan nötig.
+
+### Behoben
+
+- **Tag entfernen wirkte bei Mehrfachauswahl nur auf ein Medium.** Sind
+  mehrere Songs, Bilder oder Videos ausgewählt, entfernt ✕ an einem Tag
+  ihn jetzt bei **allen** ausgewählten, in der Audioliste wie in der
+  Galerie.
+- Dazu zeigt das Panel bei Mehrfachauswahl **alle Tags der Auswahl**,
+  nicht nur die des angezeigten Mediums. Ein Tag, den nicht alle tragen,
+  hat einen gestrichelten Rand und eine Zahl wie `3/5`; so lässt sich
+  auch ein Tag entfernen, den der erste Song gar nicht hat.
+
 ## 2026.10.2 (2026-10-20)
 
 Bisher war fml eine Einbahnstraße: Medien kamen hinein und blieben dort.

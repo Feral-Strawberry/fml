@@ -162,6 +162,48 @@ def test_batch_annotate_endpoint(tmp_path) -> None:
         app.state.thumb_pool.shutdown()
 
 
+def test_tags_of_selection_and_batch_remove(tmp_path) -> None:
+    """#303: Tags einer Mehrfachauswahl mit Zahl, ✕ löst einen Tag bei allen
+    (auch bei denen, die das Panel-Item nicht trägt), die Antwort bringt die
+    neuen Tags der Auswahl mit."""
+    from feral.db import connect, manual, store_extraction
+    from feral.extract.types import ContainerExtraction
+    from feral.web.app import BatchAnnotateRequest, MusicFieldsState
+
+    db = tmp_path / "t.sqlite"
+    app = create_app(db)
+    try:
+        conn = connect(db)
+        hashes = ["aa" * 32, "bb" * 32, "cc" * 32]
+        for h in hashes:
+            store_extraction(conn, file_hash=h, file_size=1, path=tmp_path / f"{h[:4]}.mp3",
+                             extraction=ContainerExtraction(container="mp3"))
+        for h in hashes:
+            manual.add_tag(conn, h, "album")
+        manual.add_tag(conn, hashes[1], "regenzeit")
+        manual.add_tag(conn, hashes[2], "regenzeit")
+        manual.add_tag(conn, hashes[0], "nur-eins")
+        ep = {r.path: r.endpoint for r in app.routes if hasattr(r, "endpoint")}
+
+        got = ep["/api/batch/tags"](MusicFieldsState(hashes=hashes + hashes[:1]))
+        assert got["count"] == 3            # doppelte Hashes zählen einmal
+        assert [(t["name"], t["count"]) for t in got["tags"]] == [
+            ("album", 3), ("nur-eins", 1), ("regenzeit", 2)]
+
+        # „regenzeit" trägt das Panel-Item (hashes[0]) nicht — trotzdem weg bei allen.
+        result = ep["/api/batch/annotate"](BatchAnnotateRequest(hashes=hashes, remove_tag="regenzeit"))
+        assert [(t["name"], t["count"]) for t in result["tags"]] == [("album", 3), ("nur-eins", 1)]
+        assert all("regenzeit" not in manual.annotations_for(conn, h)["tags"] for h in hashes)
+        assert manual.annotations_for(conn, hashes[0])["tags"] == ["album", "nur-eins"]
+        # Anhängen bringt die Tags der Auswahl ebenso mit.
+        result = ep["/api/batch/annotate"](BatchAnnotateRequest(hashes=hashes[1:], add_tag="neu"))
+        assert [(t["name"], t["count"]) for t in result["tags"]] == [("album", 2), ("neu", 2)]
+        conn.close()
+    finally:
+        app.state.engine.shutdown()
+        app.state.thumb_pool.shutdown()
+
+
 # --- /api/workflow: A1111-Graph wird erzeugt (Block N, ADR 0044) -----------------
 
 

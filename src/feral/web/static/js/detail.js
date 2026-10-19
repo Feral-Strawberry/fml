@@ -7,8 +7,8 @@
 // Loupe. Rating/Tags bekommen ihren Platz im Kopf erst mit Block 3.1.
 
 import { STRINGS } from "./strings.js";
-import { wireReveal, removeCovers, loadThumb, getAudioAnalysis, fmtLoudness, getItem, getTags, getModels, mediaUrl, openLocation, releaseVideos, wireMediaFallback, workflowUrl, thumbUrl, canPlay, mediaHtml, kindLabel as mediaKindLabel, fmtDuration, wireUnplayable, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
-import { applyDate, applyModel, applyRating, applyTag, colorDotsHtml, note, selectionHashes, tagRemove } from "./curate.js";
+import { getSelectionTags, wireReveal, removeCovers, loadThumb, getAudioAnalysis, fmtLoudness, getItem, getTags, getModels, mediaUrl, openLocation, releaseVideos, wireMediaFallback, workflowUrl, thumbUrl, canPlay, mediaHtml, kindLabel as mediaKindLabel, fmtDuration, wireUnplayable, mediaFallbackLabel, codecLabel, videoCodecFacts } from "./api.js";
+import { applyDate, applyModel, applyRating, applyTag, applyTagRemove, colorDotsHtml, note, selectionHashes } from "./curate.js";
 import { MUSIC_FIELDS, mountMusicFields } from "./musicfields.js";
 import { lyricsRowHtml } from "./lyricsedit.js";
 import { mountCommentSection } from "./comments.js";
@@ -226,6 +226,8 @@ export function initDetail() {
   let curManual = null;   // letzter Stand der manuellen Schicht (Tags für den Cover-Dialog)
   let curRating = null; // aktueller Stand fürs Toggle (gleiche Zahl löscht)
   let selCount = 1;     // Größe der aktuellen Auswahl (Multiselect-Hinweis)
+  let selTags = null;   // Tags der Mehrfachauswahl mit Zahl (#303), null = noch nicht da
+  let selTotal = 0;
   let curModel = "";    // angezeigtes manuelles Modell (Doppel-Submit vermeiden)
   let clipEnabled = false;   // Modul Ausschnitt (ADR 0105): Knopf ✂ nur mit Modul
   const collapsed = loadCollapsed();   // eingeklappte Abschnitte (#219)
@@ -238,20 +240,44 @@ export function initDetail() {
     curModel = manual.model || "";
     const model = panel.querySelector("#pModel");
     if (model && document.activeElement !== model) model.value = curModel;
-    const tags = panel.querySelector("#pTags");
-    if (tags) {
-      tags.innerHTML = manual.tags.length
-        ? manual.tags.map((t) => {
-            // Finder-Tags (ADR 0097): Farbpunkt + Herkunftsmarke „Finder".
-            const meta = manual.tag_meta?.[t];
-            return `<span class="badgechip tagchip"${meta?.finder ? ` title="${esc(STRINGS.curateTagFinder)}"` : ""}>${meta?.color ? colorDotsHtml([meta.color]) : ""}${esc(t)}${meta?.finder ? `<span class="ffrom">${esc(STRINGS.curateTagFinderShort)}</span>` : ""}<button type="button" class="tagdel" data-tag="${esc(t)}" title="${STRINGS.curateTagRemove}">✕</button></span>`;
-          }).join("")
-        : `<span class="vdim">${STRINGS.curateNoTags}</span>`;
-    }
+    renderTags();
     const notes = panel.querySelector("#pNotes");
     if (notes && document.activeElement !== notes) notes.value = manual.notes || "";
     const date = panel.querySelector("#pDate");
     if (date && document.activeElement !== date) date.value = manual.media_date || "";
+  }
+
+  // Tag-Chips (#303): bei Mehrfachauswahl alle Tags der Auswahl mit Zahl
+  // („3/5" = nicht alle tragen ihn), sonst die des angezeigten Items.
+  function renderTags() {
+    const el = panel.querySelector("#pTags");
+    if (!el || !curManual) return;
+    const list = selCount > 1 && selTags
+      ? selTags
+      : curManual.tags.map((name) => ({ name, count: 1, ...curManual.tag_meta?.[name] }));
+    const total = selCount > 1 && selTags ? selTotal : 1;
+    el.innerHTML = list.length
+      ? list.map((t) => {
+          // Finder-Tags (ADR 0097): Farbpunkt + Herkunftsmarke „Finder".
+          const titles = [t.finder ? STRINGS.curateTagFinder : "",
+            t.count < total ? STRINGS.curateTagPartial.replace("{n}", t.count).replace("{total}", total) : ""].filter(Boolean);
+          return `<span class="badgechip tagchip${t.count < total ? " partial" : ""}"${titles.length ? ` title="${esc(titles.join(" · "))}"` : ""}>`
+            + `${t.color ? colorDotsHtml([t.color]) : ""}${esc(t.name)}`
+            + `${t.finder ? `<span class="ffrom">${esc(STRINGS.curateTagFinderShort)}</span>` : ""}`
+            + `${t.count < total ? `<span class="tagcount">${t.count}/${total}</span>` : ""}`
+            + `<button type="button" class="tagdel" data-tag="${esc(t.name)}" title="${total > 1 ? STRINGS.curateTagRemoveAll : STRINGS.curateTagRemove}">✕</button></span>`;
+        }).join("")
+      : `<span class="vdim">${STRINGS.curateNoTags}</span>`;
+  }
+
+  async function loadSelectionTags(mySeq) {
+    try {
+      const d = await getSelectionTags(selectionHashes());
+      if (mySeq !== seq) return;   // inzwischen weitergeklickt
+      selTags = d.tags;
+      selTotal = d.count;
+      renderTags();
+    } catch (err) { console.warn(err); }
   }
 
   async function fillVocabulary() {
@@ -453,7 +479,9 @@ export function initDetail() {
       sec.classList.toggle("collapsed", collapsed.has(sec.dataset.sec));
     }
     curHash = d.file_hash;
+    selTags = null;
     renderManual(d.manual);
+    if (selCount > 1) loadSelectionTags(mySeq);
     fillVocabulary();
     wireMediaFallback(panel.querySelector(".ppreview"), mediaFallbackLabel(d), d);
     wireUnplayable(panel.querySelector(".ppreview"), d);   // 📂 im Codec-Hinweis (#71)
@@ -472,7 +500,7 @@ export function initDetail() {
     });
     panel.querySelector("#pCurate").addEventListener("click", (e) => {
       const del = e.target.closest(".tagdel");
-      if (del) tagRemove(d.file_hash, del.dataset.tag);
+      if (del) applyTagRemove(del.dataset.tag);
     });
     const tagInput = panel.querySelector("#pTagInput");
     const takeTag = () => {
@@ -605,7 +633,9 @@ export function initDetail() {
   });
   on("items-reloaded", () => { seq++; curHash = null; showEmpty(); });
   on("annotation-changed", (d) => {
-    if (d.hash === curHash) renderManual(d.manual);
+    if (d.hash !== curHash) return;
+    if (d.selectionTags && selCount > 1) { selTags = d.selectionTags; selTotal = d.selectionCount; }
+    renderManual(d.manual);
   });
   // Jahr von Hand geändert (ADR 0101): nur „Erstellt" im Datei-Block
   // nachziehen. Das Panel wird NICHT neu gebaut: der Fokus stünde sonst

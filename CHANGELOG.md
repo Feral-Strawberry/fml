@@ -7,6 +7,26 @@ What changed between snapshot releases, from the user's point of view.
 Versions are date versions (`YYYY.MM` or `YYYY.MM.N`); a running
 instance shows its version under Admin → Overview.
 
+## 2026.10.3 (2026-10-20)
+
+A fix that should not wait: **tags with several media selected.**
+
+### After the update
+
+Start as usual. No new migration, no new dependencies, no re-scan
+needed.
+
+### Fixed
+
+- **Removing a tag with several media selected only affected one of
+  them.** With several songs, images or videos selected, ✕ on a tag now
+  removes it from **all** selected media, in the audio list as in the
+  gallery.
+- With several media selected, the panel now also shows **all tags of the
+  selection**, not just those of the medium on display. A tag that not
+  all of them carry has a dashed border and a count such as `3/5`, so you
+  can also remove a tag the first song does not have at all.
+
 ## 2026.10.2 (2026-10-20)
 
 Until now fml was a one-way street: media came in and stayed there. Now

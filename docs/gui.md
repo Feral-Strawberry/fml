@@ -395,7 +395,10 @@ Dateien extrahiert wurde.
 - **Mehrere auswählen:** **Shift-Klick** markiert einen Bereich,
   **Strg/Cmd-Klick** nimmt einzelne Kacheln dazu oder heraus. Bewertung,
   Tags, Modell-Zuweisung, Musik-Angaben und Cover wirken dann auf die **ganze Auswahl** (das
-  Panel zeigt einen Hinweis mit der Anzahl).
+  Panel zeigt einen Hinweis mit der Anzahl). Unter Tags stehen dann **alle
+  Tags der Auswahl**; einer, den nicht alle tragen, hat einen gestrichelten
+  Rand und eine Zahl wie `3/5`. ✕ entfernt den Tag bei allen ausgewählten
+  Medien, ein neuer Tag kommt an alle.
 - **Bewerten:** Tasten `1`–`5` auf das ausgewählte Medium (in Übersicht und
   Lupe), `0` löscht, dieselbe Zahl nochmal ebenfalls (Toggle). Oder die
   Punkte im Panel-Kopf bzw. unten in der Lupe anklicken. Kacheln zeigen die

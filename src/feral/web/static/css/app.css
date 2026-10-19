@@ -1053,6 +1053,8 @@ body.view-audio #panel .ppreview .audiostage.hascover { padding-bottom: 14px; }
 .tagchip .fdot { width: 7px; height: 7px; box-shadow: none; }
 .tagchip .ffrom { color: var(--faint); font-size: 9px; }
 .tagchip { display: inline-flex; align-items: center; gap: 4px; text-transform: none; font-size: 10px; }
+.tagchip .tagcount { color: var(--faint); font-family: var(--mono); font-size: 9px; }
+.tagchip.partial { border-style: dashed; }
 .tagdel { background: none; border: none; padding: 0; color: var(--faint); font-size: 9px; cursor: pointer; }
 .tagdel:hover { color: var(--accent); }
 #pTagInput, #pModel, #pDate {

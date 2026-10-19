@@ -51,7 +51,9 @@ async function applyBatch(hashes, fields) {
   try {
     const d = await batchAnnotate(hashes, fields);
     if (current && current.hash === hashes[0]) currentRating = d.manual.rating;
-    emit("annotation-changed", { hash: hashes[0], manual: d.manual });
+    // Tags der ganzen Auswahl (#303) reisen mit: das Panel zeigt sie als Chips.
+    emit("annotation-changed", { hash: hashes[0], manual: d.manual,
+                                 selectionTags: d.tags, selectionCount: hashes.length });
     if ("rating" in fields) {
       emit("annotations-batch", { hashes, rating: fields.rating || null });
     }
@@ -76,6 +78,14 @@ export function applyTag(name) {
   if (!hashes.length) return null;
   if (hashes.length > 1) return applyBatch(hashes, { add_tag: name });
   return tagAdd(hashes[0], name);
+}
+
+/** Tag von der AUSWAHL lösen (#303): bei Mehrfachauswahl von allen. */
+export function applyTagRemove(name) {
+  const hashes = selectionHashes();
+  if (!hashes.length) return null;
+  if (hashes.length > 1) return applyBatch(hashes, { remove_tag: name });
+  return tagRemove(hashes[0], name);
 }
 
 /** Manuelles Modell für die AUSWAHL setzen ("" löscht; ADR 0022). */

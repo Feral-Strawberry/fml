@@ -259,13 +259,15 @@ class BatchAnnotateRequest(BaseModel):
     """Sammel-Aktion für die Multiselect-Auswahl (ADR 0022).
 
     Nur gesendete Aktionen werden ausgeführt: ``rating`` (0 löscht),
-    ``add_tag`` (hängt an), ``model`` ("" löscht das manuelle Modell),
-    ``media_date`` ("" löscht das manuelle Datum, ADR 0096).
+    ``add_tag`` (hängt an), ``remove_tag`` (löst ihn bei allen, #303),
+    ``model`` ("" löscht das manuelle Modell), ``media_date`` ("" löscht
+    das manuelle Datum, ADR 0096).
     """
 
     hashes: list[str]
     rating: int | None = None
     add_tag: str | None = None
+    remove_tag: str | None = None
     model: str | None = None
     media_date: str | None = None
 
@@ -1625,8 +1627,8 @@ def create_app(
             raise HTTPException(status_code=400, detail=msg("errBatchSize"))
         for file_hash in req.hashes:
             _require_hash(file_hash)
-        if (req.rating is None and req.add_tag is None and req.model is None
-                and req.media_date is None):
+        if (req.rating is None and req.add_tag is None and req.remove_tag is None
+                and req.model is None and req.media_date is None):
             raise HTTPException(status_code=400, detail=msg("errNoAction"))
         if req.media_date and req.media_date.strip():
             try:
@@ -1645,6 +1647,8 @@ def create_app(
                         manual.set_rating(conn, file_hash, req.rating)
                     if req.add_tag is not None and req.add_tag.strip():
                         manual.add_tag(conn, file_hash, req.add_tag)
+                    if req.remove_tag is not None and req.remove_tag.strip():
+                        manual.remove_tag(conn, file_hash, req.remove_tag)
                     if req.model is not None:
                         manual.set_model(conn, file_hash, req.model)
                     if req.media_date is not None:
@@ -1657,10 +1661,24 @@ def create_app(
                 "updated": updated,
                 # Frischer Stand des ersten Hashs — das Panel zeigt ihn an.
                 "manual": manual.annotations_for(conn, req.hashes[0]),
+                # Tags der ganzen Auswahl (#303) für die Chips im Panel.
+                "tags": manual.tags_of_selection(conn, req.hashes),
             }
 
         return engine.run_write(msg("taskBatch", n=len(req.hashes)), fn,
                                 timeout=60.0)
+
+    @app.post("/api/batch/tags")
+    def batch_tags(req: MusicFieldsState) -> dict:
+        # Tags einer Mehrfachauswahl mit ihrer Zahl (#303): das Panel zeigt
+        # alle, ✕ löst einen bei allen (batch/annotate remove_tag).
+        if not req.hashes or len(req.hashes) > 2000:
+            raise HTTPException(status_code=400, detail=msg("errBatchSize"))
+        for file_hash in req.hashes:
+            _require_hash(file_hash)
+        with read_conn() as conn:
+            return {"tags": manual.tags_of_selection(conn, req.hashes),
+                    "count": len(set(req.hashes))}
 
     @app.post("/api/fields/state")
     def music_fields_state(req: MusicFieldsState) -> dict:
